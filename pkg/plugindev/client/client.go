@@ -19,6 +19,9 @@ type PluginDev interface {
 	Scaffold(ctx context.Context, name, protocol, protocolVersion string, hints []string) (*pb.ScaffoldResponse, error)
 	ListPlugins(ctx context.Context) (*pb.ListPluginsResponse, error)
 	Build(ctx context.Context, name string, timeoutSec int) (*pb.BuildResponse, error)
+	Activate(ctx context.Context, name, registryAddr string) (*pb.ActivateResponse, error)
+	Deactivate(ctx context.Context, name string) (*pb.DeactivateResponse, error)
+	Status(ctx context.Context, name string) (*pb.StatusResponse, error)
 }
 
 type grpcClient struct {
@@ -45,4 +48,16 @@ func (c *grpcClient) ListPlugins(ctx context.Context) (*pb.ListPluginsResponse, 
 
 func (c *grpcClient) Build(ctx context.Context, name string, timeoutSec int) (*pb.BuildResponse, error) {
 	return c.cc.Build(ctx, &pb.BuildRequest{Name: name, TimeoutSec: int32(timeoutSec)})
+}
+
+func (c *grpcClient) Activate(ctx context.Context, name, registryAddr string) (*pb.ActivateResponse, error) {
+	return c.cc.Activate(ctx, &pb.ActivateRequest{Name: name, RegistryAddr: registryAddr})
+}
+
+func (c *grpcClient) Deactivate(ctx context.Context, name string) (*pb.DeactivateResponse, error) {
+	return c.cc.Deactivate(ctx, &pb.DeactivateRequest{Name: name})
+}
+
+func (c *grpcClient) Status(ctx context.Context, name string) (*pb.StatusResponse, error) {
+	return c.cc.Status(ctx, &pb.StatusRequest{Name: name})
 }

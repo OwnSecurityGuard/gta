@@ -24,6 +24,7 @@ const (
 	PluginDev_Build_FullMethodName       = "/gta.plugindev.PluginDev/Build"
 	PluginDev_Activate_FullMethodName    = "/gta.plugindev.PluginDev/Activate"
 	PluginDev_Deactivate_FullMethodName  = "/gta.plugindev.PluginDev/Deactivate"
+	PluginDev_Status_FullMethodName      = "/gta.plugindev.PluginDev/Status"
 )
 
 // PluginDevClient is the client API for PluginDev service.
@@ -31,10 +32,10 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // PluginDev is the Developer Plane control surface. It owns the filesystem and
-// subprocesses for scaffolding, building, discovering and activating decoder
-// plugins. gta-mcp is a pure forwarder to this service; in production the
-// service runs as the standalone gta-plugin-dev binary, physically isolating
-// all development capabilities from the runtime.
+// subprocesses for scaffolding, building, discovering, activating and
+// deactivating decoder plugins. gta-mcp is a pure forwarder to this service; in
+// production the service runs as the standalone gta-plugin-dev binary,
+// physically isolating all development capabilities from the runtime.
 type PluginDevClient interface {
 	// Scaffold renders the create_plugin skeleton and writes it under the
 	// server's configured plugins directory as <name>/.
@@ -48,6 +49,9 @@ type PluginDevClient interface {
 	Activate(ctx context.Context, in *ActivateRequest, opts ...grpc.CallOption) (*ActivateResponse, error)
 	// Deactivate stops a plugin process the Developer Plane launched.
 	Deactivate(ctx context.Context, in *DeactivateRequest, opts ...grpc.CallOption) (*DeactivateResponse, error)
+	// Status returns the Developer Plane portion of a plugin's dual-state view
+	// (artifact from disk, the dev-launched process, and the last attempt).
+	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 }
 
 type pluginDevClient struct {
@@ -108,15 +112,25 @@ func (c *pluginDevClient) Deactivate(ctx context.Context, in *DeactivateRequest,
 	return out, nil
 }
 
+func (c *pluginDevClient) Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StatusResponse)
+	err := c.cc.Invoke(ctx, PluginDev_Status_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginDevServer is the server API for PluginDev service.
 // All implementations must embed UnimplementedPluginDevServer
 // for forward compatibility.
 //
 // PluginDev is the Developer Plane control surface. It owns the filesystem and
-// subprocesses for scaffolding, building, discovering and activating decoder
-// plugins. gta-mcp is a pure forwarder to this service; in production the
-// service runs as the standalone gta-plugin-dev binary, physically isolating
-// all development capabilities from the runtime.
+// subprocesses for scaffolding, building, discovering, activating and
+// deactivating decoder plugins. gta-mcp is a pure forwarder to this service; in
+// production the service runs as the standalone gta-plugin-dev binary,
+// physically isolating all development capabilities from the runtime.
 type PluginDevServer interface {
 	// Scaffold renders the create_plugin skeleton and writes it under the
 	// server's configured plugins directory as <name>/.
@@ -130,6 +144,9 @@ type PluginDevServer interface {
 	Activate(context.Context, *ActivateRequest) (*ActivateResponse, error)
 	// Deactivate stops a plugin process the Developer Plane launched.
 	Deactivate(context.Context, *DeactivateRequest) (*DeactivateResponse, error)
+	// Status returns the Developer Plane portion of a plugin's dual-state view
+	// (artifact from disk, the dev-launched process, and the last attempt).
+	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	mustEmbedUnimplementedPluginDevServer()
 }
 
@@ -154,6 +171,9 @@ func (UnimplementedPluginDevServer) Activate(context.Context, *ActivateRequest) 
 }
 func (UnimplementedPluginDevServer) Deactivate(context.Context, *DeactivateRequest) (*DeactivateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Deactivate not implemented")
+}
+func (UnimplementedPluginDevServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
 }
 func (UnimplementedPluginDevServer) mustEmbedUnimplementedPluginDevServer() {}
 func (UnimplementedPluginDevServer) testEmbeddedByValue()                   {}
@@ -266,6 +286,24 @@ func _PluginDev_Deactivate_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PluginDev_Status_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginDevServer).Status(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PluginDev_Status_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginDevServer).Status(ctx, req.(*StatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PluginDev_ServiceDesc is the grpc.ServiceDesc for PluginDev service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -292,6 +330,10 @@ var PluginDev_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Deactivate",
 			Handler:    _PluginDev_Deactivate_Handler,
+		},
+		{
+			MethodName: "Status",
+			Handler:    _PluginDev_Status_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

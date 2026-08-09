@@ -5,10 +5,10 @@ package gta.plugindev;
 option go_package = "gta/pkg/plugindev/proto";
 
 // PluginDev is the Developer Plane control surface. It owns the filesystem and
-// subprocesses for scaffolding, building, discovering and activating decoder
-// plugins. gta-mcp is a pure forwarder to this service; in production the
-// service runs as the standalone gta-plugin-dev binary, physically isolating
-// all development capabilities from the runtime.
+// subprocesses for scaffolding, building, discovering, activating and
+// deactivating decoder plugins. gta-mcp is a pure forwarder to this service; in
+// production the service runs as the standalone gta-plugin-dev binary,
+// physically isolating all development capabilities from the runtime.
 service PluginDev {
   // Scaffold renders the create_plugin skeleton and writes it under the
   // server's configured plugins directory as <name>/.
@@ -22,6 +22,9 @@ service PluginDev {
   rpc Activate(ActivateRequest) returns (ActivateResponse);
   // Deactivate stops a plugin process the Developer Plane launched.
   rpc Deactivate(DeactivateRequest) returns (DeactivateResponse);
+  // Status returns the Developer Plane portion of a plugin's dual-state view
+  // (artifact from disk, the dev-launched process, and the last attempt).
+  rpc Status(StatusRequest) returns (StatusResponse);
 }
 
 message ScaffoldRequest {
@@ -74,10 +77,55 @@ message ActivateRequest {
 
 message ActivateResponse {
   string instance_id = 1;
+  bool ok = 2;
+  string message = 3;
 }
 
 message DeactivateRequest {
   string name = 1;
 }
 
-message DeactivateResponse {}
+message DeactivateResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message StatusRequest {
+  string name = 1;
+}
+
+// ArtifactState is the Developer Plane's disk-derived view of the code.
+message ArtifactState {
+  string state = 1;        // unknown | scaffolded | compiled | validated
+  string source_dir = 2;
+  string binary_path = 3;
+  bool binary_stale = 4;
+}
+
+// DevProcess is the Developer Plane's view of the process it launched.
+message DevProcess {
+  bool launched = 1;
+  int64 pid = 2;
+  string instance_id = 3;
+  bool alive = 4;
+  int64 launched_at_unix = 5;
+}
+
+// LastAttempt is the most recent build/activate/deactivate outcome, used for
+// failure attribution (design §2.3).
+message LastAttempt {
+  string action = 1;       // build | activate | deactivate
+  bool ok = 2;
+  int64 at_unix = 3;
+  int64 duration_ms = 4;
+  repeated BuildError errors = 5;
+  string message = 6;
+  string explain_ref = 7;  // P3a: points at a plugin.explain conclusion
+}
+
+message StatusResponse {
+  string name = 1;
+  ArtifactState artifact = 2;
+  DevProcess dev_process = 3;
+  LastAttempt last_attempt = 4;
+}

@@ -524,6 +524,8 @@ func (x *ActivateRequest) GetRegistryAddr() string {
 type ActivateResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	InstanceId    string                 `protobuf:"bytes,1,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -561,6 +563,20 @@ func (*ActivateResponse) Descriptor() ([]byte, []int) {
 func (x *ActivateResponse) GetInstanceId() string {
 	if x != nil {
 		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *ActivateResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *ActivateResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
 	}
 	return ""
 }
@@ -611,6 +627,8 @@ func (x *DeactivateRequest) GetName() string {
 
 type DeactivateResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -643,6 +661,372 @@ func (x *DeactivateResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DeactivateResponse.ProtoReflect.Descriptor instead.
 func (*DeactivateResponse) Descriptor() ([]byte, []int) {
 	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DeactivateResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *DeactivateResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type StatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatusRequest) Reset() {
+	*x = StatusRequest{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatusRequest) ProtoMessage() {}
+
+func (x *StatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatusRequest.ProtoReflect.Descriptor instead.
+func (*StatusRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *StatusRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// ArtifactState is the Developer Plane's disk-derived view of the code.
+type ArtifactState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	State         string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"` // unknown | scaffolded | compiled | validated
+	SourceDir     string                 `protobuf:"bytes,2,opt,name=source_dir,json=sourceDir,proto3" json:"source_dir,omitempty"`
+	BinaryPath    string                 `protobuf:"bytes,3,opt,name=binary_path,json=binaryPath,proto3" json:"binary_path,omitempty"`
+	BinaryStale   bool                   `protobuf:"varint,4,opt,name=binary_stale,json=binaryStale,proto3" json:"binary_stale,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactState) Reset() {
+	*x = ArtifactState{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactState) ProtoMessage() {}
+
+func (x *ArtifactState) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactState.ProtoReflect.Descriptor instead.
+func (*ArtifactState) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ArtifactState) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *ArtifactState) GetSourceDir() string {
+	if x != nil {
+		return x.SourceDir
+	}
+	return ""
+}
+
+func (x *ArtifactState) GetBinaryPath() string {
+	if x != nil {
+		return x.BinaryPath
+	}
+	return ""
+}
+
+func (x *ArtifactState) GetBinaryStale() bool {
+	if x != nil {
+		return x.BinaryStale
+	}
+	return false
+}
+
+// DevProcess is the Developer Plane's view of the process it launched.
+type DevProcess struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Launched       bool                   `protobuf:"varint,1,opt,name=launched,proto3" json:"launched,omitempty"`
+	Pid            int64                  `protobuf:"varint,2,opt,name=pid,proto3" json:"pid,omitempty"`
+	InstanceId     string                 `protobuf:"bytes,3,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	Alive          bool                   `protobuf:"varint,4,opt,name=alive,proto3" json:"alive,omitempty"`
+	LaunchedAtUnix int64                  `protobuf:"varint,5,opt,name=launched_at_unix,json=launchedAtUnix,proto3" json:"launched_at_unix,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DevProcess) Reset() {
+	*x = DevProcess{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DevProcess) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DevProcess) ProtoMessage() {}
+
+func (x *DevProcess) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DevProcess.ProtoReflect.Descriptor instead.
+func (*DevProcess) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *DevProcess) GetLaunched() bool {
+	if x != nil {
+		return x.Launched
+	}
+	return false
+}
+
+func (x *DevProcess) GetPid() int64 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *DevProcess) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *DevProcess) GetAlive() bool {
+	if x != nil {
+		return x.Alive
+	}
+	return false
+}
+
+func (x *DevProcess) GetLaunchedAtUnix() int64 {
+	if x != nil {
+		return x.LaunchedAtUnix
+	}
+	return 0
+}
+
+// LastAttempt is the most recent build/activate/deactivate outcome, used for
+// failure attribution (design §2.3).
+type LastAttempt struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Action        string                 `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"` // build | activate | deactivate
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	AtUnix        int64                  `protobuf:"varint,3,opt,name=at_unix,json=atUnix,proto3" json:"at_unix,omitempty"`
+	DurationMs    int64                  `protobuf:"varint,4,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	Errors        []*BuildError          `protobuf:"bytes,5,rep,name=errors,proto3" json:"errors,omitempty"`
+	Message       string                 `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
+	ExplainRef    string                 `protobuf:"bytes,7,opt,name=explain_ref,json=explainRef,proto3" json:"explain_ref,omitempty"` // P3a: points at a plugin.explain conclusion
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LastAttempt) Reset() {
+	*x = LastAttempt{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LastAttempt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LastAttempt) ProtoMessage() {}
+
+func (x *LastAttempt) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LastAttempt.ProtoReflect.Descriptor instead.
+func (*LastAttempt) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *LastAttempt) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *LastAttempt) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *LastAttempt) GetAtUnix() int64 {
+	if x != nil {
+		return x.AtUnix
+	}
+	return 0
+}
+
+func (x *LastAttempt) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *LastAttempt) GetErrors() []*BuildError {
+	if x != nil {
+		return x.Errors
+	}
+	return nil
+}
+
+func (x *LastAttempt) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *LastAttempt) GetExplainRef() string {
+	if x != nil {
+		return x.ExplainRef
+	}
+	return ""
+}
+
+type StatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Artifact      *ArtifactState         `protobuf:"bytes,2,opt,name=artifact,proto3" json:"artifact,omitempty"`
+	DevProcess    *DevProcess            `protobuf:"bytes,3,opt,name=dev_process,json=devProcess,proto3" json:"dev_process,omitempty"`
+	LastAttempt   *LastAttempt           `protobuf:"bytes,4,opt,name=last_attempt,json=lastAttempt,proto3" json:"last_attempt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatusResponse) Reset() {
+	*x = StatusResponse{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatusResponse) ProtoMessage() {}
+
+func (x *StatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatusResponse.ProtoReflect.Descriptor instead.
+func (*StatusResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *StatusResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *StatusResponse) GetArtifact() *ArtifactState {
+	if x != nil {
+		return x.Artifact
+	}
+	return nil
+}
+
+func (x *StatusResponse) GetDevProcess() *DevProcess {
+	if x != nil {
+		return x.DevProcess
+	}
+	return nil
+}
+
+func (x *StatusResponse) GetLastAttempt() *LastAttempt {
+	if x != nil {
+		return x.LastAttempt
+	}
+	return nil
 }
 
 var File_pkg_plugindev_proto_plugindev_proto protoreflect.FileDescriptor
@@ -683,20 +1067,58 @@ const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\x06output\x18\x03 \x01(\tR\x06output\"J\n" +
 	"\x0fActivateRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12#\n" +
-	"\rregistry_addr\x18\x02 \x01(\tR\fregistryAddr\"3\n" +
+	"\rregistry_addr\x18\x02 \x01(\tR\fregistryAddr\"]\n" +
 	"\x10ActivateResponse\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
-	"instanceId\"'\n" +
+	"instanceId\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"'\n" +
 	"\x11DeactivateRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\x14\n" +
-	"\x12DeactivateResponse2\x92\x03\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\">\n" +
+	"\x12DeactivateResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"#\n" +
+	"\rStatusRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\x88\x01\n" +
+	"\rArtifactState\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12\x1d\n" +
+	"\n" +
+	"source_dir\x18\x02 \x01(\tR\tsourceDir\x12\x1f\n" +
+	"\vbinary_path\x18\x03 \x01(\tR\n" +
+	"binaryPath\x12!\n" +
+	"\fbinary_stale\x18\x04 \x01(\bR\vbinaryStale\"\x9b\x01\n" +
+	"\n" +
+	"DevProcess\x12\x1a\n" +
+	"\blaunched\x18\x01 \x01(\bR\blaunched\x12\x10\n" +
+	"\x03pid\x18\x02 \x01(\x03R\x03pid\x12\x1f\n" +
+	"\vinstance_id\x18\x03 \x01(\tR\n" +
+	"instanceId\x12\x14\n" +
+	"\x05alive\x18\x04 \x01(\bR\x05alive\x12(\n" +
+	"\x10launched_at_unix\x18\x05 \x01(\x03R\x0elaunchedAtUnix\"\xdd\x01\n" +
+	"\vLastAttempt\x12\x16\n" +
+	"\x06action\x18\x01 \x01(\tR\x06action\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x17\n" +
+	"\aat_unix\x18\x03 \x01(\x03R\x06atUnix\x12\x1f\n" +
+	"\vduration_ms\x18\x04 \x01(\x03R\n" +
+	"durationMs\x121\n" +
+	"\x06errors\x18\x05 \x03(\v2\x19.gta.plugindev.BuildErrorR\x06errors\x12\x18\n" +
+	"\amessage\x18\x06 \x01(\tR\amessage\x12\x1f\n" +
+	"\vexplain_ref\x18\a \x01(\tR\n" +
+	"explainRef\"\xd9\x01\n" +
+	"\x0eStatusResponse\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x128\n" +
+	"\bartifact\x18\x02 \x01(\v2\x1c.gta.plugindev.ArtifactStateR\bartifact\x12:\n" +
+	"\vdev_process\x18\x03 \x01(\v2\x19.gta.plugindev.DevProcessR\n" +
+	"devProcess\x12=\n" +
+	"\flast_attempt\x18\x04 \x01(\v2\x1a.gta.plugindev.LastAttemptR\vlastAttempt2\xd9\x03\n" +
 	"\tPluginDev\x12K\n" +
 	"\bScaffold\x12\x1e.gta.plugindev.ScaffoldRequest\x1a\x1f.gta.plugindev.ScaffoldResponse\x12T\n" +
 	"\vListPlugins\x12!.gta.plugindev.ListPluginsRequest\x1a\".gta.plugindev.ListPluginsResponse\x12B\n" +
 	"\x05Build\x12\x1b.gta.plugindev.BuildRequest\x1a\x1c.gta.plugindev.BuildResponse\x12K\n" +
 	"\bActivate\x12\x1e.gta.plugindev.ActivateRequest\x1a\x1f.gta.plugindev.ActivateResponse\x12Q\n" +
 	"\n" +
-	"Deactivate\x12 .gta.plugindev.DeactivateRequest\x1a!.gta.plugindev.DeactivateResponseB\x19Z\x17gta/pkg/plugindev/protob\x06proto3"
+	"Deactivate\x12 .gta.plugindev.DeactivateRequest\x1a!.gta.plugindev.DeactivateResponse\x12E\n" +
+	"\x06Status\x12\x1c.gta.plugindev.StatusRequest\x1a\x1d.gta.plugindev.StatusResponseB\x19Z\x17gta/pkg/plugindev/protob\x06proto3"
 
 var (
 	file_pkg_plugindev_proto_plugindev_proto_rawDescOnce sync.Once
@@ -710,7 +1132,7 @@ func file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP() []byte {
 	return file_pkg_plugindev_proto_plugindev_proto_rawDescData
 }
 
-var file_pkg_plugindev_proto_plugindev_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_pkg_plugindev_proto_plugindev_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_pkg_plugindev_proto_plugindev_proto_goTypes = []any{
 	(*ScaffoldRequest)(nil),     // 0: gta.plugindev.ScaffoldRequest
 	(*ScaffoldResponse)(nil),    // 1: gta.plugindev.ScaffoldResponse
@@ -724,25 +1146,36 @@ var file_pkg_plugindev_proto_plugindev_proto_goTypes = []any{
 	(*ActivateResponse)(nil),    // 9: gta.plugindev.ActivateResponse
 	(*DeactivateRequest)(nil),   // 10: gta.plugindev.DeactivateRequest
 	(*DeactivateResponse)(nil),  // 11: gta.plugindev.DeactivateResponse
+	(*StatusRequest)(nil),       // 12: gta.plugindev.StatusRequest
+	(*ArtifactState)(nil),       // 13: gta.plugindev.ArtifactState
+	(*DevProcess)(nil),          // 14: gta.plugindev.DevProcess
+	(*LastAttempt)(nil),         // 15: gta.plugindev.LastAttempt
+	(*StatusResponse)(nil),      // 16: gta.plugindev.StatusResponse
 }
 var file_pkg_plugindev_proto_plugindev_proto_depIdxs = []int32{
 	3,  // 0: gta.plugindev.ListPluginsResponse.plugins:type_name -> gta.plugindev.DiscoveredPlugin
 	6,  // 1: gta.plugindev.BuildResponse.errors:type_name -> gta.plugindev.BuildError
-	0,  // 2: gta.plugindev.PluginDev.Scaffold:input_type -> gta.plugindev.ScaffoldRequest
-	2,  // 3: gta.plugindev.PluginDev.ListPlugins:input_type -> gta.plugindev.ListPluginsRequest
-	5,  // 4: gta.plugindev.PluginDev.Build:input_type -> gta.plugindev.BuildRequest
-	8,  // 5: gta.plugindev.PluginDev.Activate:input_type -> gta.plugindev.ActivateRequest
-	10, // 6: gta.plugindev.PluginDev.Deactivate:input_type -> gta.plugindev.DeactivateRequest
-	1,  // 7: gta.plugindev.PluginDev.Scaffold:output_type -> gta.plugindev.ScaffoldResponse
-	4,  // 8: gta.plugindev.PluginDev.ListPlugins:output_type -> gta.plugindev.ListPluginsResponse
-	7,  // 9: gta.plugindev.PluginDev.Build:output_type -> gta.plugindev.BuildResponse
-	9,  // 10: gta.plugindev.PluginDev.Activate:output_type -> gta.plugindev.ActivateResponse
-	11, // 11: gta.plugindev.PluginDev.Deactivate:output_type -> gta.plugindev.DeactivateResponse
-	7,  // [7:12] is the sub-list for method output_type
-	2,  // [2:7] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	6,  // 2: gta.plugindev.LastAttempt.errors:type_name -> gta.plugindev.BuildError
+	13, // 3: gta.plugindev.StatusResponse.artifact:type_name -> gta.plugindev.ArtifactState
+	14, // 4: gta.plugindev.StatusResponse.dev_process:type_name -> gta.plugindev.DevProcess
+	15, // 5: gta.plugindev.StatusResponse.last_attempt:type_name -> gta.plugindev.LastAttempt
+	0,  // 6: gta.plugindev.PluginDev.Scaffold:input_type -> gta.plugindev.ScaffoldRequest
+	2,  // 7: gta.plugindev.PluginDev.ListPlugins:input_type -> gta.plugindev.ListPluginsRequest
+	5,  // 8: gta.plugindev.PluginDev.Build:input_type -> gta.plugindev.BuildRequest
+	8,  // 9: gta.plugindev.PluginDev.Activate:input_type -> gta.plugindev.ActivateRequest
+	10, // 10: gta.plugindev.PluginDev.Deactivate:input_type -> gta.plugindev.DeactivateRequest
+	12, // 11: gta.plugindev.PluginDev.Status:input_type -> gta.plugindev.StatusRequest
+	1,  // 12: gta.plugindev.PluginDev.Scaffold:output_type -> gta.plugindev.ScaffoldResponse
+	4,  // 13: gta.plugindev.PluginDev.ListPlugins:output_type -> gta.plugindev.ListPluginsResponse
+	7,  // 14: gta.plugindev.PluginDev.Build:output_type -> gta.plugindev.BuildResponse
+	9,  // 15: gta.plugindev.PluginDev.Activate:output_type -> gta.plugindev.ActivateResponse
+	11, // 16: gta.plugindev.PluginDev.Deactivate:output_type -> gta.plugindev.DeactivateResponse
+	16, // 17: gta.plugindev.PluginDev.Status:output_type -> gta.plugindev.StatusResponse
+	12, // [12:18] is the sub-list for method output_type
+	6,  // [6:12] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_pkg_plugindev_proto_plugindev_proto_init() }
@@ -756,7 +1189,7 @@ func file_pkg_plugindev_proto_plugindev_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_plugindev_proto_plugindev_proto_rawDesc), len(file_pkg_plugindev_proto_plugindev_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

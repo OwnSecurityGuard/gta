@@ -1758,6 +1758,28 @@ func main() {
 		mcp.WithString("output_dir", mcp.Description("Optional output directory; defaults to <plugins_dir>/<name>")),
 	), capture.handleCreatePlugin)
 
+	s.AddTool(mcp.NewTool("build_plugin",
+		mcp.WithDescription("Compile a scaffolded plugin project via the Developer Plane. Returns structured file:line:col diagnostics on failure so the AI can fix the exact location without reading SDK files. On success the artifact state advances scaffolded → compiled and any prior validated proof is invalidated."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case), e.g. my-game-decoder")),
+		mcp.WithNumber("timeout_sec", mcp.Description("Optional build timeout in seconds (default 120)")),
+	), capture.handleBuildPlugin)
+
+	s.AddTool(mcp.NewTool("activate_plugin",
+		mcp.WithDescription("Launch the local plugin binary and inject GTA_REGISTRY_ADDR so it registers with the runtime. The Developer Plane owns only the process it launches; deactivate_plugin tears it down. Requires the pipeline's registry address (pass registry_addr or set GTA_REGISTRY_ADDR)."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case) to launch")),
+		mcp.WithString("registry_addr", mcp.Description("Runtime registry address, e.g. :9091. Defaults to env GTA_REGISTRY_ADDR")),
+	), capture.handleActivatePlugin)
+
+	s.AddTool(mcp.NewTool("deactivate_plugin",
+		mcp.WithDescription("Stop the plugin process the Developer Plane launched for name, and best-effort force-deregister it from the runtime registry. Safe to call when the plugin is already offline."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case) to stop")),
+	), capture.handleDeactivatePlugin)
+
+	s.AddTool(mcp.NewTool("status_plugin",
+		mcp.WithDescription("Return the dual-state view of a plugin (design §2): artifact (unknown→scaffolded→compiled→validated, from disk) merged with runtime (offline→registered→active, from the registry), plus the last build/activate attempt for failure attribution and a suggested next_action. Use this as the per-iteration entry point."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case), e.g. my-game-decoder")),
+	), capture.handleStatusPlugin)
+
 	s.AddTool(mcp.NewTool("get_plugin_contract",
 		mcp.WithDescription("Return the full contract.yaml spec for the GTA decoder plugin API. Use this as the single source of truth when writing or reviewing plugin code."),
 	), capture.handleGetPluginContract)

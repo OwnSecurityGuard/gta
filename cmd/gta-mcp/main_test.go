@@ -200,3 +200,50 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+// TestHandleStatusPluginUnknown exercises the dual-state aggregation path: an
+// unknown plugin should report artifact.state=unknown, a runtime view of
+// offline (no registry link in this test), and a build_plugin next_action.
+func TestHandleStatusPluginUnknown(t *testing.T) {
+	pluginsDir := t.TempDir()
+	client, conn := embeddedPluginDev(t, pluginsDir)
+	m := &mcpCapture{pluginsDir: pluginsDir, pdClient: client, pdConn: conn}
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"name": "ghost"}
+	res, err := m.handleStatusPlugin(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := res.Content[0].(mcp.TextContent).Text
+
+	var parsed struct {
+		Ok       bool   `json:"ok"`
+		Name     string `json:"name"`
+		Artifact struct {
+			State string `json:"state"`
+		} `json:"artifact"`
+		Runtime struct {
+			State string `json:"state"`
+		} `json:"runtime"`
+		NextAction map[string]any `json:"next_action"`
+	}
+	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
+		t.Fatalf("unmarshal status: %v\n%s", err, text)
+	}
+	if !parsed.Ok {
+		t.Fatalf("expected ok=true, got %s", text)
+	}
+	if parsed.Name != "ghost" {
+		t.Fatalf("expected name=ghost, got %q", parsed.Name)
+	}
+	if parsed.Artifact.State != "unknown" {
+		t.Fatalf("expected artifact.state=unknown, got %q", parsed.Artifact.State)
+	}
+	if parsed.Runtime.State != "offline" {
+		t.Fatalf("expected runtime.state=offline (no registry link), got %q", parsed.Runtime.State)
+	}
+	if parsed.NextAction == nil {
+		t.Fatalf("expected a next_action for an unknown plugin, got %s", text)
+	}
+}

@@ -43,17 +43,21 @@ func Build(ctx context.Context, req *BuildRequest) (*BuildResponse, error) {
 		outName += ".exe"
 	}
 
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", outName, ".")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
+	dur := time.Since(start)
 
 	resp := &BuildResponse{Output: string(out)}
 	if err != nil {
 		resp.Errors = parseGoBuildErrors(string(out))
 		resp.OK = false
+		defaultTracker.RecordBuild(req.Name, dur, resp)
 		return resp, nil
 	}
 	resp.OK = true
+	defaultTracker.RecordBuild(req.Name, dur, resp)
 	return resp, nil
 }
 

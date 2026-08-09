@@ -48,7 +48,10 @@ func TestScaffoldSmokeBuild(t *testing.T) {
 		t.Fatalf("generated main.go missing RunRegisterLoop entrypoint:\n%s", mainGo)
 	}
 
-	// Best-effort build: wire a local replace to the sibling SDK repo.
+	// Best-effort build: wire a local replace to the sibling SDK repo, tidy
+	// (so the SDK's transitive requirements land in go.mod), then compile.
+	// Skipped when the toolchain can't resolve deps (CI without the sibling
+	// repo or an offline module cache) so the unit suite stays hermetic.
 	sdk := filepath.Join(repoRoot(t), "..", "gta-plugin-sdk")
 	if _, statErr := os.Stat(sdk); statErr != nil {
 		t.Skipf("local gta-plugin-sdk not found at %s; skipping build", sdk)
@@ -58,6 +61,11 @@ func TestScaffoldSmokeBuild(t *testing.T) {
 	edit.Dir = dir
 	if out, e := edit.CombinedOutput(); e != nil {
 		t.Fatalf("go mod edit -replace: %v\n%s", e, out)
+	}
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	if out, e := tidy.CombinedOutput(); e != nil {
+		t.Skipf("go mod tidy failed (deps unavailable?): %v\n%s", e, out)
 	}
 	build := exec.Command("go", "build", "-o", name+".exe", ".")
 	build.Dir = dir

@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	plugindevclient "gta/pkg/plugindev/client"
+	"google.golang.org/grpc"
 )
 
 func TestResolvePluginsDirDefaultNextToExecutable(t *testing.T) {
@@ -47,8 +49,26 @@ func TestResolvePluginsDirAbsolute(t *testing.T) {
 	}
 }
 
+// embeddedPluginDev starts an in-process PluginDev gRPC server rooted at
+// pluginsDir and returns a client connected over loopback, exactly as gta-mcp
+// does when GTA_PLUGINDEV_ADDR is unset. This lets the discovery handlers be
+// exercised without a separate process. The connection is closed via
+// t.Cleanup; the embedded server runs for the test binary's lifetime (the same
+// lifetime model gta-mcp uses for its embedded Developer Plane).
+func embeddedPluginDev(t *testing.T, pluginsDir string) (plugindevclient.PluginDev, *grpc.ClientConn) {
+	t.Helper()
+	client, conn, err := dialPluginDev(pluginsDir, "")
+	if err != nil {
+		t.Fatalf("embeddedPluginDev: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return client, conn
+}
+
 func TestHandleListPluginsMissingDir(t *testing.T) {
-	m := &mcpCapture{pluginsDir: filepath.Join(t.TempDir(), "does-not-exist")}
+	pluginsDir := filepath.Join(t.TempDir(), "does-not-exist")
+	client, conn := embeddedPluginDev(t, pluginsDir)
+	m := &mcpCapture{pluginsDir: pluginsDir, pdClient: client, pdConn: conn}
 	res, err := m.handleListPlugins(context.Background(), mcp.CallToolRequest{})
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +98,8 @@ func TestHandleListPluginsListsBinaries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := &mcpCapture{pluginsDir: tmp}
+	client, conn := embeddedPluginDev(t, tmp)
+	m := &mcpCapture{pluginsDir: tmp, pdClient: client, pdConn: conn}
 	res, err := m.handleListPlugins(context.Background(), mcp.CallToolRequest{})
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +138,8 @@ func TestHandleListPluginsDiscoversSubdirectoryPlugins(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := &mcpCapture{pluginsDir: tmp}
+	client, conn := embeddedPluginDev(t, tmp)
+	m := &mcpCapture{pluginsDir: tmp, pdClient: client, pdConn: conn}
 	res, err := m.handleListPlugins(context.Background(), mcp.CallToolRequest{})
 	if err != nil {
 		t.Fatal(err)

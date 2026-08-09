@@ -5,23 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
-
-	"gta/pkg/plugin"
 )
 
 var pluginNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
-// handleCreatePlugin scaffolds a new decoder plugin project from the embedded
-// templates. It writes plugin.yaml + main.go + go.mod into output_dir (default
-// <plugins_dir>/<name>). The generated go.mod already contains correct relative
-// replace path to github.com/OwnSecurityGuard/gta-plugin-sdk (sibling
-// gta-plugin-sdk dir) so it compiles as-is.
+// handleCreatePlugin validates the request (local parameter checks only) and
+// forwards scaffolding to the Developer Plane. All filesystem writes happen in
+// pkg/plugindev, reachable via the PluginDev gRPC service — gta-mcp never calls
+// os.WriteFile itself.
 func (m *mcpCapture) handleCreatePlugin(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	if name == "" {
@@ -48,46 +43,18 @@ func (m *mcpCapture) handleCreatePlugin(ctx context.Context, req mcp.CallToolReq
 		}
 	}
 
-	outputDir := req.GetString("output_dir", "")
-	if outputDir == "" {
-		outputDir = filepath.Join(m.pluginsDir, name)
+	if m.pdClient == nil {
+		return errorResult(fmt.Errorf("plugin dev not available (Developer Plane not configured)")), nil
 	}
-	if abs, err := filepath.Abs(outputDir); err == nil {
-		outputDir = abs
-	}
-
-	rendered, err := plugin.RenderCreatePluginTemplates(outputDir, map[string]any{
-		"Name":            name,
-		"Protocol":        protocol,
-		"ProtocolVersion": protocolVersion,
-		"Hints":           hints,
-	})
+	resp, err := m.pdClient.Scaffold(ctx, name, protocol, protocolVersion, hints)
 	if err != nil {
 		return errorResult(err), nil
 	}
 
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return errorResult(fmt.Errorf("create output dir: %w", err)), nil
-	}
-
-	outputs := map[string]string{
-		"go.mod.tmpl":     "go.mod",
-		"main.go.tmpl":    "main.go",
-		"plugin.yaml.tmpl": "plugin.yaml",
-	}
-	created := make([]string, 0, len(outputs))
-	for tmpl, fname := range outputs {
-		path := filepath.Join(outputDir, fname)
-		if err := os.WriteFile(path, []byte(rendered[tmpl]), 0o644); err != nil {
-			return errorResult(fmt.Errorf("write %s: %w", path, err)), nil
-		}
-		created = append(created, path)
-	}
-
-	slog.Info("create_plugin completed", "name", name, "output_dir", outputDir, "files", created)
+	slog.Info("create_plugin completed", "name", resp.Name, "output_dir", resp.OutputDir, "files", resp.Created)
 	return successResult(map[string]any{
-		"name":       name,
-		"output_dir": outputDir,
-		"created":    created,
+		"name":       resp.Name,
+		"output_dir": resp.OutputDir,
+		"created":    resp.Created,
 	}), nil
 }

@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +27,8 @@ import (
 	"gta/pkg/internalipc"
 	pb "gta/pkg/internalipc/proto"
 	"gta/pkg/logging"
+	plugindevclient "gta/pkg/plugindev/client"
+	plugindevserver "gta/pkg/plugindev/server"
 	"gta/pkg/plugin/skills"
 	"gta/pkg/schema"
 	"gta/pkg/script"
@@ -84,6 +85,13 @@ type mcpCapture struct {
 	// gRPC client 连接 gta-pipeline
 	pipelineClient pb.CaptureControlClient
 	grpcConn       *grpc.ClientConn
+
+	// Developer Plane client (PluginDev gRPC). gta-mcp forwards scaffold/list/
+	// build/activate to it and never touches the filesystem or subprocesses
+	// directly. Nil means the Developer Plane is not configured for this
+	// capture instance.
+	pdClient plugindevclient.PluginDev
+	pdConn   *grpc.ClientConn
 
 	// ControlStore 读取会话元数据（db_path 等）
 	controlStore *store.ControlStore
@@ -327,6 +335,16 @@ func newMCPCapture(iface, pluginsDir, workDir, pythonPath, pipelineAddr string, 
 	}
 	client := pb.NewCaptureControlClient(conn)
 
+	// Developer Plane client. By default an embedded PluginDev gRPC server is
+	// started (rooted at pluginsDir) so gta-mcp works standalone for local
+	// development. In production, set GTA_PLUGINDEV_ADDR to point at the
+	// standalone gta-plugin-dev binary for physical isolation.
+	pdClient, pdConn, err := dialPluginDev(pluginsDir, os.Getenv("GTA_PLUGINDEV_ADDR"))
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("dial plugin dev: %w", err)
+	}
+
 	// ControlStore
 	controlPath := filepath.Join(workDir, "control.sqlite")
 	controlStore, err := store.NewControlStore(controlPath)
@@ -346,6 +364,8 @@ func newMCPCapture(iface, pluginsDir, workDir, pythonPath, pipelineAddr string, 
 		runRegistry:    runRegistry,
 		pipelineClient: client,
 		grpcConn:       conn,
+		pdClient:       pdClient,
+		pdConn:         pdConn,
 		controlStore:   controlStore,
 		readerOpener: func(path string) (captureReader, error) {
 			return store.NewSQLiteStore(path, nil)
@@ -356,6 +376,39 @@ func newMCPCapture(iface, pluginsDir, workDir, pythonPath, pipelineAddr string, 
 	// 订阅 gta-pipeline 的插件事件流并广播给 SSE 客户端（断线自动重连）。
 	m.startPluginEventWatcher()
 	return m, nil
+}
+
+// dialPluginDev resolves the Developer Plane client. When addr is non-empty it
+// dials the standalone gta-plugin-dev server at that address. Otherwise it
+// starts an embedded PluginDev gRPC server rooted at pluginsDir and dials it
+// over loopback, so local development needs no separate process. The returned
+// conn must be closed by the caller (it is the client-side connection; the
+// embedded server runs for the process lifetime).
+func dialPluginDev(pluginsDir, addr string) (plugindevclient.PluginDev, *grpc.ClientConn, error) {
+	if addr != "" {
+		conn, err := internalipc.DialGRPCAddr(addr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("dial plugindev %q: %w", addr, err)
+		}
+		return plugindevclient.NewGRPCClient(conn), conn, nil
+	}
+
+	lis, err := internalipc.ListenAddr("127.0.0.1:0")
+	if err != nil {
+		return nil, nil, fmt.Errorf("listen embedded plugindev: %w", err)
+	}
+	srv := plugindevserver.New(pluginsDir)
+	go func() {
+		// Serve blocks; on listener close it returns. Errors are logged, not fatal.
+		if serveErr := srv.Serve(lis); serveErr != nil {
+			slog.Warn("embedded plugindev server stopped", "error", serveErr)
+		}
+	}()
+	conn, err := internalipc.DialGRPCAddr(lis.Addr().String())
+	if err != nil {
+		return nil, nil, fmt.Errorf("dial embedded plugindev: %w", err)
+	}
+	return plugindevclient.NewGRPCClient(conn), conn, nil
 }
 
 func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -528,114 +581,27 @@ func (m *mcpCapture) handleGetStatus(ctx context.Context, req mcp.CallToolReques
 	}), nil
 }
 
-// discoveredPlugin is a structured descriptor returned by list_plugins.
-// Unlike a flat list of names it carries the binary path (so the agent can
-// launch/inspect it) and the plugin directory (so the agent can read or edit
-// plugin.yaml / source).
-type discoveredPlugin struct {
-	Name   string `json:"name"`
-	Binary string `json:"binary"`
-	Dir    string `json:"dir,omitempty"`
-}
-
 func (m *mcpCapture) handleListPlugins(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	info, err := os.Stat(m.pluginsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			slog.Warn("list_plugins: plugins directory does not exist", "plugins_dir", m.pluginsDir)
-			return successResult(map[string]any{"plugins": []discoveredPlugin{}, "warning": fmt.Sprintf("plugins directory not found: %s", m.pluginsDir)}), nil
-		}
-		slog.Error("list_plugins failed", "error", err)
-		return errorResult(err), nil
+	// Discovery lives in the Developer Plane (pkg/plugindev). gta-mcp is a pure
+	// forwarder — it never touches the filesystem here.
+	if m.pdClient == nil {
+		return errorResult(fmt.Errorf("plugin dev not available (Developer Plane not configured)")), nil
 	}
-	if !info.IsDir() {
-		err := fmt.Errorf("plugins path is not a directory: %s", m.pluginsDir)
-		slog.Error("list_plugins failed", "error", err)
-		return errorResult(err), nil
-	}
-	plugins, err := m.discoverPlugins(m.pluginsDir)
+	resp, err := m.pdClient.ListPlugins(ctx)
 	if err != nil {
 		slog.Error("list_plugins failed", "error", err)
 		return errorResult(err), nil
 	}
-	slog.Info("list_plugins completed", "count", len(plugins), "plugins_dir", m.pluginsDir)
+	plugins := make([]map[string]string, 0, len(resp.Plugins))
+	for _, p := range resp.Plugins {
+		plugins = append(plugins, map[string]string{
+			"name":   p.Name,
+			"binary": p.Binary,
+			"dir":    p.Dir,
+		})
+	}
+	slog.Info("list_plugins completed", "count", len(plugins))
 	return successResult(map[string]any{"plugins": plugins, "count": len(plugins)}), nil
-}
-
-// discoverPlugins scans root for plugin executables. Plugins may be laid out
-// two ways:
-//   - subdirectory form (produced by create_plugin): <root>/<name>/<name>.exe
-//   - legacy bare form: <root>/<name>.exe
-//
-// Subdirectories are recursed into one level deep; the directory name is the
-// canonical plugin name. Multiple executables inside one plugin directory are
-// collapsed to a single entry keyed by the directory name (preferring the
-// <name>/<name>.exe match).
-func (m *mcpCapture) discoverPlugins(root string) ([]discoveredPlugin, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, err
-	}
-	var out []discoveredPlugin
-	seen := make(map[string]bool)
-	for _, e := range entries {
-		if e.IsDir() {
-			name := e.Name()
-			if seen[name] {
-				continue
-			}
-			dir := filepath.Join(root, name)
-			bin, ok := findPluginBinary(dir, name)
-			if !ok {
-				continue
-			}
-			seen[name] = true
-			out = append(out, discoveredPlugin{Name: name, Binary: bin, Dir: dir})
-			continue
-		}
-		// Top-level executable (legacy layout).
-		if !isExecutable(e.Name(), e.Type()) {
-			continue
-		}
-		name := strings.TrimSuffix(e.Name(), exeExt())
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		out = append(out, discoveredPlugin{Name: name, Binary: filepath.Join(root, e.Name())})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
-// findPluginBinary looks for an executable inside a plugin directory. It
-// prefers <dir>/<dirName>.exe (the canonical build output) and otherwise
-// returns the first executable found.
-func findPluginBinary(dir, dirName string) (string, bool) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", false
-	}
-	first := ""
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if !isExecutable(e.Name(), e.Type()) {
-			continue
-		}
-		p := filepath.Join(dir, e.Name())
-		if first == "" {
-			first = p
-		}
-		if base := strings.TrimSuffix(e.Name(), exeExt()); base == dirName {
-			return p, true
-		}
-	}
-	if first != "" {
-		return first, true
-	}
-	return "", false
 }
 
 // exeExt returns the executable suffix for the current platform (".exe" on
@@ -645,15 +611,6 @@ func exeExt() string {
 		return ".exe"
 	}
 	return ""
-}
-
-// isExecutable reports whether name is a plugin binary. On Windows this is by
-// ".exe" extension; elsewhere it is by the executable permission bit.
-func isExecutable(name string, typ os.FileMode) bool {
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(filepath.Ext(name), ".exe")
-	}
-	return typ&0o111 != 0
 }
 
 func (m *mcpCapture) handleGetPluginContract(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1766,6 +1723,9 @@ func main() {
 	}
 	defer capture.grpcConn.Close()
 	defer capture.controlStore.Close()
+	if capture.pdConn != nil {
+		defer capture.pdConn.Close()
+	}
 
 	s.AddTool(mcp.NewTool("start_capture",
 		mcp.WithDescription("Start capturing traffic on a server port, or replay a pcap file. Packets are always captured and stored; an optional plugin enables protocol decoding."),

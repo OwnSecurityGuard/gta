@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package gta.plugindev;
+
+option go_package = "gta/pkg/plugindev/proto";
+
+// PluginDev is the Developer Plane control surface. It owns the filesystem and
+// subprocesses for scaffolding, building, discovering and activating decoder
+// plugins. gta-mcp is a pure forwarder to this service; in production the
+// service runs as the standalone gta-plugin-dev binary, physically isolating
+// all development capabilities from the runtime.
+service PluginDev {
+  // Scaffold renders the create_plugin skeleton and writes it under the
+  // server's configured plugins directory as <name>/.
+  rpc Scaffold(ScaffoldRequest) returns (ScaffoldResponse);
+  // ListPlugins returns plugins discovered on disk under the server's
+  // configured plugins directory.
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
+  // Build compiles a scaffolded plugin project, returning structured errors.
+  rpc Build(BuildRequest) returns (BuildResponse);
+  // Activate launches a local plugin binary and registers it with the runtime.
+  rpc Activate(ActivateRequest) returns (ActivateResponse);
+  // Deactivate stops a plugin process the Developer Plane launched.
+  rpc Deactivate(DeactivateRequest) returns (DeactivateResponse);
+}
+
+message ScaffoldRequest {
+  string name = 1;
+  string protocol = 2;
+  string protocol_version = 3;
+  repeated string hints = 4;
+}
+
+message ScaffoldResponse {
+  string name = 1;
+  string output_dir = 2;
+  repeated string created = 3;
+}
+
+message ListPluginsRequest {}
+
+message DiscoveredPlugin {
+  string name = 1;
+  string binary = 2;
+  string dir = 3;
+}
+
+message ListPluginsResponse {
+  repeated DiscoveredPlugin plugins = 1;
+}
+
+message BuildRequest {
+  string name = 1;
+  int32 timeout_sec = 2;
+}
+
+message BuildError {
+  string file = 1;
+  int32 line = 2;
+  int32 col = 3;
+  string message = 4;
+}
+
+message BuildResponse {
+  bool ok = 1;
+  repeated BuildError errors = 2;
+  string output = 3;
+}
+
+message ActivateRequest {
+  string name = 1;
+  string registry_addr = 2;
+}
+
+message ActivateResponse {
+  string instance_id = 1;
+}
+
+message DeactivateRequest {
+  string name = 1;
+}
+
+message DeactivateResponse {}

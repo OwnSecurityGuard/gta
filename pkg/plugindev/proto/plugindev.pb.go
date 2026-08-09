@@ -1029,6 +1029,240 @@ func (x *StatusResponse) GetLastAttempt() *LastAttempt {
 	return nil
 }
 
+// ExplainRequest asks for the attribution of a plugin's most recent failure.
+type ExplainRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Optional: which attempt to explain (build | activate | deactivate). If
+	// empty, the latest recorded attempt is explained.
+	Action        string `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainRequest) Reset() {
+	*x = ExplainRequest{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainRequest) ProtoMessage() {}
+
+func (x *ExplainRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainRequest.ProtoReflect.Descriptor instead.
+func (*ExplainRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ExplainRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ExplainRequest) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+// ExplainFinding is one attributed cause of failure.
+type ExplainFinding struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Set for build failures (the structured compiler diagnostic). Nil for
+	// activation/process failures, which carry their cause in `why`.
+	Error *BuildError `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	// Machine category, e.g. undefined-symbol | type-mismatch | import | module |
+	// syntax | binary-missing | process-crash | already-active | start-failed.
+	Category string `protobuf:"bytes,2,opt,name=category,proto3" json:"category,omitempty"`
+	// Optional SDK contract rule_id (SSOT: contract.yaml rules: section) so the
+	// AI can cross-reference the same vocabulary used by brief/verify.
+	RuleId string `protobuf:"bytes,3,opt,name=rule_id,json=ruleId,proto3" json:"rule_id,omitempty"`
+	// Human explanation of why this failure happened.
+	Why string `protobuf:"bytes,4,opt,name=why,proto3" json:"why,omitempty"`
+	// Actionable corrective step.
+	Fix           string `protobuf:"bytes,5,opt,name=fix,proto3" json:"fix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainFinding) Reset() {
+	*x = ExplainFinding{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainFinding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainFinding) ProtoMessage() {}
+
+func (x *ExplainFinding) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainFinding.ProtoReflect.Descriptor instead.
+func (*ExplainFinding) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ExplainFinding) GetError() *BuildError {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+func (x *ExplainFinding) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+func (x *ExplainFinding) GetRuleId() string {
+	if x != nil {
+		return x.RuleId
+	}
+	return ""
+}
+
+func (x *ExplainFinding) GetWhy() string {
+	if x != nil {
+		return x.Why
+	}
+	return ""
+}
+
+func (x *ExplainFinding) GetFix() string {
+	if x != nil {
+		return x.Fix
+	}
+	return ""
+}
+
+// ExplainResponse is the conclusion of a plugin.explain invocation. Its `ref`
+// is what last_attempt.explain_ref points back to.
+type ExplainResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ref           string                 `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"` // explain_ref, e.g. expl_<id>
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Action        string                 `protobuf:"bytes,3,opt,name=action,proto3" json:"action,omitempty"`
+	AtUnix        int64                  `protobuf:"varint,4,opt,name=at_unix,json=atUnix,proto3" json:"at_unix,omitempty"`
+	Summary       string                 `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
+	Findings      []*ExplainFinding      `protobuf:"bytes,6,rep,name=findings,proto3" json:"findings,omitempty"`
+	NextAction    string                 `protobuf:"bytes,7,opt,name=next_action,json=nextAction,proto3" json:"next_action,omitempty"` // human-readable next step
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainResponse) Reset() {
+	*x = ExplainResponse{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainResponse) ProtoMessage() {}
+
+func (x *ExplainResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainResponse.ProtoReflect.Descriptor instead.
+func (*ExplainResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ExplainResponse) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *ExplainResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ExplainResponse) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *ExplainResponse) GetAtUnix() int64 {
+	if x != nil {
+		return x.AtUnix
+	}
+	return 0
+}
+
+func (x *ExplainResponse) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *ExplainResponse) GetFindings() []*ExplainFinding {
+	if x != nil {
+		return x.Findings
+	}
+	return nil
+}
+
+func (x *ExplainResponse) GetNextAction() string {
+	if x != nil {
+		return x.NextAction
+	}
+	return ""
+}
+
 var File_pkg_plugindev_proto_plugindev_proto protoreflect.FileDescriptor
 
 const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
@@ -1110,7 +1344,25 @@ const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\bartifact\x18\x02 \x01(\v2\x1c.gta.plugindev.ArtifactStateR\bartifact\x12:\n" +
 	"\vdev_process\x18\x03 \x01(\v2\x19.gta.plugindev.DevProcessR\n" +
 	"devProcess\x12=\n" +
-	"\flast_attempt\x18\x04 \x01(\v2\x1a.gta.plugindev.LastAttemptR\vlastAttempt2\xd9\x03\n" +
+	"\flast_attempt\x18\x04 \x01(\v2\x1a.gta.plugindev.LastAttemptR\vlastAttempt\"<\n" +
+	"\x0eExplainRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\"\x9a\x01\n" +
+	"\x0eExplainFinding\x12/\n" +
+	"\x05error\x18\x01 \x01(\v2\x19.gta.plugindev.BuildErrorR\x05error\x12\x1a\n" +
+	"\bcategory\x18\x02 \x01(\tR\bcategory\x12\x17\n" +
+	"\arule_id\x18\x03 \x01(\tR\x06ruleId\x12\x10\n" +
+	"\x03why\x18\x04 \x01(\tR\x03why\x12\x10\n" +
+	"\x03fix\x18\x05 \x01(\tR\x03fix\"\xde\x01\n" +
+	"\x0fExplainResponse\x12\x10\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
+	"\x06action\x18\x03 \x01(\tR\x06action\x12\x17\n" +
+	"\aat_unix\x18\x04 \x01(\x03R\x06atUnix\x12\x18\n" +
+	"\asummary\x18\x05 \x01(\tR\asummary\x129\n" +
+	"\bfindings\x18\x06 \x03(\v2\x1d.gta.plugindev.ExplainFindingR\bfindings\x12\x1f\n" +
+	"\vnext_action\x18\a \x01(\tR\n" +
+	"nextAction2\xa3\x04\n" +
 	"\tPluginDev\x12K\n" +
 	"\bScaffold\x12\x1e.gta.plugindev.ScaffoldRequest\x1a\x1f.gta.plugindev.ScaffoldResponse\x12T\n" +
 	"\vListPlugins\x12!.gta.plugindev.ListPluginsRequest\x1a\".gta.plugindev.ListPluginsResponse\x12B\n" +
@@ -1118,7 +1370,8 @@ const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\bActivate\x12\x1e.gta.plugindev.ActivateRequest\x1a\x1f.gta.plugindev.ActivateResponse\x12Q\n" +
 	"\n" +
 	"Deactivate\x12 .gta.plugindev.DeactivateRequest\x1a!.gta.plugindev.DeactivateResponse\x12E\n" +
-	"\x06Status\x12\x1c.gta.plugindev.StatusRequest\x1a\x1d.gta.plugindev.StatusResponseB\x19Z\x17gta/pkg/plugindev/protob\x06proto3"
+	"\x06Status\x12\x1c.gta.plugindev.StatusRequest\x1a\x1d.gta.plugindev.StatusResponse\x12H\n" +
+	"\aExplain\x12\x1d.gta.plugindev.ExplainRequest\x1a\x1e.gta.plugindev.ExplainResponseB\x19Z\x17gta/pkg/plugindev/protob\x06proto3"
 
 var (
 	file_pkg_plugindev_proto_plugindev_proto_rawDescOnce sync.Once
@@ -1132,7 +1385,7 @@ func file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP() []byte {
 	return file_pkg_plugindev_proto_plugindev_proto_rawDescData
 }
 
-var file_pkg_plugindev_proto_plugindev_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_pkg_plugindev_proto_plugindev_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_pkg_plugindev_proto_plugindev_proto_goTypes = []any{
 	(*ScaffoldRequest)(nil),     // 0: gta.plugindev.ScaffoldRequest
 	(*ScaffoldResponse)(nil),    // 1: gta.plugindev.ScaffoldResponse
@@ -1151,6 +1404,9 @@ var file_pkg_plugindev_proto_plugindev_proto_goTypes = []any{
 	(*DevProcess)(nil),          // 14: gta.plugindev.DevProcess
 	(*LastAttempt)(nil),         // 15: gta.plugindev.LastAttempt
 	(*StatusResponse)(nil),      // 16: gta.plugindev.StatusResponse
+	(*ExplainRequest)(nil),      // 17: gta.plugindev.ExplainRequest
+	(*ExplainFinding)(nil),      // 18: gta.plugindev.ExplainFinding
+	(*ExplainResponse)(nil),     // 19: gta.plugindev.ExplainResponse
 }
 var file_pkg_plugindev_proto_plugindev_proto_depIdxs = []int32{
 	3,  // 0: gta.plugindev.ListPluginsResponse.plugins:type_name -> gta.plugindev.DiscoveredPlugin
@@ -1159,23 +1415,27 @@ var file_pkg_plugindev_proto_plugindev_proto_depIdxs = []int32{
 	13, // 3: gta.plugindev.StatusResponse.artifact:type_name -> gta.plugindev.ArtifactState
 	14, // 4: gta.plugindev.StatusResponse.dev_process:type_name -> gta.plugindev.DevProcess
 	15, // 5: gta.plugindev.StatusResponse.last_attempt:type_name -> gta.plugindev.LastAttempt
-	0,  // 6: gta.plugindev.PluginDev.Scaffold:input_type -> gta.plugindev.ScaffoldRequest
-	2,  // 7: gta.plugindev.PluginDev.ListPlugins:input_type -> gta.plugindev.ListPluginsRequest
-	5,  // 8: gta.plugindev.PluginDev.Build:input_type -> gta.plugindev.BuildRequest
-	8,  // 9: gta.plugindev.PluginDev.Activate:input_type -> gta.plugindev.ActivateRequest
-	10, // 10: gta.plugindev.PluginDev.Deactivate:input_type -> gta.plugindev.DeactivateRequest
-	12, // 11: gta.plugindev.PluginDev.Status:input_type -> gta.plugindev.StatusRequest
-	1,  // 12: gta.plugindev.PluginDev.Scaffold:output_type -> gta.plugindev.ScaffoldResponse
-	4,  // 13: gta.plugindev.PluginDev.ListPlugins:output_type -> gta.plugindev.ListPluginsResponse
-	7,  // 14: gta.plugindev.PluginDev.Build:output_type -> gta.plugindev.BuildResponse
-	9,  // 15: gta.plugindev.PluginDev.Activate:output_type -> gta.plugindev.ActivateResponse
-	11, // 16: gta.plugindev.PluginDev.Deactivate:output_type -> gta.plugindev.DeactivateResponse
-	16, // 17: gta.plugindev.PluginDev.Status:output_type -> gta.plugindev.StatusResponse
-	12, // [12:18] is the sub-list for method output_type
-	6,  // [6:12] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	6,  // 6: gta.plugindev.ExplainFinding.error:type_name -> gta.plugindev.BuildError
+	18, // 7: gta.plugindev.ExplainResponse.findings:type_name -> gta.plugindev.ExplainFinding
+	0,  // 8: gta.plugindev.PluginDev.Scaffold:input_type -> gta.plugindev.ScaffoldRequest
+	2,  // 9: gta.plugindev.PluginDev.ListPlugins:input_type -> gta.plugindev.ListPluginsRequest
+	5,  // 10: gta.plugindev.PluginDev.Build:input_type -> gta.plugindev.BuildRequest
+	8,  // 11: gta.plugindev.PluginDev.Activate:input_type -> gta.plugindev.ActivateRequest
+	10, // 12: gta.plugindev.PluginDev.Deactivate:input_type -> gta.plugindev.DeactivateRequest
+	12, // 13: gta.plugindev.PluginDev.Status:input_type -> gta.plugindev.StatusRequest
+	17, // 14: gta.plugindev.PluginDev.Explain:input_type -> gta.plugindev.ExplainRequest
+	1,  // 15: gta.plugindev.PluginDev.Scaffold:output_type -> gta.plugindev.ScaffoldResponse
+	4,  // 16: gta.plugindev.PluginDev.ListPlugins:output_type -> gta.plugindev.ListPluginsResponse
+	7,  // 17: gta.plugindev.PluginDev.Build:output_type -> gta.plugindev.BuildResponse
+	9,  // 18: gta.plugindev.PluginDev.Activate:output_type -> gta.plugindev.ActivateResponse
+	11, // 19: gta.plugindev.PluginDev.Deactivate:output_type -> gta.plugindev.DeactivateResponse
+	16, // 20: gta.plugindev.PluginDev.Status:output_type -> gta.plugindev.StatusResponse
+	19, // 21: gta.plugindev.PluginDev.Explain:output_type -> gta.plugindev.ExplainResponse
+	15, // [15:22] is the sub-list for method output_type
+	8,  // [8:15] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_pkg_plugindev_proto_plugindev_proto_init() }
@@ -1189,7 +1449,7 @@ func file_pkg_plugindev_proto_plugindev_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_plugindev_proto_plugindev_proto_rawDesc), len(file_pkg_plugindev_proto_plugindev_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

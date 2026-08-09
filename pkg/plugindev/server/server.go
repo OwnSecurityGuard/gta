@@ -150,11 +150,11 @@ func (s *Server) Status(ctx context.Context, req *pb.StatusRequest) (*pb.StatusR
 
 func mapLastAttempt(a *plugindev.LastAttempt) *pb.LastAttempt {
 	out := &pb.LastAttempt{
-		Action:    a.Action,
-		Ok:        a.OK,
-		AtUnix:    a.At.Unix(),
+		Action:     a.Action,
+		Ok:         a.OK,
+		AtUnix:     a.At.Unix(),
 		DurationMs: a.Duration.Milliseconds(),
-		Message:   a.Message,
+		Message:    a.Message,
 		ExplainRef: a.ExplainRef,
 	}
 	for _, e := range a.Errors {
@@ -166,6 +166,42 @@ func mapLastAttempt(a *plugindev.LastAttempt) *pb.LastAttempt {
 		})
 	}
 	return out
+}
+
+func (s *Server) Explain(ctx context.Context, req *pb.ExplainRequest) (*pb.ExplainResponse, error) {
+	res, err := plugindev.Explain(ctx, &plugindev.ExplainRequest{
+		Name:   req.GetName(),
+		Action: req.GetAction(),
+	})
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	out := &pb.ExplainResponse{
+		Ref:         res.Ref,
+		Name:        res.Name,
+		Action:      res.Action,
+		AtUnix:      res.At.Unix(),
+		Summary:     res.Summary,
+		NextAction:  res.NextAction,
+	}
+	for _, f := range res.Findings {
+		pbf := &pb.ExplainFinding{
+			Category: f.Category,
+			RuleId:   f.RuleID,
+			Why:      f.Why,
+			Fix:      f.Fix,
+		}
+		if f.Error != nil {
+			pbf.Error = &pb.BuildError{
+				File:    f.Error.File,
+				Line:    int32(f.Error.Line),
+				Col:     int32(f.Error.Col),
+				Message: f.Error.Message,
+			}
+		}
+		out.Findings = append(out.Findings, pbf)
+	}
+	return out, nil
 }
 
 // Serve registers the service on lis and blocks serving until the listener

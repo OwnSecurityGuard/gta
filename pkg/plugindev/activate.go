@@ -32,13 +32,13 @@ func Activate(ctx context.Context, req *ActivateRequest) (*ActivateResponse, err
 	dir := filepath.Join(req.Root, req.Name)
 	binary := filepath.Join(dir, req.Name+exeExt())
 	if _, err := os.Stat(binary); err != nil {
-		defaultTracker.RecordActivate(req.Name, 0, false, "binary not found: "+binary)
+		recordActivateFail(ctx, req.Name, 0, "binary not found: "+binary)
 		return nil, fmt.Errorf("plugin binary not found: %s (did you build it?)", binary)
 	}
 
 	// Refuse to double-launch; the existing process must be deactivated first.
 	if lp := defaultTracker.proc(req.Name); lp != nil && lp.alive() {
-		defaultTracker.RecordActivate(req.Name, 0, false, "already active (pid "+itoa(lp.pid)+")")
+		recordActivateFail(ctx, req.Name, 0, "already active (pid "+itoa(lp.pid)+")")
 		return nil, fmt.Errorf("plugin %q is already active (pid %d); deactivate first", req.Name, lp.pid)
 	}
 
@@ -62,7 +62,7 @@ func Activate(ctx context.Context, req *ActivateRequest) (*ActivateResponse, err
 		if logFile != nil {
 			logFile.Close()
 		}
-		defaultTracker.RecordActivate(req.Name, time.Since(start), false, "start failed: "+err.Error())
+		recordActivateFail(ctx, req.Name, time.Since(start), "start failed: "+err.Error())
 		return nil, fmt.Errorf("start plugin %q: %w", req.Name, err)
 	}
 	pid := cmd.Process.Pid
@@ -84,7 +84,7 @@ func Activate(ctx context.Context, req *ActivateRequest) (*ActivateResponse, err
 	// Liveness gate: give the binary a moment; if it already exited, surface
 	// the startup log so the AI can attribute the failure.
 	if !lp.alive() {
-		defaultTracker.RecordActivate(req.Name, time.Since(start), false, "process exited immediately")
+		recordActivateFail(ctx, req.Name, time.Since(start), "process exited immediately")
 		return nil, fmt.Errorf("plugin %q exited immediately; check %s", req.Name, logPath)
 	}
 	time.Sleep(activateLivenessWait)
@@ -93,7 +93,7 @@ func Activate(ctx context.Context, req *ActivateRequest) (*ActivateResponse, err
 		if tail, te := os.ReadFile(logPath); te == nil && len(tail) > 0 {
 			msg += ": " + tailString(tail, 512)
 		}
-		defaultTracker.RecordActivate(req.Name, time.Since(start), false, msg)
+		recordActivateFail(ctx, req.Name, time.Since(start), msg)
 		return nil, fmt.Errorf("plugin %q failed to stay up: %s", req.Name, msg)
 	}
 
@@ -125,6 +125,15 @@ func Deactivate(ctx context.Context, req *DeactivateRequest) (*DeactivateRespons
 
 func itoa(n int) string {
 	return fmt.Sprintf("%d", n)
+}
+
+// recordActivateFail records a failed activate attempt and auto-attributes it
+// (P3a) so the failure surfaces via last_attempt.explain_ref. The explain
+// conclusion is intentionally best-effort; activation failures must never be
+// swallowed by a failed attribution.
+func recordActivateFail(ctx context.Context, name string, dur time.Duration, msg string) {
+	defaultTracker.RecordActivate(name, dur, false, msg)
+	_, _ = Explain(context.Background(), &ExplainRequest{Name: name})
 }
 
 // tailString returns the last n bytes of b as a string, trimming a leading

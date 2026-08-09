@@ -54,6 +54,8 @@ func Build(ctx context.Context, req *BuildRequest) (*BuildResponse, error) {
 		resp.Errors = parseGoBuildErrors(string(out))
 		resp.OK = false
 		defaultTracker.RecordBuild(req.Name, dur, resp)
+		// P3a: auto-attribute the failure so status surfaces explain_ref.
+		_, _ = Explain(context.Background(), &ExplainRequest{Name: req.Name})
 		return resp, nil
 	}
 	resp.OK = true

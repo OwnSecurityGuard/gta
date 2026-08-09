@@ -254,3 +254,50 @@ func nextAction(artifactState, runtimeState string) map[string]any {
 		return nil
 	}
 }
+
+// handleExplainPlugin attributes the most recent build/activate/deactivate
+// failure of a plugin via the Developer Plane (design §2.3 / P3a). It is a pure
+// forwarder — gta-mcp owns no attribution logic — and its ref is what
+// status_plugin's last_attempt.explain_ref points back to.
+func (m *mcpCapture) handleExplainPlugin(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	name := req.GetString("name", "")
+	if name == "" {
+		return errorResult(fmt.Errorf("name is required")), nil
+	}
+	action := req.GetString("action", "")
+	if m.pdClient == nil {
+		return errorResult(fmt.Errorf("plugin dev not available (Developer Plane not configured)")), nil
+	}
+	resp, err := m.pdClient.Explain(ctx, name, action)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	out := map[string]any{
+		"ref":         resp.GetRef(),
+		"name":        resp.GetName(),
+		"action":      resp.GetAction(),
+		"at_unix":     resp.GetAtUnix(),
+		"summary":     resp.GetSummary(),
+		"next_action": resp.GetNextAction(),
+	}
+	var findings []map[string]any
+	for _, f := range resp.GetFindings() {
+		fm := map[string]any{
+			"category": f.GetCategory(),
+			"rule_id":  f.GetRuleId(),
+			"why":      f.GetWhy(),
+			"fix":      f.GetFix(),
+		}
+		if e := f.GetError(); e != nil {
+			fm["error"] = map[string]any{
+				"file":    e.GetFile(),
+				"line":    e.GetLine(),
+				"col":     e.GetCol(),
+				"message": e.GetMessage(),
+			}
+		}
+		findings = append(findings, fm)
+	}
+	out["findings"] = findings
+	return successResult(out), nil
+}

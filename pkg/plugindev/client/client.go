@@ -22,6 +22,7 @@ type PluginDev interface {
 	Activate(ctx context.Context, name, registryAddr string) (*pb.ActivateResponse, error)
 	Deactivate(ctx context.Context, name string) (*pb.DeactivateResponse, error)
 	Status(ctx context.Context, name string) (*pb.StatusResponse, error)
+	Explain(ctx context.Context, name, action string) (*pb.ExplainResponse, error)
 }
 
 type grpcClient struct {
@@ -60,4 +61,8 @@ func (c *grpcClient) Deactivate(ctx context.Context, name string) (*pb.Deactivat
 
 func (c *grpcClient) Status(ctx context.Context, name string) (*pb.StatusResponse, error) {
 	return c.cc.Status(ctx, &pb.StatusRequest{Name: name})
+}
+
+func (c *grpcClient) Explain(ctx context.Context, name, action string) (*pb.ExplainResponse, error) {
+	return c.cc.Explain(ctx, &pb.ExplainRequest{Name: name, Action: action})
 }

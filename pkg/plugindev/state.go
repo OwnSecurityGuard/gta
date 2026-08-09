@@ -34,21 +34,27 @@ func (p *launchedProc) alive() bool {
 // standalone gta-plugin-dev binary), so a package-level default instance is
 // sufficient.
 type Tracker struct {
-	mu        sync.Mutex
-	procs     map[string]*launchedProc
-	lastTry   map[string]*LastAttempt
-	validated map[string]*ValidatedProof
+	mu         sync.Mutex
+	procs      map[string]*launchedProc
+	lastTry    map[string]*LastAttempt
+	validated  map[string]*ValidatedProof
+	lastExplain map[string]*ExplainResult
 }
 
 // defaultTracker is the process-wide Developer Plane state.
 var defaultTracker = NewTracker()
 
+// DefaultTracker returns the process-wide Developer Plane tracker. It is exposed
+// for test wiring and embedded-service setup that must share the same state.
+func DefaultTracker() *Tracker { return defaultTracker }
+
 // NewTracker constructs an empty Tracker.
 func NewTracker() *Tracker {
 	return &Tracker{
-		procs:     make(map[string]*launchedProc),
-		lastTry:   make(map[string]*LastAttempt),
-		validated: make(map[string]*ValidatedProof),
+		procs:       make(map[string]*launchedProc),
+		lastTry:     make(map[string]*LastAttempt),
+		validated:   make(map[string]*ValidatedProof),
+		lastExplain: make(map[string]*ExplainResult),
 	}
 }
 
@@ -113,6 +119,21 @@ func (t *Tracker) ValidatedProof(name string) *ValidatedProof {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.validated[name]
+}
+
+// RecordExplain stores the latest plugin.explain conclusion for a plugin so its
+// ref can be surfaced via last_attempt.explain_ref (design §2.3 / P3a).
+func (t *Tracker) RecordExplain(name string, res *ExplainResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lastExplain[name] = res
+}
+
+// ExplainResultOf returns the latest plugin.explain conclusion for a plugin, or nil.
+func (t *Tracker) ExplainResultOf(name string) *ExplainResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastExplain[name]
 }
 
 // trackProc records a launched process under name, replacing any prior entry,

@@ -25,6 +25,7 @@ const (
 	PluginDev_Activate_FullMethodName    = "/gta.plugindev.PluginDev/Activate"
 	PluginDev_Deactivate_FullMethodName  = "/gta.plugindev.PluginDev/Deactivate"
 	PluginDev_Status_FullMethodName      = "/gta.plugindev.PluginDev/Status"
+	PluginDev_Explain_FullMethodName     = "/gta.plugindev.PluginDev/Explain"
 )
 
 // PluginDevClient is the client API for PluginDev service.
@@ -52,6 +53,12 @@ type PluginDevClient interface {
 	// Status returns the Developer Plane portion of a plugin's dual-state view
 	// (artifact from disk, the dev-launched process, and the last attempt).
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
+	// Explain attributes the most recent failed build or activation for a plugin
+	// (design §2.3 / P3a). It reads the Developer Plane's last_attempt and
+	// produces structured findings (category + optional rule_id + why + fix). On a
+	// failed build/activate the Developer Plane also auto-runs Explain and stores
+	// the result so Status can surface explain_ref immediately.
+	Explain(ctx context.Context, in *ExplainRequest, opts ...grpc.CallOption) (*ExplainResponse, error)
 }
 
 type pluginDevClient struct {
@@ -122,6 +129,16 @@ func (c *pluginDevClient) Status(ctx context.Context, in *StatusRequest, opts ..
 	return out, nil
 }
 
+func (c *pluginDevClient) Explain(ctx context.Context, in *ExplainRequest, opts ...grpc.CallOption) (*ExplainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExplainResponse)
+	err := c.cc.Invoke(ctx, PluginDev_Explain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginDevServer is the server API for PluginDev service.
 // All implementations must embed UnimplementedPluginDevServer
 // for forward compatibility.
@@ -147,6 +164,12 @@ type PluginDevServer interface {
 	// Status returns the Developer Plane portion of a plugin's dual-state view
 	// (artifact from disk, the dev-launched process, and the last attempt).
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
+	// Explain attributes the most recent failed build or activation for a plugin
+	// (design §2.3 / P3a). It reads the Developer Plane's last_attempt and
+	// produces structured findings (category + optional rule_id + why + fix). On a
+	// failed build/activate the Developer Plane also auto-runs Explain and stores
+	// the result so Status can surface explain_ref immediately.
+	Explain(context.Context, *ExplainRequest) (*ExplainResponse, error)
 	mustEmbedUnimplementedPluginDevServer()
 }
 
@@ -174,6 +197,9 @@ func (UnimplementedPluginDevServer) Deactivate(context.Context, *DeactivateReque
 }
 func (UnimplementedPluginDevServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
+}
+func (UnimplementedPluginDevServer) Explain(context.Context, *ExplainRequest) (*ExplainResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Explain not implemented")
 }
 func (UnimplementedPluginDevServer) mustEmbedUnimplementedPluginDevServer() {}
 func (UnimplementedPluginDevServer) testEmbeddedByValue()                   {}
@@ -304,6 +330,24 @@ func _PluginDev_Status_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PluginDev_Explain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExplainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginDevServer).Explain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PluginDev_Explain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginDevServer).Explain(ctx, req.(*ExplainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PluginDev_ServiceDesc is the grpc.ServiceDesc for PluginDev service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -334,6 +378,10 @@ var PluginDev_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Status",
 			Handler:    _PluginDev_Status_Handler,
+		},
+		{
+			MethodName: "Explain",
+			Handler:    _PluginDev_Explain_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

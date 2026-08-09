@@ -25,6 +25,12 @@ service PluginDev {
   // Status returns the Developer Plane portion of a plugin's dual-state view
   // (artifact from disk, the dev-launched process, and the last attempt).
   rpc Status(StatusRequest) returns (StatusResponse);
+  // Explain attributes the most recent failed build or activation for a plugin
+  // (design §2.3 / P3a). It reads the Developer Plane's last_attempt and
+  // produces structured findings (category + optional rule_id + why + fix). On a
+  // failed build/activate the Developer Plane also auto-runs Explain and stores
+  // the result so Status can surface explain_ref immediately.
+  rpc Explain(ExplainRequest) returns (ExplainResponse);
 }
 
 message ScaffoldRequest {
@@ -128,4 +134,41 @@ message StatusResponse {
   ArtifactState artifact = 2;
   DevProcess dev_process = 3;
   LastAttempt last_attempt = 4;
+}
+
+// ExplainRequest asks for the attribution of a plugin's most recent failure.
+message ExplainRequest {
+  string name = 1;
+  // Optional: which attempt to explain (build | activate | deactivate). If
+  // empty, the latest recorded attempt is explained.
+  string action = 2;
+}
+
+// ExplainFinding is one attributed cause of failure.
+message ExplainFinding {
+  // Set for build failures (the structured compiler diagnostic). Nil for
+  // activation/process failures, which carry their cause in `why`.
+  BuildError error = 1;
+  // Machine category, e.g. undefined-symbol | type-mismatch | import | module |
+  // syntax | binary-missing | process-crash | already-active | start-failed.
+  string category = 2;
+  // Optional SDK contract rule_id (SSOT: contract.yaml rules: section) so the
+  // AI can cross-reference the same vocabulary used by brief/verify.
+  string rule_id = 3;
+  // Human explanation of why this failure happened.
+  string why = 4;
+  // Actionable corrective step.
+  string fix = 5;
+}
+
+// ExplainResponse is the conclusion of a plugin.explain invocation. Its `ref`
+// is what last_attempt.explain_ref points back to.
+message ExplainResponse {
+  string ref = 1;          // explain_ref, e.g. expl_<id>
+  string name = 2;
+  string action = 3;
+  int64 at_unix = 4;
+  string summary = 5;
+  repeated ExplainFinding findings = 6;
+  string next_action = 7;  // human-readable next step
 }

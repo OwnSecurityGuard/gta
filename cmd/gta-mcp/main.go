@@ -1780,6 +1780,12 @@ func main() {
 		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case), e.g. my-game-decoder")),
 	), capture.handleStatusPlugin)
 
+	s.AddTool(mcp.NewTool("explain_plugin",
+		mcp.WithDescription("Attribute the most recent build or activate failure of a plugin (design §2.3 / P3a). Reads the Developer Plane's last attempt and returns structured findings (category + optional SDK contract rule_id + why + fix), plus a next_action. The returned ref is what status_plugin's last_attempt.explain_ref points back to. On a failed build/activate the Developer Plane already auto-runs this, so status surfaces the ref immediately."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case), e.g. my-game-decoder")),
+		mcp.WithString("action", mcp.Description("Optional: which attempt to explain (build | activate | deactivate). Omit to explain the latest attempt")),
+	), capture.handleExplainPlugin)
+
 	s.AddTool(mcp.NewTool("get_plugin_contract",
 		mcp.WithDescription("Return the full contract.yaml spec for the GTA decoder plugin API. Use this as the single source of truth when writing or reviewing plugin code."),
 	), capture.handleGetPluginContract)

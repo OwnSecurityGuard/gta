@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	plugindev "gta/pkg/plugindev"
 	plugindevclient "gta/pkg/plugindev/client"
 	"google.golang.org/grpc"
 )
@@ -245,5 +246,38 @@ func TestHandleStatusPluginUnknown(t *testing.T) {
 	}
 	if parsed.NextAction == nil {
 		t.Fatalf("expected a next_action for an unknown plugin, got %s", text)
+	}
+}
+
+// TestHandleExplainPluginForwards records a failed build in the shared
+// Developer Plane tracker and verifies handleExplainPlugin forwards the
+// structured attribution (category + SDK rule_id) produced by the embedded
+// PluginDev service.
+func TestHandleExplainPluginForwards(t *testing.T) {
+	pluginsDir := t.TempDir()
+	client, conn := embeddedPluginDev(t, pluginsDir)
+	m := &mcpCapture{pluginsDir: pluginsDir, pdClient: client, pdConn: conn}
+
+	name := "explain-fwd"
+	plugindev.DefaultTracker().RecordBuild(name, 0, &plugindev.BuildResponse{
+		OK:     false,
+		Errors: []*plugindev.BuildError{{File: "main.go", Line: 7, Col: 3, Message: "undefined: event.ValueInt32"}},
+	})
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"name": name}
+	res, err := m.handleExplainPlugin(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := res.Content[0].(mcp.TextContent).Text
+	if !containsHelper(text, "undefined-symbol") {
+		t.Fatalf("explain not forwarded: %s", text)
+	}
+	if !containsHelper(text, "value-accessor-ok") {
+		t.Fatalf("rule_id not forwarded: %s", text)
+	}
+	if !containsHelper(text, "expl_") {
+		t.Fatalf("explain_ref missing: %s", text)
 	}
 }

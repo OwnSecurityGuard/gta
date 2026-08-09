@@ -52,9 +52,9 @@ func TestScaffoldSmokeBuild(t *testing.T) {
 	// (so the SDK's transitive requirements land in go.mod), then compile.
 	// Skipped when the toolchain can't resolve deps (CI without the sibling
 	// repo or an offline module cache) so the unit suite stays hermetic.
-	sdk := filepath.Join(repoRoot(t), "..", "gta-plugin-sdk")
-	if _, statErr := os.Stat(sdk); statErr != nil {
-		t.Skipf("local gta-plugin-sdk not found at %s; skipping build", sdk)
+	sdk := findLocalSDK(t)
+	if sdk == "" {
+		t.Skip("local gta-plugin-sdk not found (tried canonical + sibling); skipping build")
 	}
 	edit := exec.Command("go", "mod", "edit",
 		"-replace", "github.com/OwnSecurityGuard/gta-plugin-sdk="+sdk)
@@ -83,6 +83,25 @@ func repoRoot(t *testing.T) string {
 		t.Fatalf("repoRoot: %v", err)
 	}
 	return root
+}
+
+// findLocalSDK locates the gta-plugin-sdk checkout so the smoke build can
+// resolve it without network access. It prefers the canonical
+// E:\ai_workspace\gta-plugin-sdk (per project convention) and falls back to a
+// sibling E:\gta-plugin-sdk of the gta repo root. Returns "" if neither exists.
+func findLocalSDK(t *testing.T) string {
+	t.Helper()
+	root := repoRoot(t)
+	candidates := []string{
+		filepath.Join(root, "..", "ai_workspace", "gta-plugin-sdk"),
+		filepath.Join(root, "..", "gta-plugin-sdk"),
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
 }
 
 func readFile(t *testing.T, path string) string {

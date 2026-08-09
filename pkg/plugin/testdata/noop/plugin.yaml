@@ -1,0 +1,4 @@
+api_version: gta.decoder/v2
+name: noop
+protocol: noop
+type: decoder

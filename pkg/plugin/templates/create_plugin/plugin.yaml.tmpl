@@ -1,0 +1,21 @@
+api_version: gta.decoder/v2
+name: {{.Name}}
+protocol: {{.Protocol}}
+type: decoder
+{{- if .ProtocolVersion }}
+protocol_version: {{.ProtocolVersion}}
+{{- end }}
+{{- if .Hints }}
+hints:
+{{- range .Hints }}
+  - {{.}}
+{{- end }}
+{{- end }}
+event:
+  fields:
+    direction: { type: string, enum: [client_to_server, server_to_client, unknown] }
+    msg_name:  { type: string }
+  data:
+    schema:
+      fields:
+        # TODO: 填写业务字段

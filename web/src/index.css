@@ -1,0 +1,355 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* =========================================================================
+   GTA · 设计令牌（Design Tokens）
+   配色思路：偏冷的灰阶画布 + 靛蓝品牌色 + 翠绿"在线/实时"强调色，
+   区别于纯中性灰的默认模板观感，呈现"专业协议分析工具"的气质。
+   ========================================================================= */
+@theme {
+  /* 字体（渐进增强：联网时加载 Inter / JetBrains Mono，离线回落系统字体） */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  /* 圆角 */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* —— 亮色主题 —— */
+  --color-background: #f5f6f9;       /* 偏冷画布，非纯白 */
+  --color-foreground: #15171e;       /* 墨色，非纯黑 */
+  --color-card: #ffffff;
+  --color-card-foreground: #15171e;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #15171e;
+
+  --color-primary: #4f46e5;          /* 靛蓝品牌色 */
+  --color-primary-foreground: #ffffff;
+  --color-primary-muted: #eef2ff;    /* 靛蓝-50  hover 底色 */
+
+  --color-secondary: #eef0f5;
+  --color-secondary-foreground: #15171e;
+  --color-muted: #eef0f5;
+  --color-muted-foreground: #6b7280;
+
+  --color-accent: #eef2ff;
+  --color-accent-foreground: #4338ca;
+
+  --color-destructive: #e11d48;
+  --color-destructive-foreground: #ffffff;
+
+  --color-success: #059669;           /* 翠绿 · 在线/实时 */
+  --color-success-foreground: #ffffff;
+
+  --color-warning: #d97706;
+  --color-warning-foreground: #ffffff;
+
+  --color-info: #0284c7;
+  --color-info-foreground: #ffffff;
+
+  --color-border: #e4e7ee;
+  --color-input: #e4e7ee;
+  --color-ring: #6366f1;
+
+  /* 阴影（柔和、分层） */
+  --shadow-2xs: 0 1px 2px 0 rgb(17 19 28 / 0.04);
+  --shadow-xs: 0 1px 3px 0 rgb(17 19 28 / 0.06), 0 1px 2px -1px rgb(17 19 28 / 0.04);
+  --shadow-sm: 0 2px 6px -1px rgb(17 19 28 / 0.08), 0 1px 3px -1px rgb(17 19 28 / 0.05);
+  --shadow-md: 0 6px 16px -4px rgb(17 19 28 / 0.10), 0 3px 8px -3px rgb(17 19 28 / 0.06);
+  --shadow-lg: 0 16px 40px -8px rgb(17 19 28 / 0.18), 0 6px 14px -6px rgb(17 19 28 / 0.10);
+  --shadow-xl: 0 24px 56px -10px rgb(17 19 28 / 0.22), 0 10px 20px -8px rgb(17 19 28 / 0.12);
+}
+
+/* —— 暗色主题变量覆盖 —— */
+.dark {
+  --color-background: #0a0c11;       /* 近黑带蓝 */
+  --color-foreground: #e8eaf0;
+  --color-card: #13161f;
+  --color-card-foreground: #e8eaf0;
+  --color-popover: #161a24;
+  --color-popover-foreground: #e8eaf0;
+
+  --color-primary: #818cf8;          /* 靛蓝-400 */
+  --color-primary-foreground: #0a0c11;
+  --color-primary-muted: #1d2333;
+
+  --color-secondary: #1b1f2b;
+  --color-secondary-foreground: #e8eaf0;
+  --color-muted: #1b1f2b;
+  --color-muted-foreground: #98a0ad;
+
+  --color-accent: #1d2333;
+  --color-accent-foreground: #c7d2fe;
+
+  --color-destructive: #fb7185;
+  --color-destructive-foreground: #0a0c11;
+  --color-success: #34d399;
+  --color-success-foreground: #0a0c11;
+  --color-warning: #fbbf24;
+  --color-warning-foreground: #0a0c11;
+  --color-info: #38bdf8;
+  --color-info-foreground: #0a0c11;
+
+  --color-border: #232838;
+  --color-input: #232838;
+  --color-ring: #818cf8;
+
+  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.35);
+  --shadow-xs: 0 1px 3px 0 rgb(0 0 0 / 0.40), 0 1px 2px -1px rgb(0 0 0 / 0.30);
+  --shadow-sm: 0 2px 6px -1px rgb(0 0 0 / 0.45), 0 1px 3px -1px rgb(0 0 0 / 0.35);
+  --shadow-md: 0 6px 16px -4px rgb(0 0 0 / 0.55), 0 3px 8px -3px rgb(0 0 0 / 0.40);
+  --shadow-lg: 0 16px 40px -8px rgb(0 0 0 / 0.65), 0 6px 14px -6px rgb(0 0 0 / 0.45);
+  --shadow-xl: 0 24px 56px -10px rgb(0 0 0 / 0.70), 0 10px 20px -8px rgb(0 0 0 / 0.50);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  /* 极淡的径向光晕，避免大面积纯色平板的呆板感 */
+  background-image: radial-gradient(
+    120% 80% at 50% -10%,
+    color-mix(in srgb, var(--color-primary) 6%, transparent),
+    transparent 60%
+  );
+  background-attachment: fixed;
+}
+
+.dark body {
+  background-image: radial-gradient(
+    120% 80% at 50% -10%,
+    color-mix(in srgb, var(--color-primary) 12%, transparent),
+    transparent 55%
+  );
+}
+
+/* 文本选区用品牌色，强化识别 */
+::selection {
+  background-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  color: var(--color-foreground);
+}
+
+/* =========================================================================
+   自定义滚动条（细、圆角、hover 时显品牌色）
+   ========================================================================= */
+.gta-scroll,
+.overflow-auto {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent) transparent;
+}
+.gta-scroll::-webkit-scrollbar,
+.overflow-auto::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.gta-scroll::-webkit-scrollbar-track,
+.overflow-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+.gta-scroll::-webkit-scrollbar-thumb,
+.overflow-auto::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--color-muted-foreground) 28%, transparent);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.gta-scroll::-webkit-scrollbar-thumb:hover,
+.overflow-auto::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+}
+
+/* =========================================================================
+   表格：吸顶表头（带毛玻璃与底边界），需配合 .gta-table 使用
+   ========================================================================= */
+.gta-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: color-mix(in srgb, var(--color-card) 88%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 1px 0 0 var(--color-border);
+}
+
+/* =========================================================================
+   卡片 / 表面工具类
+   ========================================================================= */
+.gta-card {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 品牌渐变文字 */
+.gta-gradient-text {
+  background-image: linear-gradient(
+    135deg,
+    var(--color-primary),
+    color-mix(in srgb, var(--color-primary) 55%, var(--color-info))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* =========================================================================
+   动画（默认开启，reduced-motion 下禁用）
+   ========================================================================= */
+@keyframes gta-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes gta-pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes gta-pulse-dot {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-success) 60%, transparent); }
+  70%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-success) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-success) 0%, transparent); }
+}
+@keyframes gta-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes gta-toast-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes gta-loading-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.gta-fade-in { animation: gta-fade-in 0.25s ease-out both; }
+.gta-pop-in  { animation: gta-pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.gta-toast-in { animation: gta-toast-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* 数据刷新中的顶部进度条（keepPreviousData 期间提示后台正在拉取）。
+   关键：绝对定位浮层，不占文档流空间，避免出现/消失时把表格顶动造成抖动。 */
+.gta-loading-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  width: 100%;
+  overflow: hidden;
+  z-index: 3;
+  pointer-events: none;
+}
+.gta-loading-bar::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 40%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  animation: gta-loading-slide 1.1s ease-in-out infinite;
+}
+
+/* 在线状态脉冲点（运行时指示） */
+.gta-live-dot {
+  position: relative;
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background-color: var(--color-success);
+  animation: gta-pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* 骨架屏微光 */
+.gta-skeleton {
+  border-radius: var(--radius-md);
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-muted) 60%, transparent) 25%,
+    color-mix(in srgb, var(--color-muted) 100%, transparent) 37%,
+    color-mix(in srgb, var(--color-muted) 60%, transparent) 63%
+  );
+  background-size: 200% 100%;
+  animation: gta-shimmer 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .gta-pop-in,
+  .gta-fade-in { animation: none !important; }
+  .gta-live-dot { animation: none !important; }
+  .gta-skeleton { animation: none !important; }
+  .gta-toast-in { animation: none !important; }
+  .gta-loading-bar::after { animation: none !important; }
+}
+
+/* =========================================================================
+   JSON 展开视图 & 语法高亮
+   ========================================================================= */
+.gta-json-view {
+  max-width: 56rem;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+  background-color: color-mix(in srgb, var(--color-muted) 45%, transparent);
+}
+
+.gta-json-pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  tab-size: 2;
+}
+
+/* JSON 语法高亮 — 亮色（与品牌色系协调的彩虹色） */
+.gta-json-key { color: #6d28d9; font-weight: 600; }
+.gta-json-string { color: #0d9488; }
+.gta-json-number { color: #2563eb; }
+.gta-json-boolean { color: #c026d3; }
+.gta-json-null { color: #94a3b8; font-style: italic; }
+.gta-json-punct { color: #64748b; }
+
+/* JSON 语法高亮 — 暗色 */
+.dark .gta-json-key { color: #c4b5fd; }
+.dark .gta-json-string { color: #5eead4; }
+.dark .gta-json-number { color: #93c5fd; }
+.dark .gta-json-boolean { color: #f0abfc; }
+.dark .gta-json-null { color: #64748b; font-style: italic; }
+.dark .gta-json-punct { color: #94a3b8; }
+
+/* 原生 select 在暗色 Windows 下的可读性兜底 */
+select {
+  color: var(--color-foreground);
+  background-color: var(--color-background);
+}

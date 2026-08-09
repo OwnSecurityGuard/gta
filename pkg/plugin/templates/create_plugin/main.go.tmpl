@@ -1,0 +1,47 @@
+package main
+
+import (
+	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
+	"github.com/OwnSecurityGuard/gta-plugin-sdk"
+
+	"github.com/OwnSecurityGuard/gta-plugin-sdk/event"
+)
+
+func main() {
+	sdk.RunRegisterLoop(decodePacket)
+}
+
+// decodePacket 是核心解码函数，签名匹配 sdk.DecodeFuncV2。
+// 输入：req.Payload（链路层字节）+ req.LinkType（参考 contract.yaml link_types 剥离）
+// 输出：通过 stream.Send 发送 DecodeResponseV2 结果（MsgPack 编码），最后发送 done=true。
+func decodePacket(req *pb.DecodeRequest, stream pb.Decoder_DecodeV2Server) error {
+	defer func() { _ = recover() }()
+
+	// TODO: 解析 req.Payload，根据 req.LinkType 剥离链路层
+	// 参考 link_types：1=Ethernet, 12=RawIP, 113=Loopback, 1000=RawIP, 1001=ProxyPayload
+
+	// 构建业务 payload
+	payload := event.ValueObject(map[string]event.Value{
+		// TODO: 填写业务字段
+	})
+	msgpackData, err := payload.MarshalMsgpack()
+	if err != nil {
+		return err
+	}
+
+	// 发送结构化结果
+	if err := stream.Send(&pb.DecodeResponseV2{
+		InputId:        req.InputId,
+		EventType:      "unknown",
+		SchemaId:       "unknown.v1",
+		PayloadMsgpack: msgpackData,
+	}); err != nil {
+		return err
+	}
+
+	// 标记该 input_id 的结果已全部发完
+	return stream.Send(&pb.DecodeResponseV2{
+		InputId: req.InputId,
+		Done:    true,
+	})
+}

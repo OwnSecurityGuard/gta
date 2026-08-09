@@ -1,0 +1,74 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# SQLite database files
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Dependency directories
+vendor/
+
+# Build output
+dist/
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Frontend build artifacts (web/ is a real Vite project; only source is tracked)
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+web/.vite/
+
+# IDE
+.trae/
+
+# Runtime state (databases, sessions, run logs)
+sessions/
+runs/
+current.json
+
+# AI working memory (tool-internal, not project source)
+.workbuddy/
+
+# Stray/junk file
+NUL

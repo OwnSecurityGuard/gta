@@ -281,3 +281,41 @@ func TestHandleExplainPluginForwards(t *testing.T) {
 		t.Fatalf("explain_ref missing: %s", text)
 	}
 }
+
+// TestHandleExplainPluginForwardsVerify locks in P3b end-to-end: the MCP layer
+// is a pure forwarder — it only maps the `verify` JSON argument onto the gRPC
+// VerifyResult and forwards it. The embedded Developer Plane does the actual
+// decode-attribution (here: high entropy + majority undecodable => suspected
+// encryption, referencing contract.yaml rule_id inspect-bytes-first).
+func TestHandleExplainPluginForwardsVerify(t *testing.T) {
+	pluginsDir := t.TempDir()
+	client, conn := embeddedPluginDev(t, pluginsDir)
+	m := &mcpCapture{pluginsDir: pluginsDir, pdClient: client, pdConn: conn}
+
+	name := "explain-verify-fwd"
+	verifyArg := map[string]any{
+		"verdict": "fail",
+		"quality": map[string]any{
+			"total_inputs":    10,
+			"unknown_inputs":  8,
+			"unknown_ratio":   0.8,
+			"entropy_estimate": 7.8,
+		},
+	}
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"name": name, "verify": verifyArg}
+	res, err := m.handleExplainPlugin(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := res.Content[0].(mcp.TextContent).Text
+	if !containsHelper(text, "suspected-encryption") {
+		t.Fatalf("decode attribution not forwarded: %s", text)
+	}
+	if !containsHelper(text, "inspect-bytes-first") {
+		t.Fatalf("rule_id not forwarded: %s", text)
+	}
+	if !containsHelper(text, "expl_") {
+		t.Fatalf("explain_ref missing: %s", text)
+	}
+}

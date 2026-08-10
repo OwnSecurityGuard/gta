@@ -1033,9 +1033,14 @@ func (x *StatusResponse) GetLastAttempt() *LastAttempt {
 type ExplainRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// Optional: which attempt to explain (build | activate | deactivate). If
-	// empty, the latest recorded attempt is explained.
-	Action        string `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	// Optional: which attempt to explain (build | activate | deactivate |
+	// verify). If empty, the latest recorded attempt is explained.
+	Action string `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	// Optional: an inline verify result to attribute (decode-class failures,
+	// P3b). When set, action is treated as "verify" and the result is classified
+	// directly. When omitted on a verify request, the most recent result
+	// recorded by plugin.verify (P4) via RecordVerify is used.
+	Verify        *VerifyResult `protobuf:"bytes,3,opt,name=verify,proto3" json:"verify,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1082,6 +1087,13 @@ func (x *ExplainRequest) GetAction() string {
 		return x.Action
 	}
 	return ""
+}
+
+func (x *ExplainRequest) GetVerify() *VerifyResult {
+	if x != nil {
+		return x.Verify
+	}
+	return nil
 }
 
 // ExplainFinding is one attributed cause of failure.
@@ -1263,6 +1275,268 @@ func (x *ExplainResponse) GetNextAction() string {
 	return ""
 }
 
+// VerifyResult is the output of plugin.verify (P4): SDK contract violations,
+// gta-side quality statistics, and an overall verdict. plugin.explain (P3b)
+// consumes it to attribute decode-class failures (all-unknown / wrong framing /
+// suspected encryption / suspected missing reassembly).
+type VerifyResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Violations    []*Violation           `protobuf:"bytes,1,rep,name=violations,proto3" json:"violations,omitempty"`
+	Quality       *QualityStats          `protobuf:"bytes,2,opt,name=quality,proto3" json:"quality,omitempty"`
+	Verdict       string                 `protobuf:"bytes,3,opt,name=verdict,proto3" json:"verdict,omitempty"` // pass | warn | fail
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyResult) Reset() {
+	*x = VerifyResult{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyResult) ProtoMessage() {}
+
+func (x *VerifyResult) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyResult.ProtoReflect.Descriptor instead.
+func (*VerifyResult) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *VerifyResult) GetViolations() []*Violation {
+	if x != nil {
+		return x.Violations
+	}
+	return nil
+}
+
+func (x *VerifyResult) GetQuality() *QualityStats {
+	if x != nil {
+		return x.Quality
+	}
+	return nil
+}
+
+func (x *VerifyResult) GetVerdict() string {
+	if x != nil {
+		return x.Verdict
+	}
+	return ""
+}
+
+// Violation is a single SDK contract rule the verify corpus tripped. rule_id is
+// the shared vocabulary defined in contract.yaml (rules: section) and reused by
+// brief / verify / explain.
+type Violation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RuleId        string                 `protobuf:"bytes,1,opt,name=rule_id,json=ruleId,proto3" json:"rule_id,omitempty"`
+	Topic         string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
+	Severity      string                 `protobuf:"bytes,3,opt,name=severity,proto3" json:"severity,omitempty"`
+	Statement     string                 `protobuf:"bytes,4,opt,name=statement,proto3" json:"statement,omitempty"`
+	DocRef        string                 `protobuf:"bytes,5,opt,name=doc_ref,json=docRef,proto3" json:"doc_ref,omitempty"`
+	Count         int32                  `protobuf:"varint,6,opt,name=count,proto3" json:"count,omitempty"`
+	Sample        string                 `protobuf:"bytes,7,opt,name=sample,proto3" json:"sample,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Violation) Reset() {
+	*x = Violation{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Violation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Violation) ProtoMessage() {}
+
+func (x *Violation) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Violation.ProtoReflect.Descriptor instead.
+func (*Violation) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *Violation) GetRuleId() string {
+	if x != nil {
+		return x.RuleId
+	}
+	return ""
+}
+
+func (x *Violation) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+func (x *Violation) GetSeverity() string {
+	if x != nil {
+		return x.Severity
+	}
+	return ""
+}
+
+func (x *Violation) GetStatement() string {
+	if x != nil {
+		return x.Statement
+	}
+	return ""
+}
+
+func (x *Violation) GetDocRef() string {
+	if x != nil {
+		return x.DocRef
+	}
+	return ""
+}
+
+func (x *Violation) GetCount() int32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *Violation) GetSample() string {
+	if x != nil {
+		return x.Sample
+	}
+	return ""
+}
+
+// QualityStats holds the corpus-level signals plugin.explain classifies. All
+// fields are optional; a missing QualityStats means no statistical evidence is
+// available and explain falls back to violations only.
+type QualityStats struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	TotalInputs          int32                  `protobuf:"varint,1,opt,name=total_inputs,json=totalInputs,proto3" json:"total_inputs,omitempty"`
+	UnknownInputs        int32                  `protobuf:"varint,2,opt,name=unknown_inputs,json=unknownInputs,proto3" json:"unknown_inputs,omitempty"`
+	UnknownRatio         float64                `protobuf:"fixed64,3,opt,name=unknown_ratio,json=unknownRatio,proto3" json:"unknown_ratio,omitempty"`
+	CorrelatedInputs     int32                  `protobuf:"varint,4,opt,name=correlated_inputs,json=correlatedInputs,proto3" json:"correlated_inputs,omitempty"`
+	LongPacketErrors     int32                  `protobuf:"varint,5,opt,name=long_packet_errors,json=longPacketErrors,proto3" json:"long_packet_errors,omitempty"`
+	EntropyEstimate      float64                `protobuf:"fixed64,6,opt,name=entropy_estimate,json=entropyEstimate,proto3" json:"entropy_estimate,omitempty"`
+	SchemaVersionedRatio float64                `protobuf:"fixed64,7,opt,name=schema_versioned_ratio,json=schemaVersionedRatio,proto3" json:"schema_versioned_ratio,omitempty"`
+	DecodeErrors         int32                  `protobuf:"varint,8,opt,name=decode_errors,json=decodeErrors,proto3" json:"decode_errors,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *QualityStats) Reset() {
+	*x = QualityStats{}
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QualityStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QualityStats) ProtoMessage() {}
+
+func (x *QualityStats) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_plugindev_proto_plugindev_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QualityStats.ProtoReflect.Descriptor instead.
+func (*QualityStats) Descriptor() ([]byte, []int) {
+	return file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *QualityStats) GetTotalInputs() int32 {
+	if x != nil {
+		return x.TotalInputs
+	}
+	return 0
+}
+
+func (x *QualityStats) GetUnknownInputs() int32 {
+	if x != nil {
+		return x.UnknownInputs
+	}
+	return 0
+}
+
+func (x *QualityStats) GetUnknownRatio() float64 {
+	if x != nil {
+		return x.UnknownRatio
+	}
+	return 0
+}
+
+func (x *QualityStats) GetCorrelatedInputs() int32 {
+	if x != nil {
+		return x.CorrelatedInputs
+	}
+	return 0
+}
+
+func (x *QualityStats) GetLongPacketErrors() int32 {
+	if x != nil {
+		return x.LongPacketErrors
+	}
+	return 0
+}
+
+func (x *QualityStats) GetEntropyEstimate() float64 {
+	if x != nil {
+		return x.EntropyEstimate
+	}
+	return 0
+}
+
+func (x *QualityStats) GetSchemaVersionedRatio() float64 {
+	if x != nil {
+		return x.SchemaVersionedRatio
+	}
+	return 0
+}
+
+func (x *QualityStats) GetDecodeErrors() int32 {
+	if x != nil {
+		return x.DecodeErrors
+	}
+	return 0
+}
+
 var File_pkg_plugindev_proto_plugindev_proto protoreflect.FileDescriptor
 
 const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
@@ -1344,10 +1618,11 @@ const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\bartifact\x18\x02 \x01(\v2\x1c.gta.plugindev.ArtifactStateR\bartifact\x12:\n" +
 	"\vdev_process\x18\x03 \x01(\v2\x19.gta.plugindev.DevProcessR\n" +
 	"devProcess\x12=\n" +
-	"\flast_attempt\x18\x04 \x01(\v2\x1a.gta.plugindev.LastAttemptR\vlastAttempt\"<\n" +
+	"\flast_attempt\x18\x04 \x01(\v2\x1a.gta.plugindev.LastAttemptR\vlastAttempt\"q\n" +
 	"\x0eExplainRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06action\x18\x02 \x01(\tR\x06action\"\x9a\x01\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x123\n" +
+	"\x06verify\x18\x03 \x01(\v2\x1b.gta.plugindev.VerifyResultR\x06verify\"\x9a\x01\n" +
 	"\x0eExplainFinding\x12/\n" +
 	"\x05error\x18\x01 \x01(\v2\x19.gta.plugindev.BuildErrorR\x05error\x12\x1a\n" +
 	"\bcategory\x18\x02 \x01(\tR\bcategory\x12\x17\n" +
@@ -1362,7 +1637,30 @@ const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\asummary\x18\x05 \x01(\tR\asummary\x129\n" +
 	"\bfindings\x18\x06 \x03(\v2\x1d.gta.plugindev.ExplainFindingR\bfindings\x12\x1f\n" +
 	"\vnext_action\x18\a \x01(\tR\n" +
-	"nextAction2\xa3\x04\n" +
+	"nextAction\"\x99\x01\n" +
+	"\fVerifyResult\x128\n" +
+	"\n" +
+	"violations\x18\x01 \x03(\v2\x18.gta.plugindev.ViolationR\n" +
+	"violations\x125\n" +
+	"\aquality\x18\x02 \x01(\v2\x1b.gta.plugindev.QualityStatsR\aquality\x12\x18\n" +
+	"\averdict\x18\x03 \x01(\tR\averdict\"\xbb\x01\n" +
+	"\tViolation\x12\x17\n" +
+	"\arule_id\x18\x01 \x01(\tR\x06ruleId\x12\x14\n" +
+	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\x1a\n" +
+	"\bseverity\x18\x03 \x01(\tR\bseverity\x12\x1c\n" +
+	"\tstatement\x18\x04 \x01(\tR\tstatement\x12\x17\n" +
+	"\adoc_ref\x18\x05 \x01(\tR\x06docRef\x12\x14\n" +
+	"\x05count\x18\x06 \x01(\x05R\x05count\x12\x16\n" +
+	"\x06sample\x18\a \x01(\tR\x06sample\"\xde\x02\n" +
+	"\fQualityStats\x12!\n" +
+	"\ftotal_inputs\x18\x01 \x01(\x05R\vtotalInputs\x12%\n" +
+	"\x0eunknown_inputs\x18\x02 \x01(\x05R\runknownInputs\x12#\n" +
+	"\runknown_ratio\x18\x03 \x01(\x01R\funknownRatio\x12+\n" +
+	"\x11correlated_inputs\x18\x04 \x01(\x05R\x10correlatedInputs\x12,\n" +
+	"\x12long_packet_errors\x18\x05 \x01(\x05R\x10longPacketErrors\x12)\n" +
+	"\x10entropy_estimate\x18\x06 \x01(\x01R\x0fentropyEstimate\x124\n" +
+	"\x16schema_versioned_ratio\x18\a \x01(\x01R\x14schemaVersionedRatio\x12#\n" +
+	"\rdecode_errors\x18\b \x01(\x05R\fdecodeErrors2\xa3\x04\n" +
 	"\tPluginDev\x12K\n" +
 	"\bScaffold\x12\x1e.gta.plugindev.ScaffoldRequest\x1a\x1f.gta.plugindev.ScaffoldResponse\x12T\n" +
 	"\vListPlugins\x12!.gta.plugindev.ListPluginsRequest\x1a\".gta.plugindev.ListPluginsResponse\x12B\n" +
@@ -1385,7 +1683,7 @@ func file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP() []byte {
 	return file_pkg_plugindev_proto_plugindev_proto_rawDescData
 }
 
-var file_pkg_plugindev_proto_plugindev_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_pkg_plugindev_proto_plugindev_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_pkg_plugindev_proto_plugindev_proto_goTypes = []any{
 	(*ScaffoldRequest)(nil),     // 0: gta.plugindev.ScaffoldRequest
 	(*ScaffoldResponse)(nil),    // 1: gta.plugindev.ScaffoldResponse
@@ -1407,6 +1705,9 @@ var file_pkg_plugindev_proto_plugindev_proto_goTypes = []any{
 	(*ExplainRequest)(nil),      // 17: gta.plugindev.ExplainRequest
 	(*ExplainFinding)(nil),      // 18: gta.plugindev.ExplainFinding
 	(*ExplainResponse)(nil),     // 19: gta.plugindev.ExplainResponse
+	(*VerifyResult)(nil),        // 20: gta.plugindev.VerifyResult
+	(*Violation)(nil),           // 21: gta.plugindev.Violation
+	(*QualityStats)(nil),        // 22: gta.plugindev.QualityStats
 }
 var file_pkg_plugindev_proto_plugindev_proto_depIdxs = []int32{
 	3,  // 0: gta.plugindev.ListPluginsResponse.plugins:type_name -> gta.plugindev.DiscoveredPlugin
@@ -1415,27 +1716,30 @@ var file_pkg_plugindev_proto_plugindev_proto_depIdxs = []int32{
 	13, // 3: gta.plugindev.StatusResponse.artifact:type_name -> gta.plugindev.ArtifactState
 	14, // 4: gta.plugindev.StatusResponse.dev_process:type_name -> gta.plugindev.DevProcess
 	15, // 5: gta.plugindev.StatusResponse.last_attempt:type_name -> gta.plugindev.LastAttempt
-	6,  // 6: gta.plugindev.ExplainFinding.error:type_name -> gta.plugindev.BuildError
-	18, // 7: gta.plugindev.ExplainResponse.findings:type_name -> gta.plugindev.ExplainFinding
-	0,  // 8: gta.plugindev.PluginDev.Scaffold:input_type -> gta.plugindev.ScaffoldRequest
-	2,  // 9: gta.plugindev.PluginDev.ListPlugins:input_type -> gta.plugindev.ListPluginsRequest
-	5,  // 10: gta.plugindev.PluginDev.Build:input_type -> gta.plugindev.BuildRequest
-	8,  // 11: gta.plugindev.PluginDev.Activate:input_type -> gta.plugindev.ActivateRequest
-	10, // 12: gta.plugindev.PluginDev.Deactivate:input_type -> gta.plugindev.DeactivateRequest
-	12, // 13: gta.plugindev.PluginDev.Status:input_type -> gta.plugindev.StatusRequest
-	17, // 14: gta.plugindev.PluginDev.Explain:input_type -> gta.plugindev.ExplainRequest
-	1,  // 15: gta.plugindev.PluginDev.Scaffold:output_type -> gta.plugindev.ScaffoldResponse
-	4,  // 16: gta.plugindev.PluginDev.ListPlugins:output_type -> gta.plugindev.ListPluginsResponse
-	7,  // 17: gta.plugindev.PluginDev.Build:output_type -> gta.plugindev.BuildResponse
-	9,  // 18: gta.plugindev.PluginDev.Activate:output_type -> gta.plugindev.ActivateResponse
-	11, // 19: gta.plugindev.PluginDev.Deactivate:output_type -> gta.plugindev.DeactivateResponse
-	16, // 20: gta.plugindev.PluginDev.Status:output_type -> gta.plugindev.StatusResponse
-	19, // 21: gta.plugindev.PluginDev.Explain:output_type -> gta.plugindev.ExplainResponse
-	15, // [15:22] is the sub-list for method output_type
-	8,  // [8:15] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	20, // 6: gta.plugindev.ExplainRequest.verify:type_name -> gta.plugindev.VerifyResult
+	6,  // 7: gta.plugindev.ExplainFinding.error:type_name -> gta.plugindev.BuildError
+	18, // 8: gta.plugindev.ExplainResponse.findings:type_name -> gta.plugindev.ExplainFinding
+	21, // 9: gta.plugindev.VerifyResult.violations:type_name -> gta.plugindev.Violation
+	22, // 10: gta.plugindev.VerifyResult.quality:type_name -> gta.plugindev.QualityStats
+	0,  // 11: gta.plugindev.PluginDev.Scaffold:input_type -> gta.plugindev.ScaffoldRequest
+	2,  // 12: gta.plugindev.PluginDev.ListPlugins:input_type -> gta.plugindev.ListPluginsRequest
+	5,  // 13: gta.plugindev.PluginDev.Build:input_type -> gta.plugindev.BuildRequest
+	8,  // 14: gta.plugindev.PluginDev.Activate:input_type -> gta.plugindev.ActivateRequest
+	10, // 15: gta.plugindev.PluginDev.Deactivate:input_type -> gta.plugindev.DeactivateRequest
+	12, // 16: gta.plugindev.PluginDev.Status:input_type -> gta.plugindev.StatusRequest
+	17, // 17: gta.plugindev.PluginDev.Explain:input_type -> gta.plugindev.ExplainRequest
+	1,  // 18: gta.plugindev.PluginDev.Scaffold:output_type -> gta.plugindev.ScaffoldResponse
+	4,  // 19: gta.plugindev.PluginDev.ListPlugins:output_type -> gta.plugindev.ListPluginsResponse
+	7,  // 20: gta.plugindev.PluginDev.Build:output_type -> gta.plugindev.BuildResponse
+	9,  // 21: gta.plugindev.PluginDev.Activate:output_type -> gta.plugindev.ActivateResponse
+	11, // 22: gta.plugindev.PluginDev.Deactivate:output_type -> gta.plugindev.DeactivateResponse
+	16, // 23: gta.plugindev.PluginDev.Status:output_type -> gta.plugindev.StatusResponse
+	19, // 24: gta.plugindev.PluginDev.Explain:output_type -> gta.plugindev.ExplainResponse
+	18, // [18:25] is the sub-list for method output_type
+	11, // [11:18] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_pkg_plugindev_proto_plugindev_proto_init() }
@@ -1449,7 +1753,7 @@ func file_pkg_plugindev_proto_plugindev_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_plugindev_proto_plugindev_proto_rawDesc), len(file_pkg_plugindev_proto_plugindev_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   20,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

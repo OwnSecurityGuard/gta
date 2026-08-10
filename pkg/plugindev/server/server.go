@@ -168,10 +168,45 @@ func mapLastAttempt(a *plugindev.LastAttempt) *pb.LastAttempt {
 	return out
 }
 
+// mapVerifyResult converts a gRPC VerifyResult into the domain type consumed by
+// plugin.explain (P3b). A nil wire message maps to a nil domain result so the
+// explain path falls back to the tracker's last recorded verify.
+func mapVerifyResult(v *pb.VerifyResult) *plugindev.VerifyResult {
+	if v == nil {
+		return nil
+	}
+	out := &plugindev.VerifyResult{Verdict: v.GetVerdict()}
+	for _, vv := range v.GetViolations() {
+		out.Violations = append(out.Violations, &plugindev.Violation{
+			RuleID:    vv.GetRuleId(),
+			Topic:     vv.GetTopic(),
+			Severity:  vv.GetSeverity(),
+			Statement: vv.GetStatement(),
+			DocRef:    vv.GetDocRef(),
+			Count:     int(vv.GetCount()),
+			Sample:    vv.GetSample(),
+		})
+	}
+	if q := v.GetQuality(); q != nil {
+		out.Quality = &plugindev.QualityStats{
+			TotalInputs:          int(q.GetTotalInputs()),
+			UnknownInputs:        int(q.GetUnknownInputs()),
+			UnknownRatio:         q.GetUnknownRatio(),
+			CorrelatedInputs:     int(q.GetCorrelatedInputs()),
+			LongPacketErrors:     int(q.GetLongPacketErrors()),
+			EntropyEstimate:      q.GetEntropyEstimate(),
+			SchemaVersionedRatio: q.GetSchemaVersionedRatio(),
+			DecodeErrors:         int(q.GetDecodeErrors()),
+		}
+	}
+	return out
+}
+
 func (s *Server) Explain(ctx context.Context, req *pb.ExplainRequest) (*pb.ExplainResponse, error) {
 	res, err := plugindev.Explain(ctx, &plugindev.ExplainRequest{
 		Name:   req.GetName(),
 		Action: req.GetAction(),
+		Verify: mapVerifyResult(req.GetVerify()),
 	})
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())

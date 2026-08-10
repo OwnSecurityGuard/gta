@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	pb "gta/pkg/internalipc/proto"
+	plugindevpb "gta/pkg/plugindev/proto"
 )
 
 // handleBuildPlugin compiles a scaffolded plugin project via the Developer
@@ -255,10 +257,15 @@ func nextAction(artifactState, runtimeState string) map[string]any {
 	}
 }
 
-// handleExplainPlugin attributes the most recent build/activate/deactivate
-// failure of a plugin via the Developer Plane (design §2.3 / P3a). It is a pure
-// forwarder — gta-mcp owns no attribution logic — and its ref is what
-// status_plugin's last_attempt.explain_ref points back to.
+// handleExplainPlugin attributes the most recent failure of a plugin via the
+// Developer Plane (design §2.3 / P3a / P3b). It is a pure forwarder — gta-mcp
+// owns no attribution logic — and its ref is what status_plugin's
+// last_attempt.explain_ref points back to.
+//
+// For decode-class attribution (P3b) the caller may pass a `verify` object
+// (the plugin.verify result: {violations, quality, verdict}); it is mapped onto
+// the gRPC VerifyResult and forwarded verbatim. When omitted, the Developer
+// Plane attributes the most recent result recorded by plugin.verify (P4).
 func (m *mcpCapture) handleExplainPlugin(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	if name == "" {
@@ -268,7 +275,15 @@ func (m *mcpCapture) handleExplainPlugin(ctx context.Context, req mcp.CallToolRe
 	if m.pdClient == nil {
 		return errorResult(fmt.Errorf("plugin dev not available (Developer Plane not configured)")), nil
 	}
-	resp, err := m.pdClient.Explain(ctx, name, action)
+
+	var pbVerify *plugindevpb.VerifyResult
+	if m, ok := req.Params.Arguments.(map[string]any); ok {
+		if raw, ok := m["verify"]; ok && raw != nil {
+			pbVerify = verifyResultFromArg(raw)
+		}
+	}
+
+	resp, err := m.pdClient.Explain(ctx, name, action, pbVerify)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -300,4 +315,65 @@ func (m *mcpCapture) handleExplainPlugin(ctx context.Context, req mcp.CallToolRe
 	}
 	out["findings"] = findings
 	return successResult(out), nil
+}
+
+// verifyResultFromArg maps the `verify` tool argument (an opaque JSON object
+// produced by plugin.verify: {violations, quality, verdict}) onto the gRPC
+// VerifyResult. It is strict only about shape, never about attribution — all
+// interpretation stays in the Developer Plane. An unparseable payload yields a
+// nil result, which makes the Developer Plane attribute its last recorded
+// verify instead.
+func verifyResultFromArg(raw any) *plugindevpb.VerifyResult {
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var v struct {
+		Violations []struct {
+			RuleID    string `json:"rule_id"`
+			Topic     string `json:"topic"`
+			Severity  string `json:"severity"`
+			Statement string `json:"statement"`
+			DocRef    string `json:"doc_ref"`
+			Count     int    `json:"count"`
+			Sample    string `json:"sample"`
+		} `json:"violations"`
+		Quality struct {
+			TotalInputs          int     `json:"total_inputs"`
+			UnknownInputs        int     `json:"unknown_inputs"`
+			UnknownRatio         float64 `json:"unknown_ratio"`
+			CorrelatedInputs     int     `json:"correlated_inputs"`
+			LongPacketErrors     int     `json:"long_packet_errors"`
+			EntropyEstimate      float64 `json:"entropy_estimate"`
+			SchemaVersionedRatio float64 `json:"schema_versioned_ratio"`
+			DecodeErrors         int     `json:"decode_errors"`
+		} `json:"quality"`
+		Verdict string `json:"verdict"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil
+	}
+	out := &plugindevpb.VerifyResult{Verdict: v.Verdict}
+	for _, vv := range v.Violations {
+		out.Violations = append(out.Violations, &plugindevpb.Violation{
+			RuleId:    vv.RuleID,
+			Topic:     vv.Topic,
+			Severity:  vv.Severity,
+			Statement: vv.Statement,
+			DocRef:    vv.DocRef,
+			Count:     int32(vv.Count),
+			Sample:    vv.Sample,
+		})
+	}
+	out.Quality = &plugindevpb.QualityStats{
+		TotalInputs:          int32(v.Quality.TotalInputs),
+		UnknownInputs:        int32(v.Quality.UnknownInputs),
+		UnknownRatio:         v.Quality.UnknownRatio,
+		CorrelatedInputs:     int32(v.Quality.CorrelatedInputs),
+		LongPacketErrors:     int32(v.Quality.LongPacketErrors),
+		EntropyEstimate:      v.Quality.EntropyEstimate,
+		SchemaVersionedRatio: v.Quality.SchemaVersionedRatio,
+		DecodeErrors:         int32(v.Quality.DecodeErrors),
+	}
+	return out
 }

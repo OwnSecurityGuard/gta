@@ -39,6 +39,10 @@ type Tracker struct {
 	lastTry    map[string]*LastAttempt
 	validated  map[string]*ValidatedProof
 	lastExplain map[string]*ExplainResult
+	// lastVerify holds the most recent plugin.verify result per plugin so
+	// plugin.explain (P3b) can attribute it without the AI re-supplying the
+	// corpus. It is the cross-plane proof's live counterpart to validated.
+	lastVerify map[string]*VerifyResult
 }
 
 // defaultTracker is the process-wide Developer Plane state.
@@ -55,6 +59,7 @@ func NewTracker() *Tracker {
 		lastTry:     make(map[string]*LastAttempt),
 		validated:   make(map[string]*ValidatedProof),
 		lastExplain: make(map[string]*ExplainResult),
+		lastVerify:  make(map[string]*VerifyResult),
 	}
 }
 
@@ -78,6 +83,7 @@ func (t *Tracker) RecordBuild(name string, dur time.Duration, resp *BuildRespons
 	if ok {
 		t.mu.Lock()
 		delete(t.validated, name)
+		delete(t.lastVerify, name)
 		t.mu.Unlock()
 	}
 }
@@ -135,6 +141,27 @@ func (t *Tracker) ExplainResultOf(name string) *ExplainResult {
 	defer t.mu.Unlock()
 	return t.lastExplain[name]
 }
+
+// RecordVerify stores the most recent plugin.verify result for a plugin so
+// plugin.explain (P3b) can attribute it later via action=verify. A successful
+// build clears it (RecordBuild), consistent with the validated invalidation
+// rule (design §2.2): a fresh binary invalidates prior verification evidence.
+func (t *Tracker) RecordVerify(name string, r *VerifyResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lastVerify[name] = r
+}
+
+// LastVerify returns the most recent verify result for a plugin, or nil.
+func (t *Tracker) LastVerify(name string) *VerifyResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastVerify[name]
+}
+
+// RecordVerify is the package-level entry point for plugin.verify (P4) to store
+// a plugin's latest verify result on the process-wide tracker.
+func RecordVerify(name string, r *VerifyResult) { defaultTracker.RecordVerify(name, r) }
 
 // trackProc records a launched process under name, replacing any prior entry,
 // and starts a goroutine that marks it exited (and drops it from the map) once

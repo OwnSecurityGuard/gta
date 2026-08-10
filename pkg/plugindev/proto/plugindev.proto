@@ -139,9 +139,14 @@ message StatusResponse {
 // ExplainRequest asks for the attribution of a plugin's most recent failure.
 message ExplainRequest {
   string name = 1;
-  // Optional: which attempt to explain (build | activate | deactivate). If
-  // empty, the latest recorded attempt is explained.
+  // Optional: which attempt to explain (build | activate | deactivate |
+  // verify). If empty, the latest recorded attempt is explained.
   string action = 2;
+  // Optional: an inline verify result to attribute (decode-class failures,
+  // P3b). When set, action is treated as "verify" and the result is classified
+  // directly. When omitted on a verify request, the most recent result
+  // recorded by plugin.verify (P4) via RecordVerify is used.
+  VerifyResult verify = 3;
 }
 
 // ExplainFinding is one attributed cause of failure.
@@ -171,4 +176,41 @@ message ExplainResponse {
   string summary = 5;
   repeated ExplainFinding findings = 6;
   string next_action = 7;  // human-readable next step
+}
+
+// VerifyResult is the output of plugin.verify (P4): SDK contract violations,
+// gta-side quality statistics, and an overall verdict. plugin.explain (P3b)
+// consumes it to attribute decode-class failures (all-unknown / wrong framing /
+// suspected encryption / suspected missing reassembly).
+message VerifyResult {
+  repeated Violation violations = 1;
+  QualityStats quality = 2;
+  string verdict = 3; // pass | warn | fail
+}
+
+// Violation is a single SDK contract rule the verify corpus tripped. rule_id is
+// the shared vocabulary defined in contract.yaml (rules: section) and reused by
+// brief / verify / explain.
+message Violation {
+  string rule_id = 1;
+  string topic = 2;
+  string severity = 3;
+  string statement = 4;
+  string doc_ref = 5;
+  int32 count = 6;
+  string sample = 7;
+}
+
+// QualityStats holds the corpus-level signals plugin.explain classifies. All
+// fields are optional; a missing QualityStats means no statistical evidence is
+// available and explain falls back to violations only.
+message QualityStats {
+  int32 total_inputs = 1;
+  int32 unknown_inputs = 2;
+  double unknown_ratio = 3;
+  int32 correlated_inputs = 4;
+  int32 long_packet_errors = 5;
+  double entropy_estimate = 6;
+  double schema_versioned_ratio = 7;
+  int32 decode_errors = 8;
 }

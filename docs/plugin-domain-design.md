@@ -147,10 +147,10 @@ offline → registered → active → bound
 
 ```yaml
 rules:
-  - id: payload-is-l7
+  - id: payload-framing-by-link-type
     topic: framing
     severity: error
-    statement: "DecodeRequest.payload is L7 application data, not a complete network frame"
+    statement: "DecodeRequest.payload is a complete link-layer frame for pcap sources; strip by link_type (framing.ExtractL7) before parsing L7"
     doc_ref: "Agents.md#8.1"
   - id: done-required
     topic: lifecycle

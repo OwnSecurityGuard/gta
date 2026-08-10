@@ -2,6 +2,7 @@ package plugindev
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -57,8 +58,11 @@ func TestExplainVerifyAllUnknown(t *testing.T) {
 }
 
 // TestExplainVerifyWrongFraming locks in the "错 framing" attribution: an SDK
-// payload-is-l7 violation must surface a wrong-framing finding pointing back at
-// the same rule_id so the AI can cross-reference contract.yaml.
+// payload-framing-by-link-type violation must surface a wrong-framing finding
+// pointing back at the same rule_id so the AI can cross-reference contract.yaml.
+// The violation means the decoder treated a full link-layer frame as L7 (did NOT
+// strip), so the advice must be to add framing — the opposite of the old
+// payload-is-l7 guidance.
 func TestExplainVerifyWrongFraming(t *testing.T) {
 	res, err := Explain(context.Background(), &ExplainRequest{
 		Name:   "wrong-framing",
@@ -66,7 +70,7 @@ func TestExplainVerifyWrongFraming(t *testing.T) {
 		Verify: &VerifyResult{
 			Verdict: "fail",
 			Violations: []*Violation{
-				{RuleID: "payload-is-l7", Topic: "framing", Severity: "error", Statement: "payload is L7"},
+				{RuleID: "payload-framing-by-link-type", Topic: "framing", Severity: "error", Statement: "payload is full frame, strip by link_type"},
 			},
 		},
 	})
@@ -77,8 +81,11 @@ func TestExplainVerifyWrongFraming(t *testing.T) {
 	if f == nil {
 		t.Fatalf("expected wrong-framing finding, got %+v", res.Findings)
 	}
-	if f.RuleID != "payload-is-l7" {
-		t.Fatalf("expected rule_id payload-is-l7, got %q", f.RuleID)
+	if f.RuleID != "payload-framing-by-link-type" {
+		t.Fatalf("expected rule_id payload-framing-by-link-type, got %q", f.RuleID)
+	}
+	if f.Fix == "" || !strings.Contains(f.Fix, "ExtractL7") {
+		t.Fatalf("wrong-framing fix must tell the dev to strip via framing.ExtractL7, got %q", f.Fix)
 	}
 }
 
@@ -113,7 +120,7 @@ func TestExplainVerifySuspectedEncryption(t *testing.T) {
 
 // TestExplainVerifySuspectedReassembly locks in the "疑似缺流重组" attribution:
 // many inputs that produced events but were never correlated must surface a
-// suspected-reassembly finding referencing correlation-only-when-known.
+// suspected-reassembly finding referencing tcp-reassembly-required.
 func TestExplainVerifySuspectedReassembly(t *testing.T) {
 	res, err := Explain(context.Background(), &ExplainRequest{
 		Name:   "reasm",
@@ -134,8 +141,8 @@ func TestExplainVerifySuspectedReassembly(t *testing.T) {
 	if f == nil {
 		t.Fatalf("expected suspected-reassembly finding, got %+v", res.Findings)
 	}
-	if f.RuleID != "correlation-only-when-known" {
-		t.Fatalf("expected rule_id correlation-only-when-known, got %q", f.RuleID)
+	if f.RuleID != "tcp-reassembly-required" {
+		t.Fatalf("expected rule_id tcp-reassembly-required, got %q", f.RuleID)
 	}
 }
 

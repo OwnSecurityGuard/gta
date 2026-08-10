@@ -1,0 +1,50 @@
+api_version: gta.decoder/v2
+name: godot-gateway
+protocol: godot-gateway
+protocol_version: "1"
+type: decoder
+hints:
+  - http
+  - json
+  - rest
+  - port:8088
+  - godot
+  - mmo
+  - ekonia
+event:
+  fields:
+    direction: { type: string, enum: [client_to_server, server_to_client, unknown] }
+    msg_name:  { type: string }
+    is_push:   { type: boolean }
+  data:
+    schema:
+      fields:
+        endpoint:          { type: string }
+        method:            { type: string }
+        path:              { type: string }
+        account_username:  { type: string }
+        account_password:  { type: string }
+        client_version:    { type: string }
+        token:             { type: string }
+        world_id:          { type: int }
+        account_id:        { type: int }
+        character_id:      { type: int }
+        character_name:    { type: string }
+        skin:              { type: int }
+        session_id:        { type: string }
+        account_name:      { type: string }
+        world_address:     { type: string }
+        world_port:        { type: int }
+        auth_token:        { type: string }
+        error_name:        { type: string }
+        endpoint_inferred: { type: boolean }
+meta:
+  author: workbuddy
+  description: >-
+    Decoder for the Godot Tiny MMO (Ekonia) client<->gateway auth/routing traffic.
+    Gateway speaks plain HTTP/1.1 REST with JSON bodies. Decodes the 8 /v1/*
+    endpoints, expanding wire-short keys (a-u, a-p, t-id, w-id, c-id, c-v) into
+    readable fields and mapping server error codes to names.
+  game: godot-tiny-mmo
+  transport: http-json
+  decoded_directions: [client_to_server, server_to_client]

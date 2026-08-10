@@ -188,17 +188,18 @@ func explainVerifyRequest(req *ExplainRequest) (*ExplainResult, error) {
 func explainVerify(result *VerifyResult) []*ExplainFinding {
 	var findings []*ExplainFinding
 
-	// 1) Wrong framing — driven by SDK violations (payload-is-l7 /
-	// link-type-is-provenance). This is the highest-signal finding because it
-	// comes straight from the contract checker, not a heuristic.
+	// 1) Wrong framing — driven by SDK violations on the framing rules.
+	// These fire when a decoder treats a full link-layer frame as L7 (did NOT
+	// strip by link_type / reassemble). This is the highest-signal finding
+	// because it comes straight from the contract checker, not a heuristic.
 	for _, v := range result.Violations {
 		switch v.RuleID {
-		case "payload-is-l7", "link-type-is-provenance":
+		case "payload-framing-by-link-type", "link-type-selects-framing":
 			findings = append(findings, &ExplainFinding{
 				Category: "wrong-framing",
-				RuleID:   "payload-is-l7",
-				Why: "SDK 校验（" + v.RuleID + "）判定解码器按 link_type 又剥了一次以太网/IP/TCP 头，真实业务字节被吃掉",
-				Fix:      "删除剥头逻辑：DecodeRequest.payload 已经是 L7 应用层数据（见 contract.yaml payload-is-l7 / Agents.md#8.1）",
+				RuleID:   v.RuleID,
+				Why: "SDK 校验（" + v.RuleID + "）判定解码器把完整链路层帧当成了 L7：pcap 类来源交付的是带链路/网络/传输头的完整帧，需要先按 link_type 剥头、再按流重组，而不是直接当应用层字节解析",
+				Fix:      "用 framing.ExtractL7(payload, link_type) 按 link_type 剥头，再用 framing.NewReassembler 做 TCP 重组；只有 ProxyPayload(1001)/TLSPlaintext(1002) 才是纯 L7（见 contract.yaml payload-framing-by-link-type）",
 			})
 		}
 	}
@@ -218,15 +219,15 @@ func explainVerify(result *VerifyResult) []*ExplainFinding {
 		findings = append(findings, &ExplainFinding{
 			Category: "all-unknown",
 			RuleID:   "inspect-bytes-first",
-			Why:      "解码器对全部 " + strconv.Itoa(q.TotalInputs) + " 个输入都未产出任何事件（全 unknown），说明 payload 没被正确识别为 L7 数据",
-			Fix:      "先用 sample_bytes 看真实首字节与长度分布再决定 framing；记住 payload 已是 L7（payload-is-l7），不要再按 link_type 剥头",
+			Why: "解码器对全部 " + strconv.Itoa(q.TotalInputs) + " 个输入都未产出任何事件（全 unknown）。典型根因是剥头/重组缺失：把带链路层头的完整帧直接当 L7 解析，业务字节整体错位导致 0 命中",
+			Fix: "①先用 sample_bytes_plugin 看真实首字节确认 link_type 与帧结构；②用 framing.ExtractL7 按 link_type 剥头；③TCP 类协议接 framing.Reassembler 重组。不要假设 payload 已是 L7（只有 ProxyPayload/TLSPlaintext 才是）",
 		})
 	} else if unknownRatio >= AllUnknownRatioThreshold {
 		findings = append(findings, &ExplainFinding{
 			Category: "all-unknown",
 			RuleID:   "inspect-bytes-first",
-			Why:      fmt.Sprintf("%.0f%% 的输入未能解码（全 unknown），解码器基本没认出任何 L7 结构", unknownRatio*100),
-			Fix:      "先用 sample_bytes 看真实首字节与长度分布再决定 framing；记住 payload 已是 L7（payload-is-l7），不要再按 link_type 剥头",
+			Why: fmt.Sprintf("%.0f%% 的输入未能解码（全 unknown），大概率解码器没按 link_type 剥头/重组，把完整帧当 L7 解析", unknownRatio*100),
+			Fix:      "先用 sample_bytes_plugin 看真实首字节；用 framing.ExtractL7 剥头 + framing.Reassembler 重组；TCP body 恒空往往是缺重组的信号",
 		})
 	}
 
@@ -247,9 +248,9 @@ func explainVerify(result *VerifyResult) []*ExplainFinding {
 	if q.TotalInputs > 1 && q.CorrelatedInputs == 0 && (q.TotalInputs-q.UnknownInputs) > 0 {
 		findings = append(findings, &ExplainFinding{
 			Category: "suspected-reassembly",
-			RuleID:   "correlation-only-when-known",
+			RuleID:   "tcp-reassembly-required",
 			Why: fmt.Sprintf("同一会话被切成 %d 个 input，但没有任何 correlation_key 串联，疑似缺流重组或粘包未切分", q.TotalInputs),
-			Fix: "按流重组后再按长度前缀/分隔符切分消息；只有在确实可推断时才填 correlation_key（correlation-only-when-known）",
+			Fix: "按流重组后再按长度前缀/分隔符切分消息（用 framing.NewReassembler）；只有在确实可推断时才填 correlation_key（correlation-only-when-known）",
 		})
 	}
 
@@ -264,9 +265,9 @@ func verifyNextAction(findings []*ExplainFinding) string {
 	}
 	switch findings[0].Category {
 	case "wrong-framing":
-		return "remove the header-stripping logic (payload is already L7), then re-verify"
+		return "add framing.ExtractL7 + Reassembler to strip by link_type (payload is a full frame, NOT L7), then re-verify"
 	case "all-unknown":
-		return "run sample_bytes to inspect real bytes, then fix framing"
+		return "run sample_bytes_plugin to inspect real bytes, then add framing.ExtractL7 + Reassembler"
 	case "suspected-encryption":
 		return "confirm whether the stream is encrypted/compressed; decrypt first or mark schema opaque"
 	case "suspected-reassembly":

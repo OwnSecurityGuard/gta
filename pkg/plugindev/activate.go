@@ -111,7 +111,7 @@ func Deactivate(ctx context.Context, req *DeactivateRequest) (*DeactivateRespons
 	lp := defaultTracker.proc(req.Name)
 	if lp == nil {
 		defaultTracker.RecordDeactivate(req.Name, 0, false, "no dev-launched process for "+req.Name)
-		return &DeactivateResponse{OK: false, Message: "no dev-launched process for " + req.Name + " (use deregister_plugin for externally-started plugins)"}, nil
+		return &DeactivateResponse{OK: false, Message: "no process was launched by the Developer Plane for " + req.Name + " — activate_plugin only manages processes it started. For a plugin you launched yourself, stop it directly, or call deregister_plugin to remove it from the registry."}, nil
 	}
 	start := time.Now()
 	if err := lp.cmd.Process.Kill(); err != nil {

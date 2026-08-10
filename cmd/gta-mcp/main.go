@@ -1750,7 +1750,7 @@ func main() {
 	), capture.handleListPlugins)
 
 	s.AddTool(mcp.NewTool("create_plugin",
-		mcp.WithDescription("Scaffold a new decoder plugin project (plugin.yaml + main.go + go.mod) from templates. The skeleton registers itself via github.com/OwnSecurityGuard/gta-plugin-sdk and is ready to compile after adjusting the replace path (point it at the local gta-plugin-sdk repo or the published remote module)."),
+		mcp.WithDescription("Scaffold a new decoder plugin project (plugin.yaml + main.go + go.mod) from templates. The skeleton registers itself via github.com/OwnSecurityGuard/gta-plugin-sdk. IMPORTANT: the generated decoder receives a COMPLETE link-layer frame (not L7) for pcap sources — strip headers with framing.ExtractL7 and reassemble TCP with framing.Reassembler before parsing. Ready to compile after adjusting the replace path (point it at the local gta-plugin-sdk repo or the published remote module)."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name, kebab-case, e.g. my-game-decoder")),
 		mcp.WithString("protocol", mcp.Required(), mcp.Description("Protocol the plugin decodes, e.g. my_game")),
 		mcp.WithString("protocol_version", mcp.Description("Optional protocol version, e.g. game/v3")),
@@ -1791,7 +1791,7 @@ func main() {
 	), capture.handleGetPluginContract)
 
 	s.AddTool(mcp.NewTool("get_plugin_dev_guide",
-		mcp.WithDescription("Return the full plugin development guide (markdown). Covers architecture, plugin.yaml schema, Decode RPC contract, lifecycle, and best practices."),
+		mcp.WithDescription("Return the full plugin development guide (markdown). Covers architecture, plugin.yaml schema, Decode RPC contract, lifecycle, framing, and best practices. KEY TAKEAWAY: for pcap sources DecodeRequest.payload is a COMPLETE link-layer frame (link header + IP + TCP/UDP + app bytes), NOT pre-stripped L7 — strip it per link_type with framing.ExtractL7 and reassemble TCP with framing.Reassembler first. Only ProxyPayload(1001)/TLSPlaintext(1002) are already L7. Read this BEFORE writing any decoder."),
 	), capture.handleGetPluginDevGuide)
 
 	s.AddTool(mcp.NewTool("list_registered_plugins",

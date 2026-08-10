@@ -22,6 +22,13 @@ type fakeEngine struct {
 	decodeResult  DecodeRawPacketsResult
 	decodeErr     error
 	decodeLastReq DecodeRawPacketsRequest
+
+	verifyResult  VerifyResult
+	verifyErr     error
+	verifyLastReq VerifyRequest
+	sampleResult  SampleBytesResult
+	sampleErr     error
+	sampleLastReq SampleBytesRequest
 }
 
 func (f *fakeEngine) StartSession(ctx context.Context, req StartSessionRequest) (StartSessionResult, error) {
@@ -45,6 +52,14 @@ func (f *fakeEngine) DecodeRawPackets(ctx context.Context, req DecodeRawPacketsR
 }
 func (f *fakeEngine) TestPlugin(ctx context.Context, req TestPluginRequest) (TestPluginResult, error) {
 	return TestPluginResult{}, nil
+}
+func (f *fakeEngine) Verify(ctx context.Context, req VerifyRequest) (VerifyResult, error) {
+	f.verifyLastReq = req
+	return f.verifyResult, f.verifyErr
+}
+func (f *fakeEngine) SampleBytes(ctx context.Context, req SampleBytesRequest) (SampleBytesResult, error) {
+	f.sampleLastReq = req
+	return f.sampleResult, f.sampleErr
 }
 func (f *fakeEngine) SetSessionPlugin(ctx context.Context, sessionID, plugin string) (string, error) {
 	return plugin, nil

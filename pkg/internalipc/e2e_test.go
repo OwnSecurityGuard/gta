@@ -139,3 +139,9 @@ func (f *fakeCaptureEngine) SubscribePlugins(ctx context.Context) (<-chan captur
 func (f *fakeCaptureEngine) TestPlugin(ctx context.Context, req capturecontrol.TestPluginRequest) (capturecontrol.TestPluginResult, error) {
 	return capturecontrol.TestPluginResult{}, nil
 }
+func (f *fakeCaptureEngine) Verify(ctx context.Context, req capturecontrol.VerifyRequest) (capturecontrol.VerifyResult, error) {
+	return capturecontrol.VerifyResult{Verdict: "pass"}, nil
+}
+func (f *fakeCaptureEngine) SampleBytes(ctx context.Context, req capturecontrol.SampleBytesRequest) (capturecontrol.SampleBytesResult, error) {
+	return capturecontrol.SampleBytesResult{}, nil
+}

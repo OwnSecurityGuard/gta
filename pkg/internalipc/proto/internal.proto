@@ -35,6 +35,13 @@ service CaptureControl {
   // 原始包字节仅进程内使用，绝不回传前端；结果不落库（隔离测试，不污染会话真实解码数据）。
   // 该能力不暴露原始包，因此无需 --enable-raw-debug 门控。
   rpc TestPlugin(TestPluginRequest) returns (TestPluginResponse);
+  // Verify 用指定插件对离线会话的 raw_packets 解码并做契约+质量校验，
+  // 产出 violations（引 SDK checker，带 rule_id）+ quality（gta 统计）+ verdict。
+  // 仅统计不落库；validated 证明写入 Developer Plane 的 Tracker（跨平面）。
+  rpc Verify(VerifyRequest) returns (VerifyResponse);
+  // SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
+  // 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
+  rpc SampleBytes(SampleBytesRequest) returns (SampleBytesResponse);
 }
 
 // DecodeRawPacketsRequest 离线解码请求。
@@ -94,6 +101,84 @@ message TestPluginResponse {
   map<string, int64> type_histogram = 4;   // 事件类型 → 计数（全量）
   repeated TestEventLite sample_events = 5;
   repeated TestErrorLite error_samples = 6;
+}
+
+// VerifyRequest 插件验证请求（契约+质量校验）。参数与 TestPlugin 同源：
+// 指定会话 + 插件，可选 protocol/src/dst/limit 过滤。
+message VerifyRequest {
+  string session_id = 1;
+  string plugin = 2;
+  string protocol = 3;
+  string src = 4;
+  string dst = 5;
+  int64 limit = 6;        // 0 = 全部
+}
+
+// VerifyViolation 单条契约违规（源自 SDK contract checker，带 rule_id）。
+message VerifyViolation {
+  string rule_id = 1;
+  string topic = 2;
+  string severity = 3;
+  string statement = 4;
+  string doc_ref = 5;
+  int32 count = 6;
+  string sample = 7;
+}
+
+// VerifyQuality gta 侧语料级统计（与 plugin.explain 共享判据）。
+message VerifyQuality {
+  int64 total_inputs = 1;
+  int64 unknown_inputs = 2;
+  double unknown_ratio = 3;
+  int64 correlated_inputs = 4;
+  int64 long_packet_errors = 5;
+  double entropy_estimate = 6;
+  double schema_versioned_ratio = 7;
+  int64 decode_errors = 8;
+}
+
+// VerifyResponse 验证结论：violations + quality + verdict，外加溯源字段。
+message VerifyResponse {
+  string verdict = 1;                 // pass | warn | fail
+  repeated VerifyViolation violations = 2;
+  VerifyQuality quality = 3;
+  string verify_run_id = 4;
+  string session_id = 5;
+  int64 at_unix = 6;
+}
+
+// SampleBytesRequest 取证取样请求。limit/max_bytes 为请求值，服务端封顶
+// （20 包 / 64 字节），审计记真实返回量。
+message SampleBytesRequest {
+  string session_id = 1;
+  string plugin = 2;          // 仅用于审计 actor 标注
+  int64 limit = 3;            // 请求包上限（服务端封顶 20）
+  int32 max_bytes = 4;        // 每包字节上限（服务端封顶 64）
+}
+
+// SampledPacket 单个原始包的事实快照（无解释）。
+message SampledPacket {
+  string raw_packet_id = 1;
+  string src = 2;
+  string dst = 3;
+  int64 length = 4;
+  string hex = 5;             // 截断后的 hexdump
+  double entropy = 6;         // 该包熵估计（bits/byte）
+  int32 first_byte = 7;
+}
+
+// SampleBytesResponse 取证事实 + 审计回执。
+message SampleBytesResponse {
+  string session_id = 1;
+  int64 requested_packets = 2;
+  int64 returned_packets = 3;
+  int64 returned_bytes = 4;
+  bool truncated = 5;
+  repeated SampledPacket packets = 6;
+  map<int32, int64> length_histogram = 7;        // 长度桶 → 计数
+  map<int32, int64> first_byte_distribution = 8; // 首字节 → 计数
+  double mean_entropy = 9;                        // 整体熵估计
+  int64 audit_id = 10;                            // plugin_debug_access 行 id
 }
 
 message PcapLiveConfig {

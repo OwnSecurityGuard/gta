@@ -221,7 +221,7 @@ func explainVerify(result *VerifyResult) []*ExplainFinding {
 			Why:      "解码器对全部 " + strconv.Itoa(q.TotalInputs) + " 个输入都未产出任何事件（全 unknown），说明 payload 没被正确识别为 L7 数据",
 			Fix:      "先用 sample_bytes 看真实首字节与长度分布再决定 framing；记住 payload 已是 L7（payload-is-l7），不要再按 link_type 剥头",
 		})
-	} else if unknownRatio >= allUnknownRatioThreshold {
+	} else if unknownRatio >= AllUnknownRatioThreshold {
 		findings = append(findings, &ExplainFinding{
 			Category: "all-unknown",
 			RuleID:   "inspect-bytes-first",
@@ -231,7 +231,7 @@ func explainVerify(result *VerifyResult) []*ExplainFinding {
 	}
 
 	// 3) Suspected encryption/compression — high entropy + majority undecodable.
-	if q.EntropyEstimate >= highEntropyThreshold && unknownRatio >= encryptionUnknownRatioThreshold {
+	if q.EntropyEstimate >= HighEntropyThreshold && unknownRatio >= EncryptionUnknownRatioThreshold {
 		findings = append(findings, &ExplainFinding{
 			Category: "suspected-encryption",
 			RuleID:   "inspect-bytes-first",

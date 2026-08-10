@@ -95,8 +95,9 @@ func TestControlStore_UpdateNonExistent(t *testing.T) {
 	}
 }
 
-// 确保 ControlStore 不污染事件数据库的表（它只应有 sessions 表）。
-func TestControlStore_OnlySessionsTable(t *testing.T) {
+// 确保 ControlStore 只承载控制面元数据，不混入任何事件/解码数据表。
+// 白名单：sessions（会话元数据）、plugin_debug_access（sample_bytes 审计，设计 §6）。
+func TestControlStore_OnlyControlPlaneTables(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "control.db")
 	cs, err := NewControlStore(db)
 	if err != nil {
@@ -117,11 +118,25 @@ func TestControlStore_OnlySessionsTable(t *testing.T) {
 		rows.Scan(&name)
 		tables = append(tables, name)
 	}
-	// 应只有 sessions 表（sqlite_sequence 自动生成）
+	allowed := map[string]bool{
+		"sessions":            true,
+		"plugin_debug_access": true,
+		"sqlite_sequence":     true, // AUTOINCREMENT 自动生成
+	}
 	for _, name := range tables {
-		if name != "sessions" && name != "sqlite_sequence" {
+		if !allowed[name] {
 			t.Errorf("unexpected table %q in control store", name)
 		}
+	}
+	// 审计表必须存在，否则 sample_bytes 无处落账。
+	var seenAudit bool
+	for _, name := range tables {
+		if name == "plugin_debug_access" {
+			seenAudit = true
+		}
+	}
+	if !seenAudit {
+		t.Error("plugin_debug_access table missing from control store")
 	}
 }
 

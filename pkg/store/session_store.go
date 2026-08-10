@@ -59,6 +59,25 @@ CREATE TABLE IF NOT EXISTS sessions (
 	if _, err := cs.db.Exec(schema); err != nil {
 		return err
 	}
+	// plugin_debug_access 审计表（设计 §6）：sample_bytes 等取证工具的访问留痕。
+	// 仅追加，无 UPDATE/DELETE 路径；写入方唯一为 Runtime Plane（pipeline /
+	// 内嵌的 Developer Plane），避免与 MCP 进程加剧 SQLite 锁竞争。
+	auditSchema := `
+CREATE TABLE IF NOT EXISTS plugin_debug_access (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    at                DATETIME NOT NULL,
+    actor             TEXT,
+    tool              TEXT,
+    plugin            TEXT,
+    session_id        TEXT,
+    requested_packets INTEGER,
+    returned_packets  INTEGER,
+    returned_bytes    INTEGER,
+    truncated         INTEGER
+);`
+	if _, err := cs.db.Exec(auditSchema); err != nil {
+		return err
+	}
 	if _, err := cs.db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		return err
 	}

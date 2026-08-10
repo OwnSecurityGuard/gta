@@ -1929,6 +1929,28 @@ func main() {
 		mcp.WithNumber("sample_limit", mcp.Description("Optional: max number of decoded events to return as samples, default 50")),
 	), capture.handleTestPlugin)
 
+	// verify_plugin：契约+质量校验，产出 verdict 并把 artifact.state 升到 validated。
+	// 纯转发到 Runtime Plane（gta-pipeline）；MCP 零归因逻辑。
+	s.AddTool(mcp.NewTool("verify_plugin",
+		mcp.WithDescription("Verify a plugin by decoding an offline session's raw packets and checking contract violations (SDK checker, each tagged with a contract.yaml rule_id) plus gta-side quality stats (unknown ratio, entropy, correlation). Returns a verdict: pass | warn | fail, and on a non-fail verdict promotes the plugin's artifact.state to validated (with a proof). Pure forwarder to the Runtime Plane; MCP owns no attribution logic."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Stopped session whose raw packets to verify against")),
+		mcp.WithString("plugin", mcp.Required(), mcp.Description("Plugin name to verify, e.g. http or tcp")),
+		mcp.WithString("protocol", mcp.Description("Optional: only verify packets with this protocol, e.g. tcp")),
+		mcp.WithString("src", mcp.Description("Optional: only verify packets whose source matches (substring)")),
+		mcp.WithString("dst", mcp.Description("Optional: only verify packets whose destination matches (substring)")),
+		mcp.WithNumber("limit", mcp.Description("Optional: max number of raw packets to verify, 0 means all")),
+	), capture.handleVerifyPlugin)
+
+	// sample_bytes_plugin：取证取样（事实），并在 plugin_debug_access 留审计。
+	// 硬上限 20 包 / 64 字节不可突破；审计记真实返回量。纯转发到 Runtime Plane。
+	s.AddTool(mcp.NewTool("sample_bytes_plugin",
+		mcp.WithDescription("Sample the first bytes of a session's raw packets as FACTS only (hexdump, length histogram, first-byte distribution, entropy). No interpretation, no code. Every call is recorded in the plugin_debug_access audit table with the REAL returned packet/byte counts (not the requested ones). Hard cap 20 packets / 64 bytes, not bypassable via parameters. Pure forwarder to the Runtime Plane; MCP reads nothing and writes nothing."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session to sample from")),
+		mcp.WithString("plugin", mcp.Description("Optional: plugin name, recorded in the audit row only")),
+		mcp.WithNumber("limit", mcp.Description("Optional: requested packet cap (server caps at 20)")),
+		mcp.WithNumber("max_bytes", mcp.Description("Optional: requested bytes per packet (server caps at 64)")),
+	), capture.handleSampleBytesPlugin)
+
 	s.AddTool(mcp.NewTool("list_sessions",
 		mcp.WithDescription("List all capture sessions with their metadata"),
 	), capture.handleListSessions)

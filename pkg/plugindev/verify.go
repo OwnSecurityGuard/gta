@@ -63,15 +63,16 @@ type QualityStats struct {
 }
 
 // Decode-attribution thresholds (P3b). Centralised so tests and future tuning
-// share one source of truth.
+// share one source of truth. Exported because pkg/plugin/quality (P4) reuses
+// them when computing the verdict.
 const (
-	// allUnknownRatioThreshold: at/above this share of undecodable inputs the
+	// AllUnknownRatioThreshold: at/above this share of undecodable inputs the
 	// decoder is treated as producing all-unknown output.
-	allUnknownRatioThreshold = 0.95
-	// encryptionUnknownRatioThreshold: combined with high entropy, this share
+	AllUnknownRatioThreshold = 0.95
+	// EncryptionUnknownRatioThreshold: combined with high entropy, this share
 	// of undecodable inputs triggers the suspected-encryption finding.
-	encryptionUnknownRatioThreshold = 0.5
-	// highEntropyThreshold bits/byte: payload entropy at/above this, together
+	EncryptionUnknownRatioThreshold = 0.5
+	// HighEntropyThreshold bits/byte: payload entropy at/above this, together
 	// with a majority of undecodable inputs, looks encrypted/compressed.
-	highEntropyThreshold = 7.5
+	HighEntropyThreshold = 7.5
 )

@@ -38,6 +38,9 @@ type rawDecodeResult struct {
 	Dst    string
 	Events []*event.Event
 	Err    error
+	// Payload 是该原始包的未解码字节，仅供进程内统计（熵估计）使用，
+	// 绝不外传前端（隐私安全，见 TestPlugin 注释）。
+	Payload []byte
 }
 
 // forEachRawDecoded 分批读取会话的 raw_packets 并在进程内解码，
@@ -77,15 +80,15 @@ func forEachRawDecoded(ctx context.Context, st *store.SQLiteStore, dispatcher *d
 		for _, r := range rows {
 			pkt, perr := rawRowToPacket(r)
 			if perr != nil {
-				onResult(rawDecodeResult{RawID: r.ID, Src: r.Src, Dst: r.Dst, Err: perr})
+				onResult(rawDecodeResult{RawID: r.ID, Src: r.Src, Dst: r.Dst, Payload: r.Payload, Err: perr})
 				continue
 			}
 			ev, derr := dispatcher.DecodeV2(ctx, pkt)
 			if derr != nil {
-				onResult(rawDecodeResult{RawID: r.ID, Src: r.Src, Dst: r.Dst, Err: derr})
+				onResult(rawDecodeResult{RawID: r.ID, Src: r.Src, Dst: r.Dst, Payload: r.Payload, Err: derr})
 				continue
 			}
-			onResult(rawDecodeResult{RawID: r.ID, Src: r.Src, Dst: r.Dst, Events: ev})
+			onResult(rawDecodeResult{RawID: r.ID, Src: r.Src, Dst: r.Dst, Payload: r.Payload, Events: ev})
 		}
 		offset += len(rows)
 		if len(rows) < batchLimit {

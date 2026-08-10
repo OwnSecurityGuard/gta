@@ -31,6 +31,8 @@ const (
 	CaptureControl_SetSessionPlugin_FullMethodName    = "/gta.internalipc.CaptureControl/SetSessionPlugin"
 	CaptureControl_WatchPlugins_FullMethodName        = "/gta.internalipc.CaptureControl/WatchPlugins"
 	CaptureControl_TestPlugin_FullMethodName          = "/gta.internalipc.CaptureControl/TestPlugin"
+	CaptureControl_Verify_FullMethodName              = "/gta.internalipc.CaptureControl/Verify"
+	CaptureControl_SampleBytes_FullMethodName         = "/gta.internalipc.CaptureControl/SampleBytes"
 )
 
 // CaptureControlClient is the client API for CaptureControl service.
@@ -69,6 +71,13 @@ type CaptureControlClient interface {
 	// 原始包字节仅进程内使用，绝不回传前端；结果不落库（隔离测试，不污染会话真实解码数据）。
 	// 该能力不暴露原始包，因此无需 --enable-raw-debug 门控。
 	TestPlugin(ctx context.Context, in *TestPluginRequest, opts ...grpc.CallOption) (*TestPluginResponse, error)
+	// Verify 用指定插件对离线会话的 raw_packets 解码并做契约+质量校验，
+	// 产出 violations（引 SDK checker，带 rule_id）+ quality（gta 统计）+ verdict。
+	// 仅统计不落库；validated 证明写入 Developer Plane 的 Tracker（跨平面）。
+	Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*VerifyResponse, error)
+	// SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
+	// 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
+	SampleBytes(ctx context.Context, in *SampleBytesRequest, opts ...grpc.CallOption) (*SampleBytesResponse, error)
 }
 
 type captureControlClient struct {
@@ -208,6 +217,26 @@ func (c *captureControlClient) TestPlugin(ctx context.Context, in *TestPluginReq
 	return out, nil
 }
 
+func (c *captureControlClient) Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*VerifyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_Verify_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) SampleBytes(ctx context.Context, in *SampleBytesRequest, opts ...grpc.CallOption) (*SampleBytesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SampleBytesResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_SampleBytes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CaptureControlServer is the server API for CaptureControl service.
 // All implementations must embed UnimplementedCaptureControlServer
 // for forward compatibility.
@@ -244,6 +273,13 @@ type CaptureControlServer interface {
 	// 原始包字节仅进程内使用，绝不回传前端；结果不落库（隔离测试，不污染会话真实解码数据）。
 	// 该能力不暴露原始包，因此无需 --enable-raw-debug 门控。
 	TestPlugin(context.Context, *TestPluginRequest) (*TestPluginResponse, error)
+	// Verify 用指定插件对离线会话的 raw_packets 解码并做契约+质量校验，
+	// 产出 violations（引 SDK checker，带 rule_id）+ quality（gta 统计）+ verdict。
+	// 仅统计不落库；validated 证明写入 Developer Plane 的 Tracker（跨平面）。
+	Verify(context.Context, *VerifyRequest) (*VerifyResponse, error)
+	// SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
+	// 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
+	SampleBytes(context.Context, *SampleBytesRequest) (*SampleBytesResponse, error)
 	mustEmbedUnimplementedCaptureControlServer()
 }
 
@@ -289,6 +325,12 @@ func (UnimplementedCaptureControlServer) WatchPlugins(*WatchPluginsRequest, grpc
 }
 func (UnimplementedCaptureControlServer) TestPlugin(context.Context, *TestPluginRequest) (*TestPluginResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TestPlugin not implemented")
+}
+func (UnimplementedCaptureControlServer) Verify(context.Context, *VerifyRequest) (*VerifyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Verify not implemented")
+}
+func (UnimplementedCaptureControlServer) SampleBytes(context.Context, *SampleBytesRequest) (*SampleBytesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SampleBytes not implemented")
 }
 func (UnimplementedCaptureControlServer) mustEmbedUnimplementedCaptureControlServer() {}
 func (UnimplementedCaptureControlServer) testEmbeddedByValue()                        {}
@@ -520,6 +562,42 @@ func _CaptureControl_TestPlugin_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CaptureControl_Verify_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).Verify(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_Verify_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).Verify(ctx, req.(*VerifyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_SampleBytes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SampleBytesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).SampleBytes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_SampleBytes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).SampleBytes(ctx, req.(*SampleBytesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CaptureControl_ServiceDesc is the grpc.ServiceDesc for CaptureControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -570,6 +648,14 @@ var CaptureControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TestPlugin",
 			Handler:    _CaptureControl_TestPlugin_Handler,
+		},
+		{
+			MethodName: "Verify",
+			Handler:    _CaptureControl_Verify_Handler,
+		},
+		{
+			MethodName: "SampleBytes",
+			Handler:    _CaptureControl_SampleBytes_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

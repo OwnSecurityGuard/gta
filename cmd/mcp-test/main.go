@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	base := "http://localhost:8087"
+	base := "http://localhost:8781"
 	resp, err := http.Get(base + "/sse")
 	if err != nil {
 		fmt.Println("GET /sse error:", err)

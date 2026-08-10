@@ -1,4 +1,4 @@
-.PHONY: proto test build build-mcp build-pipeline build-examples run-mcp run-pipeline
+.PHONY: proto test build build-mcp build-pipeline build-plugin-dev build-examples run-mcp run-pipeline run-plugin-dev
 
 TAGS := pcap
 
@@ -24,7 +24,12 @@ build-mcp:
 build-pipeline:
 	go build -tags $(TAGS) -o bin/gta-pipeline.exe ./cmd/gta-pipeline
 
-build: build-mcp build-pipeline
+# Developer Plane 独立二进制。默认由 gta-mcp 内嵌（dialPluginDev 在
+# GTA_PLUGINDEV_ADDR 为空时起进程内实例），只有需要物理隔离开发平面时才用它。
+build-plugin-dev:
+	go build -tags $(TAGS) -o bin/gta-plugin-dev.exe ./cmd/gta-plugin-dev
+
+build: build-mcp build-pipeline build-plugin-dev
 
 build-examples:
 	go build -tags $(TAGS) -o bin/http-server.exe ./examples/http/server
@@ -35,3 +40,6 @@ run-mcp:
 
 run-pipeline:
 	go run -tags $(TAGS) ./cmd/gta-pipeline
+
+run-plugin-dev:
+	go run -tags $(TAGS) ./cmd/gta-plugin-dev

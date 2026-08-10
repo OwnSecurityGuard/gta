@@ -31,8 +31,8 @@ func main() {
 	workDir := flag.String("workdir", ".", "working directory")
 	rulesPath := flag.String("rules", "", "rules.yaml path")
 	controlPath := flag.String("control", "", "control.sqlite path (default: <workdir>/control.sqlite)")
-	// 默认走 TCP 端口（:9091 注册, :8088 控制），兼容 Windows / 跨机器。
-	controlAddr := flag.String("control-addr", ":9888", "CaptureControl gRPC 监听地址（默认 :8088）")
+	// 默认走 TCP 端口（:9091 注册, :9888 控制），兼容 Windows / 跨机器。
+	controlAddr := flag.String("control-addr", ":9888", "CaptureControl gRPC 监听地址（默认 :9888）")
 	registryAddr := flag.String("registry-addr", ":9091", "PluginRegistry gRPC 监听地址（默认 :9091）")
 	debug := flag.Bool("debug", false, "enable debug logging")
 	logFormat := flag.String("log-format", "json", "log format: json | text")

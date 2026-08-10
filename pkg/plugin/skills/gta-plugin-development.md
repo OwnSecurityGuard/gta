@@ -408,7 +408,7 @@ func main() {
 5. **`verify_plugin`** 会把离线会话的原始包喂给你的解码器，并对照 contract.yaml 规则（含 `payload-framing-by-link-type`/`link-type-selects-framing`）给出 `pass|warn|fail` 判定与证据。0 事件时优先跑它。
 6. **`explain_plugin`** 对 0 事件给出归因与修复建议（已修正：不再误导"payload 已是 L7"）。
 
-> 踩坑实录：曾有人坚信"payload 已是 L7"（旧 error 级规则 `payload-is-l7`），写出纯 L7 解码器，回环帧导致 0 事件，转而用 Python 手剥字节定位，再补 TCP 重组——耗费大量调试 token。正确做法是开发前先读契约，0 事件先 `sample_bytes_plugin`，回环解码器直接内置 `ExtractL7` + `Reassembler`。
+> 踩坑实录：曾有人坚信"payload 已是 L7"（这条经证伪的旧规则原叫 `payload-is-l7`，现行 SSOT 规则为 `payload-framing-by-link-type`(error)：必须按 link_type 剥头），写出纯 L7 解码器，回环帧导致 0 事件，转而用 Python 手剥字节定位，再补 TCP 重组——耗费大量调试 token。正确做法是开发前先读契约，0 事件先 `sample_bytes_plugin`，回环解码器直接内置 `ExtractL7` + `Reassembler`。
 
 ---
 

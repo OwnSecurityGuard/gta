@@ -62,21 +62,20 @@ func decodeRequest(payload []byte) ([]byte, bool) {
 	}
 
 	result := map[string]any{
-		"data": map[string]any{
-			"type":           "request",
-			"method":         r.Method,
-			"path":           r.URL.String(),
-			"version":        r.Proto,
-			"host":           r.Host,
-			"content_length": r.Header.Get("Content-Length"),
-			"body_len":       bodyLen,
-			"body":           parseBodyIfJSON(body),
-			"body_truncated": truncated,
-			"headers":        headers,
-		},
-		"_fields": map[string]any{
+		"type":           "request",
+		"method":         r.Method,
+		"path":           r.URL.String(),
+		"version":        r.Proto,
+		"host":           r.Host,
+		"content_length": r.Header.Get("Content-Length"),
+		"body_len":       bodyLen,
+		"body":           parseBodyIfJSON(body),
+		"body_truncated": truncated,
+		"headers":        headers,
+		"_meta": map[string]any{
 			"direction": "client_to_server",
 			"msg_name":  fmt.Sprintf("%s %s", r.Method, r.URL.String()),
+			"is_push":   false,
 		},
 	}
 	return mustMarshal(result), true
@@ -99,20 +98,19 @@ func decodeResponse(payload []byte) ([]byte, bool) {
 	}
 
 	result := map[string]any{
-		"data": map[string]any{
-			"type":           "response",
-			"version":        r.Proto,
-			"status":         r.StatusCode,
-			"reason":         http.StatusText(r.StatusCode),
-			"content_length": r.Header.Get("Content-Length"),
-			"body_len":       bodyLen,
-			"body":           parseBodyIfJSON(body),
-			"body_truncated": truncated,
-			"headers":        headers,
-		},
-		"_fields": map[string]any{
+		"type":           "response",
+		"version":        r.Proto,
+		"status":         r.StatusCode,
+		"reason":         http.StatusText(r.StatusCode),
+		"content_length": r.Header.Get("Content-Length"),
+		"body_len":       bodyLen,
+		"body":           parseBodyIfJSON(body),
+		"body_truncated": truncated,
+		"headers":        headers,
+		"_meta": map[string]any{
 			"direction": "server_to_client",
 			"msg_name":  fmt.Sprintf("resp %d", r.StatusCode),
+			"is_push":   false,
 		},
 	}
 	return mustMarshal(result), true
@@ -167,7 +165,7 @@ func parseBodyIfJSON(body string) any {
 func mustMarshal(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return []byte(`{"data":{"error":"marshal failed"}}`)
+		return []byte(`{"_meta":{"error":"marshal failed"}}`)
 	}
 	return b
 }

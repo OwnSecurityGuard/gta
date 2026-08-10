@@ -283,7 +283,7 @@ rules:
 
 | 阶段 | 内容 | 为什么在这个位置 |
 |---|---|---|
-| **P0 契约统一** | contract.yaml 迁 SDK 并修正 v2 `output_contract`（现文件第 25-47 行已是 `payload_msgpack`，第 101-109 行仍写 v1 的 JSON 约定，自相矛盾）；新增 `rules:` 段；gta 删重复 Manifest 定义改依赖 `sdk.Manifest`；修 `list_plugins` 目录 bug | 不先做，后面每个工具都在放大同一份错误契约 |
+| **P0 契约统一** | contract.yaml 迁 SDK 并修正 v2 `output_contract`（现 output_contract 已统一为 msgpack，`payload_msgpack` 为唯一产出，v1 JSON 约定已废止，见 SDK 仓库 contract/contract.yaml）；新增 `rules:` 段；gta 删重复 Manifest 定义改依赖 `sdk.Manifest`；修 `list_plugins` 目录 bug | 不先做，后面每个工具都在放大同一份错误契约 |
 | **P1 平面拆分** | 建 `pkg/plugindev` + `PluginDev` gRPC；`create_plugin` 的文件写入下沉；MCP 全面转发化 | 结构先立住，之后加工具是填空而非改架构 |
 | **P2 闭环** | `plugin.build`（结构化 file:line:col）+ `plugin.activate/deactivate` + `plugin.status`（双状态 + last_attempt） | AI 第一次能不离开 MCP 跑通 |
 | **P3a explain 一期** | 只归因 build 失败与注册失败 | 这两类不需要流量语料，成本低、见效早，正好接住 P2 的失败面 |

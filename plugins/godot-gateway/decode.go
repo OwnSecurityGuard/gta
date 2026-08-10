@@ -127,7 +127,7 @@ func messageToEvent(m *httpMsg) []*Event {
 	return []*Event{buildResponseEvent(endpoint, inferred, fields, m.statusCode)}
 }
 
-// decodeL7 handles payloads that are already L7 (HTTP or bare JSON). Used when
+// decodeL7 handles payloads the pipeline already delivered as L7 (HTTP or bare JSON). Used when
 // the pipeline delivers stripped payloads rather than full frames.
 func decodeL7(pkt []byte) []*Event {
 	events := []*Event{}
@@ -147,7 +147,7 @@ func decodeL7(pkt []byte) []*Event {
 	return events
 }
 
-// extractL7 is a pass-through for already-L7 payloads. When stripToTCP returns
+// extractL7 is a pass-through for the L7-delivered fallback. When stripToTCP returns
 // ok=false the pipeline has already stripped link headers, so nothing to do.
 func extractL7(pkt []byte) []byte {
 	return pkt

@@ -62,7 +62,7 @@ func TestExplainVerifyAllUnknown(t *testing.T) {
 // pointing back at the same rule_id so the AI can cross-reference contract.yaml.
 // The violation means the decoder treated a full link-layer frame as L7 (did NOT
 // strip), so the advice must be to add framing — the opposite of the old
-// payload-is-l7 guidance.
+// payload-framing-by-link-type guidance.
 func TestExplainVerifyWrongFraming(t *testing.T) {
 	res, err := Explain(context.Background(), &ExplainRequest{
 		Name:   "wrong-framing",

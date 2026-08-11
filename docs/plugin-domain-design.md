@@ -109,7 +109,7 @@ offline → registered → active → bound
 
 - **失效规则**：任何一次 `build` 成功，Artifact 立即从 `validated` 降级回 `compiled`
 - **溯源**：`validated` 必须携带 `proof: { verify_run_id, session_id, verdict, at }`，不能是一个裸 bool
-- **陈旧判定**：`binary_stale` 由 `main.go` 与 `*.exe` 的 mtime 比较得出（`tools/hotreload.go` 的实践已经在用这个信号），stale 时 `next_action` 强制指向 `build`
+- **陈旧判定**：`binary_stale` 由 `main.go` 与 `*.exe` 的 mtime 比较得出（`tools/hotreload/hotreload.go` 的实践已经在用这个信号），stale 时 `next_action` 强制指向 `build`
 
 ### 2.3 失败不该建成状态
 

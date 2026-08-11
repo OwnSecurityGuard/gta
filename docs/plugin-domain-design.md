@@ -55,7 +55,7 @@ MCP               ← 只做协议适配与路由，零 exec、零 os.WriteFile
 
 这样做的三个收益：
 
-1. `cmd/gta-mcp` 里 `exec.Command` 数量保持为 0（当前全仓库唯一一处在 `pkg/script/executor.go:69`，跑 Python，与此无关）
+1. `cmd/gta-mcp` 里 `exec.Command` 数量保持为 0（Python 脚本沙箱 `pkg/script` 已移除，全仓库不再有 gta-mcp 直接 subprocess 的调用）
 2. 生产部署只要不启动 Developer Plane，全部开发态能力零暴露——比一个 `--enable-plugin-dev` 布尔开关强，因为那是**物理隔离**而非条件分支
 3. Developer Plane 与 Runtime Plane 的边界，正好对上 §2 的双状态空间
 

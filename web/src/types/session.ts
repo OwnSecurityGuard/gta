@@ -1,4 +1,4 @@
-/** list_sessions 返回的单个 session 元数据 */
+/** list_all_sessions 返回的单个 session 元数据 */
 export interface SessionInfo {
   session_id: string;
   started_at: string;
@@ -16,7 +16,7 @@ export interface SessionInfo {
   db_path: string;
 }
 
-/** list_sessions 完整响应 */
+/** list_all_sessions 完整响应 */
 export interface ListSessionsResult {
   ok: boolean;
   count: number;

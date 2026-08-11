@@ -322,19 +322,19 @@ func TestE2E_RunWindowAndTrace(t *testing.T) {
 		t.Errorf("client_request_count = %v, want 2", summary["client_request_count"])
 	}
 
-	// 6. get_capture_run_status 验证
+	// 6. get_run_status 验证
 	statusReq := mcp.CallToolRequest{}
 	statusReq.Params.Arguments = map[string]any{"run_id": runID}
-	statusResult, err := m.handleGetCaptureRunStatus(ctx, statusReq)
+	statusResult, err := m.handleGetRunStatus(ctx, statusReq)
 	if err != nil {
-		t.Fatalf("get_capture_run_status: %v", err)
+		t.Fatalf("get_run_status: %v", err)
 	}
 	var statusResp map[string]any
 	json.Unmarshal([]byte(contentText(statusResult)), &statusResp)
 	if statusResp["status"] != "stopped" {
 		t.Errorf("status = %v, want stopped", statusResp["status"])
 	}
-	t.Logf("get_capture_run_status: status=%s", statusResp["status"])
+	t.Logf("get_run_status: status=%s", statusResp["status"])
 
 	// 7. trace_protocol_flow 主验证
 	traceReq := mcp.CallToolRequest{}

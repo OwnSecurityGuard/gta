@@ -17,7 +17,7 @@
 | `list_registered_plugins` | 列出当前已注册插件：online/offline、instance_id、protocol、last_heartbeat（热更可见性的关键） |
 | `get_plugin_manifest` | 查看某插件 manifest |
 | `deregister_plugin` | 强制插件下线（测试切换 / 故障隔离） |
-| `list_capture_sessions` | 返回在线会话及其绑定插件 `plugin` 字段 |
+| `list_live_sessions` | 返回在线会话及其绑定插件 `plugin` 字段 |
 | `list_plugins` | 扫描 plugins 目录的二进制（磁盘可用插件，非运行态） |
 | `decode_raw_packets` | 离线会话用插件解码（需 `--enable-raw-debug`） |
 | `list_decoded_data` | 协议数据主视图（已在前端使用） |
@@ -66,7 +66,7 @@
 - 可展开查看 manifest（`get_plugin_manifest`）。
 
 ### 4.3 会话绑定插件 + 切换（支持"切热更"）
-- 会话侧栏/详情展示绑定插件（来自 `list_capture_sessions` / `list_sessions` 的 `plugin`）。
+- 会话侧栏/详情展示绑定插件（来自 `list_live_sessions` / `list_all_sessions` 的 `plugin`）。
 - 新增"切换插件"操作：下拉选已注册插件 → 调 `set_session_plugin`（**需后端新增工具，见 §6**）→ capture_task 强制 resolve，即时切到新插件。
 - 后端未实现 `set_session_plugin` 前：前端只读展示绑定关系，并提示"重启同名插件即可热更；切换不同名需后端 set_session_plugin"。
 

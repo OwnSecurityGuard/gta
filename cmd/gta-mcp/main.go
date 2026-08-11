@@ -31,7 +31,6 @@ import (
 	plugindevserver "gta/pkg/plugindev/server"
 	"gta/pkg/plugin/skills"
 	"gta/pkg/schema"
-	"gta/pkg/script"
 	"gta/pkg/store"
 
 	_ "modernc.org/sqlite"
@@ -78,8 +77,6 @@ type mcpCapture struct {
 	workDir     string
 	mcpServer   *server.MCPServer
 	sessionMgr  *sessionManager
-	scriptMgr   *script.Manager
-	executor    *script.Executor
 	runRegistry *RunRegistry
 
 	// gRPC client 连接 gta-pipeline
@@ -304,22 +301,7 @@ func (sm *sessionManager) deleteSession(sessionID string) error {
 	return os.RemoveAll(sessionDir)
 }
 
-func newMCPCapture(iface, pluginsDir, workDir, pythonPath, pipelineAddr string, mcpServer *server.MCPServer, enableRawDebug bool) (*mcpCapture, error) {
-	scriptMgr, err := script.NewManager(workDir)
-	if err != nil {
-		slog.Error("failed to create script manager", "error", err)
-		scriptMgr, _ = script.NewManager(workDir)
-	}
-
-	// API 模块目录：优先使用可执行文件同级的 api 目录，其次使用内嵌目录
-	apiDir := filepath.Join(filepath.Dir(os.Args[0]), "api")
-	if _, err := os.Stat(filepath.Join(apiDir, "gta_api.py")); os.IsNotExist(err) {
-		// 回退到源码目录
-		apiDir = filepath.Join(filepath.Dir(os.Args[0]), "pkg", "script", "api")
-	}
-
-	executor := script.NewExecutor(pythonPath, apiDir, workDir, "http://localhost:8090/mcp", 30*time.Second)
-
+func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr string, mcpServer *server.MCPServer, enableRawDebug bool) (*mcpCapture, error) {
 	runRegistry, err := NewRunRegistry(workDir)
 	if err != nil {
 		slog.Warn("init run registry failed", "error", err)
@@ -359,8 +341,6 @@ func newMCPCapture(iface, pluginsDir, workDir, pythonPath, pipelineAddr string, 
 		workDir:        workDir,
 		mcpServer:      mcpServer,
 		sessionMgr:     newSessionManager(workDir),
-		scriptMgr:      scriptMgr,
-		executor:       executor,
 		runRegistry:    runRegistry,
 		pipelineClient: client,
 		grpcConn:       conn,
@@ -520,7 +500,7 @@ func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequ
 	}), nil
 }
 
-func (m *mcpCapture) handleGetStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	sessionID := req.GetString("session_id", "")
 
 	// 如果未指定 session_id，回退到当前 session
@@ -536,7 +516,7 @@ func (m *mcpCapture) handleGetStatus(ctx context.Context, req mcp.CallToolReques
 		sessionID = sess.SessionID
 	}
 
-	slog.Debug("get_capture_status requested", "session_id", sessionID)
+	slog.Debug("get_session_status requested", "session_id", sessionID)
 
 	// 通过 gRPC 查询实时状态
 	if m.pipelineClient != nil {
@@ -557,7 +537,7 @@ func (m *mcpCapture) handleGetStatus(ctx context.Context, req mcp.CallToolReques
 			}), nil
 		}
 		// gRPC 查询失败，降级返回 sessionMgr 中的元数据
-		slog.Warn("get_capture_status gRPC failed, falling back to metadata", "error", err, "session_id", sessionID)
+		slog.Warn("get_session_status gRPC failed, falling back to metadata", "error", err, "session_id", sessionID)
 	}
 
 	// 返回 sessionMgr 中的元数据
@@ -730,13 +710,13 @@ func (m *mcpCapture) handleListInterfaces(ctx context.Context, req mcp.CallToolR
 	return successResult(map[string]any{"interfaces": out}), nil
 }
 
-func (m *mcpCapture) handleListCaptureSessions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (m *mcpCapture) handleListLiveSessions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if m.pipelineClient == nil {
 		return errorResult(fmt.Errorf("pipeline client not available")), nil
 	}
 	resp, err := m.pipelineClient.ListCaptureSessions(ctx, &pb.ListCaptureSessionsRequest{})
 	if err != nil {
-		slog.Error("list_capture_sessions failed", "error", err)
+		slog.Error("list_live_sessions failed", "error", err)
 		return errorResult(fmt.Errorf("list capture sessions: %w", err)), nil
 	}
 	var sessions []map[string]any
@@ -752,7 +732,7 @@ func (m *mcpCapture) handleListCaptureSessions(ctx context.Context, req mcp.Call
 			"started_at_unix": s.GetStartedAtUnix(),
 		})
 	}
-	slog.Info("list_capture_sessions completed", "count", len(sessions))
+	slog.Info("list_live_sessions completed", "count", len(sessions))
 	return successResult(map[string]any{"count": len(sessions), "sessions": sessions}), nil
 }
 
@@ -1464,10 +1444,10 @@ func (m *mcpCapture) getDBPath(sessionID string) (string, error) {
 	return "", nil
 }
 
-func (m *mcpCapture) handleListSessions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	sessions, err := m.sessionMgr.listSessions()
 	if err != nil {
-		slog.Error("list_sessions failed", "error", err)
+		slog.Error("list_all_sessions failed", "error", err)
 		return errorResult(err), nil
 	}
 
@@ -1492,7 +1472,7 @@ func (m *mcpCapture) handleListSessions(ctx context.Context, req mcp.CallToolReq
 		})
 	}
 
-	slog.Info("list_sessions completed", "count", len(out), "total", len(sessions))
+	slog.Info("list_all_sessions completed", "count", len(out), "total", len(sessions))
 	return successResult(map[string]any{"count": len(out), "sessions": out}), nil
 }
 
@@ -1684,7 +1664,6 @@ func main() {
 	iface := flag.String("iface", "", "capture interface; empty means all available interfaces")
 	pluginsDir := flag.String("plugins-dir", "plugins", "plugins directory")
 	workDir := flag.String("work-dir", ".", "working directory for session databases")
-	pythonPath := flag.String("python", "python", "python interpreter path")
 	pipelineAddr := flag.String("pipeline-addr", ":9888", "gta-pipeline gRPC 地址（默认 :9888）")
 	debug := flag.Bool("debug", false, "enable debug logging")
 	enableRawDebug := flag.Bool("enable-raw-debug", os.Getenv("GTA_MCP_ENABLE_RAW_DEBUG") == "1", "暴露原始包调试工具（list_raw_packets / decode_raw_packets），仅限插件开发调试；默认关闭")
@@ -1716,7 +1695,7 @@ func main() {
 		server.WithToolCapabilities(true),
 	)
 
-	capture, err := newMCPCapture(*iface, resolvedPluginsDir, *workDir, *pythonPath, *pipelineAddr, s, *enableRawDebug)
+	capture, err := newMCPCapture(*iface, resolvedPluginsDir, *workDir, *pipelineAddr, s, *enableRawDebug)
 	if err != nil {
 		slog.Error("init mcp capture", "error", err)
 		os.Exit(1)
@@ -1740,10 +1719,10 @@ func main() {
 		mcp.WithString("session_id", mcp.Description("Session ID to stop; defaults to current session")),
 	), capture.handleStopCapture)
 
-	s.AddTool(mcp.NewTool("get_capture_status",
+	s.AddTool(mcp.NewTool("get_session_status",
 		mcp.WithDescription("Get capture status for a specific or current session"),
 		mcp.WithString("session_id", mcp.Description("Session ID to query; defaults to current session")),
-	), capture.handleGetStatus)
+	), capture.handleGetSessionStatus)
 
 	s.AddTool(mcp.NewTool("list_plugins",
 		mcp.WithDescription("List available decoder plugins"),
@@ -1823,9 +1802,9 @@ func main() {
 		mcp.WithDescription("List available pcap capture interfaces"),
 	), capture.handleListInterfaces)
 
-	s.AddTool(mcp.NewTool("list_capture_sessions",
+	s.AddTool(mcp.NewTool("list_live_sessions",
 		mcp.WithDescription("List currently active capture sessions from the pipeline"),
-	), capture.handleListCaptureSessions)
+	), capture.handleListLiveSessions)
 
 	// 默认 MCP surface：事件（events）、StateChange、聚合统计（aggregate stats）。
 	s.AddTool(mcp.NewTool("list_decoded_data",
@@ -1871,10 +1850,10 @@ func main() {
 		mcp.WithString("time_to", mcp.Description("Optional upper bound of the time window (RFC3339Nano). Defaults to now. Mainly for testing.")),
 	), capture.handleEndCaptureRun)
 
-	s.AddTool(mcp.NewTool("get_capture_run_status",
+	s.AddTool(mcp.NewTool("get_run_status",
 		mcp.WithDescription("Quickly check whether a behavior run has useful data. Returns flow/message counts for fail-fast decisions."),
 		mcp.WithString("run_id", mcp.Required(), mcp.Description("Run ID to check")),
-	), capture.handleGetCaptureRunStatus)
+	), capture.handleGetRunStatus)
 
 	s.AddTool(mcp.NewTool("trace_protocol_flow",
 		mcp.WithDescription("Build the chronological evidence chain (causation chain) for one behavior. Stitches request/response/push/state_diff across the run window. Returns steps or file_path for large results."),
@@ -1955,44 +1934,18 @@ func main() {
 		mcp.WithNumber("max_bytes", mcp.Description("Optional: requested bytes per packet (server caps at 64)")),
 	), capture.handleSampleBytesPlugin)
 
-	s.AddTool(mcp.NewTool("list_sessions",
-		mcp.WithDescription("List all capture sessions with their metadata"),
-	), capture.handleListSessions)
+	s.AddTool(mcp.NewTool("list_all_sessions",
+		mcp.WithDescription("List all capture sessions with their metadata (including stopped/offline sessions)"),
+	), capture.handleListAllSessions)
 
 	s.AddTool(mcp.NewTool("delete_session",
 		mcp.WithDescription("Delete a capture session and its data"),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID to delete")),
 	), capture.handleDeleteSession)
 
-	// Script management tools
-	s.AddTool(mcp.NewTool("save_script",
-		mcp.WithDescription("Save a Python script for later reuse"),
-		mcp.WithString("name", mcp.Required(), mcp.Description("Script name (alphanumeric, underscore, hyphen only)")),
-		mcp.WithString("code", mcp.Required(), mcp.Description("Python script content")),
-		mcp.WithString("scope", mcp.Enum("global", "session"), mcp.Description("Script scope: global (shared) or session-specific, default: global")),
-		mcp.WithString("session_id", mcp.Description("Session ID (required if scope is session)")),
-	), capture.handleSaveScript)
-
-	s.AddTool(mcp.NewTool("list_scripts",
-		mcp.WithDescription("List saved Python scripts"),
-		mcp.WithString("scope", mcp.Enum("global", "session"), mcp.Description("Script scope: global or session, default: global")),
-		mcp.WithString("session_id", mcp.Description("Session ID (required if scope is session)")),
-	), capture.handleListScripts)
-
-	s.AddTool(mcp.NewTool("run_script",
-		mcp.WithDescription("Execute a saved Python script with optional arguments"),
-		mcp.WithString("name", mcp.Required(), mcp.Description("Script name to execute")),
-		mcp.WithString("scope", mcp.Enum("global", "session"), mcp.Description("Script scope, default: global")),
-		mcp.WithString("session_id", mcp.Description("Session ID (required if scope is session)")),
-		mcp.WithString("args", mcp.Description("JSON string of script arguments, accessible via gta_api.get_arg(), default: {}")),
-	), capture.handleRunScript)
-
-	s.AddTool(mcp.NewTool("delete_script",
-		mcp.WithDescription("Delete a saved Python script"),
-		mcp.WithString("name", mcp.Required(), mcp.Description("Script name to delete")),
-		mcp.WithString("scope", mcp.Enum("global", "session"), mcp.Description("Script scope, default: global")),
-		mcp.WithString("session_id", mcp.Description("Session ID (required if scope is session)")),
-	), capture.handleDeleteScript)
+	// Script management tools removed: the Python script sandbox (save_script /
+	// list_scripts / run_script / delete_script) has been deleted. Arbitrary
+	// Python execution no longer lives in the capture control plane.
 
 	sseServer := server.NewSSEServer(s)
 	httpServer := server.NewStreamableHTTPServer(s, server.WithStateLess(true))

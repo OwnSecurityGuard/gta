@@ -37,7 +37,7 @@
 
 ### 必须已落地（P0）
 - [x] `decoded_events` 结构化字段（`flow_id` / `direction` / `msg_name` / `msg_id` / `is_push` / `src` / `dst`）
-- [x] `begin_capture_run` / `end_capture_run` / `get_capture_run_status` + `RunRegistry`
+- [x] `begin_capture_run` / `end_capture_run` / `get_run_status` + `RunRegistry`
 - [x] `trace_protocol_flow`
 
 ### 待落地（P1，本流程支持降级运行）
@@ -48,10 +48,9 @@
 - [ ] `trace_request_effect` — 缺失时 Agent 用 `trace_protocol_flow` 的 step 内信息
 
 ### 现有可用（底层）
-- `start_capture` / `stop_capture` / `get_capture_status`
-- `list_plugins` / `list_interfaces` / `list_sessions` / `delete_session`
+- `start_capture` / `stop_capture` / `get_session_status`
+- `list_plugins` / `list_interfaces` / `list_all_sessions` / `delete_session`
 - `aggregate_query` / `list_decoded_data` / `get_capture_schema`
-- `save_script` / `list_scripts` / `run_script` / `delete_script`
 
 ---
 
@@ -99,10 +98,10 @@ MCP   → {run_id, time_to, duration_ms, captured_flow_count, captured_message_c
 
 **Token 预算**：< 300 tokens
 
-### Step 4: `get_capture_run_status` — fail-fast 检查
+### Step 4: `get_run_status` — fail-fast 检查
 
 ```
-Agent → get_capture_run_status(run_id)
+Agent → get_run_status(run_id)
 MCP   → {run_id, status, flow_count, client_request_count, server_message_count, decode_error_count, uncertainties?}
 ```
 
@@ -291,7 +290,7 @@ get_message            →   list_decoded_data (filter="msg_id == X")
 |---|---|---|---|
 | 1. begin_capture_run | begin_capture_run | < 200 | — |
 | 3. end_capture_run | end_capture_run | < 300 | — |
-| 4. get_capture_run_status | get_capture_run_status | < 200 | — |
+| 4. get_run_status | get_run_status | < 200 | — |
 | 5. select_operation_flow | select_operation_flow | < 500 | < 2000 (list_flows) / < 5000 (list_decoded_data) |
 | 6. summarize_operation_messages | summarize_operation_messages | < 600 | < 3000 (list_messages) |
 | 7. trace_protocol_flow | trace_protocol_flow | 1000–5000 (小) / < 500 (大+文件) | — |
@@ -367,28 +366,9 @@ for u in uncertainties:
 
 ---
 
-## 9. 与脚本引擎的协作
+## 9. 与脚本引擎的协作（已移除）
 
-`run_script` 工具允许执行 Python 脚本，脚本内通过 `gta_api` 模块访问 `query_events` / `query_metrics`。本工作流与脚本引擎的协作场景：
-
-### 场景 1：复杂数据分析
-```
-Agent → run_script(name="analyze_flow_distribution", args={"run_id": "...", "flow_id": 12})
-脚本  → query_events(filter="flow_id == 12") → 应用层统计 → 输出分布报告
-Agent → (基于报告补充 trace_protocol_flow 的分析)
-```
-
-### 场景 2：load-test 数据生成
-```
-Agent → run_script(name="gen_loadtest_data", args={"run_id": "...", "flow_id": 12, "feature": "upgrade"})
-脚本  → query_events → 提取 request body → 生成 load-test fixtures (JSON)
-Agent → (基于 fixtures 编写 load-test 代码)
-```
-
-**协作规范**：
-- 脚本访问数据走 `query_events` / `query_metrics`（Python 侧薄封装，转发到 `list_decoded_data` / `aggregate_query`）
-- 脚本输出应结构化（JSON），便于 Agent 解析
-- 脚本不直接读 db，避免路径依赖
+> ⚠️ Python 脚本引擎（`save_script` / `list_scripts` / `run_script` / `delete_script`）已从 gta-mcp 移除。需要自定义分析时，直接通过 `list_decoded_data` / `aggregate_query` 取数，或放到 gta-mcp 之外的独立脚本中处理。
 
 ---
 
@@ -396,7 +376,7 @@ Agent → (基于 fixtures 编写 load-test 代码)
 
 ### 可重试错误
 - `end_capture_run` 幂等：重复调用返回相同 summary
-- `get_capture_run_status` 幂等：纯读查询
+- `get_run_status` 幂等：纯读查询
 - `trace_protocol_flow` 幂等：纯读查询，文件覆盖
 
 ### 不可重试错误
@@ -434,7 +414,7 @@ if summary["captured_message_count"] == 0:
     exit(1)
 
 # Step 4: fail-fast 检查
-status = get_capture_run_status(run_id=run_id)
+status = get_run_status(run_id=run_id)
 if status["server_message_count"] == 0:
     print("无服务器消息，操作可能未触发")
     exit(1)
@@ -507,10 +487,8 @@ print(f"load-test 代码已生成到 {project_path}")
 
 3. **`trace_protocol_flow` 与 `trace_request_effect` 的调用时机**：Agent 何时应调用 `trace_request_effect` 深挖？建议在 `trace_protocol_flow` 的 step `key_fields` 不足或 `entity_diffs` 需要详细分析时。
 
-4. **脚本引擎的协作边界**：`run_script` 应在 Step 7 之后（补充分析）还是 Step 8 之前（生成 fixtures）？建议两者皆可，按场景选择。
+4. **load-test 代码的验证**：Agent 生成的代码是否需要回放验证？建议首版不做，后续加 `validate_loadtest` 工具。
 
-5. **load-test 代码的验证**：Agent 生成的代码是否需要回放验证？建议首版不做，后续加 `validate_loadtest` 工具。
+5. **`file_path` 的跨平台兼容**：`workDir/runs/{run_id}/trace.json` 在 Windows 上路径分隔符问题。建议 MCP 返回正斜杠路径，Agent 用 `pathlib` 处理。
 
-6. **`file_path` 的跨平台兼容**：`workDir/runs/{run_id}/trace.json` 在 Windows 上路径分隔符问题。建议 MCP 返回正斜杠路径，Agent 用 `pathlib` 处理。
-
-7. **并发 run 的隔离**：多个 `begin_capture_run` 并发时，Agent 如何区分？建议 `run_id` 作为唯一隔离键，不依赖 session 状态。
+6. **并发 run 的隔离**：多个 `begin_capture_run` 并发时，Agent 如何区分？建议 `run_id` 作为唯一隔离键，不依赖 session 状态。

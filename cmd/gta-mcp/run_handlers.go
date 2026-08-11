@@ -283,8 +283,8 @@ func (m *mcpCapture) handleEndCaptureRun(ctx context.Context, req mcp.CallToolRe
 	}), nil
 }
 
-// handleGetCaptureRunStatus 快速检查 run 是否有有用数据。
-func (m *mcpCapture) handleGetCaptureRunStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// handleGetRunStatus 快速检查 run 是否有有用数据。
+func (m *mcpCapture) handleGetRunStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if m.runRegistry == nil {
 		return errorResult(fmt.Errorf("run registry not initialized")), nil
 	}

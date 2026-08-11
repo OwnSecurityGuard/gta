@@ -140,7 +140,6 @@ GTA_PLUGINDEV_ADDR=127.0.0.1:8089 ./bin/gta-mcp.exe -work-dir . -plugins-dir plu
 | `-plugins-dir` | `plugins` | 插件目录 |
 | `-pipeline-addr` | `:9888` | gta-pipeline 的 CaptureControl 地址 |
 | `-iface` | 空 | 抓包网卡，空表示全部 |
-| `-python` | `python` | Python 解释器路径 |
 | `-enable-raw-debug` | `false`（或 `GTA_MCP_ENABLE_RAW_DEBUG=1`） | 暴露 `list_raw_packets` / `decode_raw_packets`，插件开发调试用 |
 | `-debug` / `-log-format` / `-log-file` | `false` / `json` / `<workdir>/logs/gta-mcp.log` | 日志 |
 
@@ -159,17 +158,17 @@ make test
 
 ## 核心功能
 
-### MCP 工具（37 个，其中 2 个原始包调试工具默认不注册）
+### MCP 工具（34 个，其中 2 个原始包调试工具默认不注册）
 
 | 类别 | 工具 | 功能 |
 |------|------|------|
-| 抓包控制 | `start_capture` / `stop_capture` / `get_capture_status` | 启动、停止、查询抓包 |
-| | `list_interfaces` / `list_capture_sessions` / `set_session_plugin` | 网卡列表、会话列表、会话换绑插件 |
+| 抓包控制 | `start_capture` / `stop_capture` / `get_session_status` | 启动、停止、查询抓包 |
+| | `list_interfaces` / `list_live_sessions` / `set_session_plugin` | 网卡列表、会话列表、会话换绑插件 |
 | 数据查询 | `list_decoded_data` / `list_state_changes` | 解码事件与状态变更（支持 expr 过滤） |
 | | `aggregate_query` / `get_capture_schema` | 聚合指标查询、模式推断 |
 | | `trace_protocol_flow` | 时序证据链（request/response/push/entity_diff） |
 | 原始包调试 | `list_raw_packets` / `decode_raw_packets` | 需 `-enable-raw-debug`，默认关闭 |
-| 操作分析 | `begin_capture_run` / `end_capture_run` / `get_capture_run_status` | 标记操作窗口、获取摘要 |
+| 操作分析 | `begin_capture_run` / `end_capture_run` / `get_run_status` | 标记操作窗口、获取摘要 |
 | 插件开发<br>(Developer Plane) | `create_plugin` / `build_plugin` | 脚手架生成、编译（失败返回 file:line:col 诊断） |
 | | `activate_plugin` / `deactivate_plugin` | 拉起 / 停止本地插件进程 |
 | | `status_plugin` / `explain_plugin` | 双状态视图、失败归因（带 SDK rule_id） |
@@ -178,8 +177,7 @@ make test
 | 插件运行时 | `list_plugins` / `list_registered_plugins` | 目录扫描 vs 注册表在线实例 |
 | | `get_plugin_manifest` / `deregister_plugin` | 读取 manifest、强制下线 |
 | 插件知识 | `get_plugin_contract` / `get_plugin_dev_guide` | 契约 SSOT、开发指南 |
-| 脚本引擎 | `save_script` / `run_script` / `list_scripts` / `delete_script` | Python 脚本管理与执行 |
-| 会话管理 | `list_sessions` / `delete_session` | 会话生命周期管理 |
+| 会话管理 | `list_all_sessions` / `delete_session` | 会话生命周期管理 |
 
 ### 双状态空间
 

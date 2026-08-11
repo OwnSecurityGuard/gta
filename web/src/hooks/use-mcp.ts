@@ -18,7 +18,7 @@ import type { TestPluginResult, TestPluginVars } from "@/types/plugin-test";
 export function useSessions() {
   return useQuery({
     queryKey: ["sessions"],
-    queryFn: () => mcpClient.callTool<ListSessionsResult>("list_sessions"),
+    queryFn: () => mcpClient.callTool<ListSessionsResult>("list_all_sessions"),
     refetchInterval: 10_000, // 每 10s 自动刷新
   });
 }

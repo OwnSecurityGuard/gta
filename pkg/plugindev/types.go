@@ -8,22 +8,33 @@ package plugindev
 
 import "time"
 
-// ScaffoldRequest asks the Developer Plane to render the create_plugin skeleton
-// into Root/Name. Root is injected by the server from its configured plugins
-// directory; clients (MCP) never specify it.
+// ScaffoldRequest asks the Developer Plane to render the create_plugin skeleton.
+//
+// 输出目录解析规则（用于严格遵循用户传入的 output_dir）：
+//   - OutputDir 非空：文件直接写入该目录（go.mod/main.go/plugin.yaml 落在该目录下）。
+//     这是 MCP create_plugin 透传用户 output_dir 的路径，优先级最高。
+//   - 否则回退到 Root/Name：Root 由服务端从配置的 plugins 目录注入（开发者平面隔离）。
+//
+// SDKVersion / FramingAvailable 由服务端从本包的常量注入，供模板渲染与结果返回，
+// 保证脚手架与已发布 SDK 同版本、并如实标注 framing 是否可用。
 type ScaffoldRequest struct {
 	Name            string
 	Protocol        string
 	ProtocolVersion string
 	Hints           []string
-	Root            string
+	OutputDir       string // 严格指定的生成目录（MCP output_dir），为空则回退 Root/Name
+	Root            string // 服务端配置的 plugins 目录（回退用）
+	SDKVersion      string // 注入：脚手架固定引用的 SDK 版本
+	FramingAvailable bool  // 注入：当前 SDK 版本是否含 framing 包
 }
 
 // ScaffoldResponse reports what Scaffold produced.
 type ScaffoldResponse struct {
-	Name      string
-	OutputDir string
-	Created   []string
+	Name             string
+	OutputDir        string
+	Created          []string
+	SDKVersion       string // 脚手架实际引用的 SDK 版本
+	FramingAvailable bool   // 生成代码是否依赖 framing 包（false 时已显式标注不可用）
 }
 
 // DiscoveredPlugin is a plugin found on disk by ListPlugins.

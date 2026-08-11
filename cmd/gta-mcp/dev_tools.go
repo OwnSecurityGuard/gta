@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	pb "gta/pkg/internalipc/proto"
@@ -47,7 +49,13 @@ func (m *mcpCapture) handleBuildPlugin(ctx context.Context, req mcp.CallToolRequ
 
 // handleActivatePlugin launches the local plugin binary (Developer Plane) and
 // injects GTA_REGISTRY_ADDR so it registers with the runtime. registry_addr
-// defaults to the GTA_REGISTRY_ADDR env when not supplied.
+// resolves in this order: explicit arg → GTA_REGISTRY_ADDR env → the pipeline's
+// actual registry address (via GetRegistryAddr). The last fallback means the
+// caller never has to know the address — gta-mcp reads it from the runtime.
+//
+// 接入是否完成不以「进程启动 / activate 返回 ok（仅拿到 pid）」为准：启动后必须
+// 联合校验 list_registered_plugins（registered）、status_plugin.online（online）、
+// get_plugin_manifest（manifest_present）三项，全部满足才视为集成完成。
 func (m *mcpCapture) handleActivatePlugin(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	if name == "" {
@@ -57,8 +65,14 @@ func (m *mcpCapture) handleActivatePlugin(ctx context.Context, req mcp.CallToolR
 	if registryAddr == "" {
 		registryAddr = os.Getenv("GTA_REGISTRY_ADDR")
 	}
+	if registryAddr == "" && m.pipelineClient != nil {
+		// 回退到 pipeline 实际监听的 registry 地址，避免「不知道该连哪里」。
+		if resp, err := m.pipelineClient.GetRegistryAddr(ctx, &pb.GetRegistryAddrRequest{}); err == nil && resp.GetRegistryAddr() != "" {
+			registryAddr = resp.GetRegistryAddr()
+		}
+	}
 	if registryAddr == "" {
-		return errorResult(fmt.Errorf("registry_addr is required (pass it, or set GTA_REGISTRY_ADDR to the pipeline's registry address)")), nil
+		return errorResult(fmt.Errorf("registry_addr is required (pass it, set GTA_REGISTRY_ADDR, or ensure the pipeline is reachable so gta-mcp can read it from the runtime)")), nil
 	}
 	if m.pdClient == nil {
 		return errorResult(fmt.Errorf("plugin dev not available (Developer Plane not configured)")), nil
@@ -67,12 +81,84 @@ func (m *mcpCapture) handleActivatePlugin(ctx context.Context, req mcp.CallToolR
 	if err != nil {
 		return errorResult(err), nil
 	}
-	return successResult(map[string]any{
-		"name":        name,
-		"ok":          resp.GetOk(),
-		"instance_id": resp.GetInstanceId(),
-		"message":     resp.GetMessage(),
-	}), nil
+
+	out := map[string]any{
+		"name":          name,
+		"registry_addr": registryAddr,
+		"process_launched": resp.GetOk(),
+		"instance_id":   resp.GetInstanceId(),
+		"message":       resp.GetMessage(),
+	}
+
+	// 联合校验：仅看到进程 pid 或 activate 成功不算接入完成。
+	if m.pipelineClient != nil && resp.GetOk() {
+		registered, online, manifestPresent, detail := m.verifyPluginIntegration(ctx, name)
+		integrated := registered && online && manifestPresent
+		out["registered"] = registered
+		out["online"] = online
+		out["manifest_present"] = manifestPresent
+		out["integrated"] = integrated
+		out["verification_detail"] = detail
+		if !integrated {
+			out["ok"] = false
+			out["message"] = "plugin process launched but not fully integrated: " + detail
+		} else {
+			out["ok"] = true
+		}
+	} else {
+		// 无 pipeline 连接时只能确认进程已启动，无法验证注册。
+		out["ok"] = resp.GetOk()
+		out["integrated"] = false
+		out["verification_detail"] = "pipeline unreachable: registered/online/manifest not verified"
+	}
+	return successResult(out), nil
+}
+
+// verifyPluginIntegration 轮询确认插件真正接入运行时：同时检查
+// list_registered_plugins（registered）、status_plugin.online（online）、
+// get_plugin_manifest（manifest_present）。三者皆满足才视为集成完成。仅进程
+// 启动成功 / activate 返回 ok 不足以证明接入完成。
+func (m *mcpCapture) verifyPluginIntegration(ctx context.Context, name string) (registered, online, manifestPresent bool, detail string) {
+	deadline := time.Now().Add(15 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		registered, online, manifestPresent = false, false, false
+
+		listResp, err := m.pipelineClient.ListPlugins(ctx, &pb.ListPluginsRequest{})
+		if err == nil {
+			for _, p := range listResp.GetPlugins() {
+				if p.GetName() == name {
+					registered = true
+					online = p.GetOnline()
+					break
+				}
+			}
+		}
+		manResp, merr := m.pipelineClient.GetPluginManifest(ctx, &pb.GetPluginManifestRequest{Name: name})
+		manifestPresent = merr == nil && len(manResp.GetManifest()) > 0
+
+		if registered && online && manifestPresent {
+			return true, true, true, "registered + online + manifest present"
+		}
+		if time.Now().After(deadline) {
+			var parts []string
+			if !registered {
+				parts = append(parts, "not in list_registered_plugins")
+			} else if !online {
+				parts = append(parts, "registered but not online (no heartbeat yet?)")
+			}
+			if !manifestPresent {
+				parts = append(parts, "get_plugin_manifest returned empty/nil")
+			}
+			return registered, online, manifestPresent, strings.Join(parts, "; ")
+		}
+		select {
+		case <-ctx.Done():
+			return registered, online, manifestPresent, "context cancelled before integration confirmed"
+		case <-ticker.C:
+		}
+	}
 }
 
 // handleDeactivatePlugin stops the process the Developer Plane launched for the
@@ -105,6 +191,29 @@ func (m *mcpCapture) handleDeactivatePlugin(ctx context.Context, req mcp.CallToo
 		} else {
 			out["registry_deregister"] = map[string]any{"ok": dresp.GetOk(), "instance_id": dresp.GetInstanceId()}
 		}
+	}
+	return successResult(out), nil
+}
+
+// handleGetRegistryAddr 返回当前 pipeline 的 registry 地址，插件启动时需将其写入
+// GTA_REGISTRY_ADDR。此前只能从 pipeline 启动日志人工获取，现由 pipeline 通过
+// GetRegistryAddr RPC 直接暴露，gta-mcp 原样转发。
+func (m *mcpCapture) handleGetRegistryAddr(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if m.pipelineClient == nil {
+		return errorResult(fmt.Errorf("pipeline client not available")), nil
+	}
+	resp, err := m.pipelineClient.GetRegistryAddr(ctx, &pb.GetRegistryAddrRequest{})
+	if err != nil {
+		return errorResult(fmt.Errorf("get registry addr: %w", err)), nil
+	}
+	addr := resp.GetRegistryAddr()
+	out := map[string]any{
+		"registry_addr": addr,
+	}
+	if addr == "" {
+		out["message"] = "pipeline returned an empty registry address (registry not configured via -registry-addr)"
+	} else {
+		out["message"] = "set GTA_REGISTRY_ADDR=" + addr + " when launching plugins"
 	}
 	return successResult(out), nil
 }

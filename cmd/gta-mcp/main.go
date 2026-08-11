@@ -1750,12 +1750,12 @@ func main() {
 	), capture.handleListPlugins)
 
 	s.AddTool(mcp.NewTool("create_plugin",
-		mcp.WithDescription("Scaffold a new decoder plugin project (plugin.yaml + main.go + go.mod) from templates. The skeleton registers itself via github.com/OwnSecurityGuard/gta-plugin-sdk. IMPORTANT: the generated decoder receives a COMPLETE link-layer frame (not L7) for pcap sources — strip headers with framing.ExtractL7 and reassemble TCP with framing.Reassembler before parsing. Ready to compile after adjusting the replace path (point it at the local gta-plugin-sdk repo or the published remote module)."),
+		mcp.WithDescription("Scaffold a new decoder plugin project (plugin.yaml + main.go + go.mod) from templates. The skeleton registers itself via github.com/OwnSecurityGuard/gta-plugin-sdk. IMPORTANT: the generated decoder receives a COMPLETE link-layer frame (not L7) for pcap sources — when the pinned SDK ships the framing package, the scaffold uses framing.ExtractL7 + framing.Reassembler; otherwise it is explicitly marked framing-unavailable. Returns the actual output_dir (absolute), the exact sdk_version pinned, and whether framing is available. Ready to compile after adjusting the replace path (point it at the local gta-plugin-sdk repo or the published remote module)."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name, kebab-case, e.g. my-game-decoder")),
 		mcp.WithString("protocol", mcp.Required(), mcp.Description("Protocol the plugin decodes, e.g. my_game")),
 		mcp.WithString("protocol_version", mcp.Description("Optional protocol version, e.g. game/v3")),
 		mcp.WithString("hints", mcp.Description("Optional match hints as JSON array of strings or comma-separated, e.g. [\"tcp\",\"port:7000\"]")),
-		mcp.WithString("output_dir", mcp.Description("Optional output directory; defaults to <plugins_dir>/<name>")),
+		mcp.WithString("output_dir", mcp.Description("Strict target directory for the generated project; files are written directly there. Defaults to <plugins_dir>/<name> when omitted.")),
 	), capture.handleCreatePlugin)
 
 	s.AddTool(mcp.NewTool("build_plugin",
@@ -1765,9 +1765,9 @@ func main() {
 	), capture.handleBuildPlugin)
 
 	s.AddTool(mcp.NewTool("activate_plugin",
-		mcp.WithDescription("Launch the local plugin binary and inject GTA_REGISTRY_ADDR so it registers with the runtime. The Developer Plane owns only the process it launches; deactivate_plugin tears it down. Requires the pipeline's registry address (pass registry_addr or set GTA_REGISTRY_ADDR)."),
+		mcp.WithDescription("Launch the local plugin binary and inject GTA_REGISTRY_ADDR so it registers with the runtime. The Developer Plane owns only the process it launches; deactivate_plugin tears it down. registry_addr resolves in order: explicit arg → GTA_REGISTRY_ADDR env → the pipeline's actual registry address (read via get_registry_addr), so you usually don't need to pass it. After launch, activation is NOT considered complete on a mere pid/activate-ok: it jointly verifies list_registered_plugins (registered), status_plugin.online (online), and get_plugin_manifest (manifest_present) — all three must hold before integrated=true."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case) to launch")),
-		mcp.WithString("registry_addr", mcp.Description("Runtime registry address, e.g. :9091. Defaults to env GTA_REGISTRY_ADDR")),
+		mcp.WithString("registry_addr", mcp.Description("Runtime registry address, e.g. :9091. Defaults to env GTA_REGISTRY_ADDR, then to the pipeline's address (via get_registry_addr)")),
 	), capture.handleActivatePlugin)
 
 	s.AddTool(mcp.NewTool("deactivate_plugin",
@@ -1793,6 +1793,10 @@ func main() {
 	s.AddTool(mcp.NewTool("get_plugin_dev_guide",
 		mcp.WithDescription("Return the full plugin development guide (markdown). Covers architecture, plugin.yaml schema, Decode RPC contract, lifecycle, framing, and best practices. KEY TAKEAWAY: for pcap sources DecodeRequest.payload is a COMPLETE link-layer frame (link header + IP + TCP/UDP + app bytes), NOT pre-stripped L7 — strip it per link_type with framing.ExtractL7 and reassemble TCP with framing.Reassembler first. Only ProxyPayload(1001)/TLSPlaintext(1002) are already L7. Read this BEFORE writing any decoder."),
 	), capture.handleGetPluginDevGuide)
+
+	s.AddTool(mcp.NewTool("get_registry_addr",
+		mcp.WithDescription("Return the registry address the pipeline is currently listening on (its -registry-addr, e.g. :9091). Plugins MUST connect here by setting GTA_REGISTRY_ADDR at startup; this tool removes the guesswork of reading pipeline startup logs. Use it to learn where a freshly launched plugin should register, or to confirm activate_plugin's resolved address."),
+	), capture.handleGetRegistryAddr)
 
 	s.AddTool(mcp.NewTool("list_registered_plugins",
 		mcp.WithDescription("List all plugins currently registered with the pipeline (active via gRPC PluginRegistry). Different from list_plugins which scans the plugins directory for binary files."),

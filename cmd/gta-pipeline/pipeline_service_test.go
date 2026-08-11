@@ -27,7 +27,7 @@ func newTestPipelineService(t *testing.T) (*pipelineService, string, *store.Cont
 	}
 	t.Cleanup(func() { _ = controlStore.Close() })
 	mgr := plugin.NewRegistryServer(10)
-	s := newPipelineService(workDir, controlStore, mgr, nil)
+	s := newPipelineService(workDir, controlStore, mgr, nil, ":9091")
 	return s, workDir, controlStore
 }
 

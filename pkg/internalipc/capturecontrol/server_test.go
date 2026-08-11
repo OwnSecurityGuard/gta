@@ -76,6 +76,9 @@ func (f *fakeEngine) ListPlugins(ctx context.Context) ([]PluginSummary, error) {
 func (f *fakeEngine) GetPluginManifest(ctx context.Context, name string) ([]byte, error) {
 	return nil, nil
 }
+func (f *fakeEngine) GetRegistryAddr(ctx context.Context) (string, error) {
+	return ":9091", nil
+}
 
 func TestServer_StartCapture(t *testing.T) {
 	engine := &fakeEngine{

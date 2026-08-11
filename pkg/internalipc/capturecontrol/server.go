@@ -49,6 +49,8 @@ type CaptureEngine interface {
 	Verify(ctx context.Context, req VerifyRequest) (VerifyResult, error)
 	// SampleBytes 读取会话原始包前若干字节（事实），并在 plugin_debug_access 留审计。
 	SampleBytes(ctx context.Context, req SampleBytesRequest) (SampleBytesResult, error)
+	// GetRegistryAddr 返回插件应连接的注册中心地址（即 -registry-addr 的值）。
+	GetRegistryAddr(ctx context.Context) (string, error)
 }
 
 // PluginEvent 是插件注册表状态变化通知（与 proto PluginEvent 对应，但用 Go 原生类型）。
@@ -403,6 +405,17 @@ func (s *Server) GetPluginManifest(ctx context.Context, req *pb.GetPluginManifes
 		Manifest: manifest,
 		Name:     req.GetName(),
 	}, nil
+}
+
+// GetRegistryAddr 处理获取注册中心地址 RPC。返回插件应连接的注册中心地址
+// （即 gta-pipeline 的 -registry-addr，如 :9091），供 gta-mcp / 插件启动时填入
+// GTA_REGISTRY_ADDR。
+func (s *Server) GetRegistryAddr(ctx context.Context, req *pb.GetRegistryAddrRequest) (*pb.GetRegistryAddrResponse, error) {
+	addr, err := s.engine.GetRegistryAddr(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetRegistryAddrResponse{RegistryAddr: addr}, nil
 }
 
 // DeregisterPlugin 处理注销插件 RPC。

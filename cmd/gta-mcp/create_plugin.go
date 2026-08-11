@@ -43,18 +43,26 @@ func (m *mcpCapture) handleCreatePlugin(ctx context.Context, req mcp.CallToolReq
 		}
 	}
 
+	// output_dir 严格指定生成目录；为空则回退到插件目录下的 <name>/。
+	outputDir := req.GetString("output_dir", "")
+
 	if m.pdClient == nil {
 		return errorResult(fmt.Errorf("plugin dev not available (Developer Plane not configured)")), nil
 	}
-	resp, err := m.pdClient.Scaffold(ctx, name, protocol, protocolVersion, hints)
+	resp, err := m.pdClient.Scaffold(ctx, name, protocol, protocolVersion, hints, outputDir)
 	if err != nil {
 		return errorResult(err), nil
 	}
 
-	slog.Info("create_plugin completed", "name", resp.Name, "output_dir", resp.OutputDir, "files", resp.Created)
+	slog.Info("create_plugin completed",
+		"name", resp.Name, "output_dir", resp.OutputDir,
+		"sdk_version", resp.SdkVersion, "framing_available", resp.FramingAvailable,
+		"files", resp.Created)
 	return successResult(map[string]any{
-		"name":       resp.Name,
-		"output_dir": resp.OutputDir,
-		"created":    resp.Created,
+		"name":              resp.Name,
+		"output_dir":        resp.OutputDir, // 实际生成路径（已解析为绝对路径）
+		"created":           resp.Created,
+		"sdk_version":       resp.SdkVersion, // 实际引用的 gta-plugin-sdk 版本
+		"framing_available": resp.FramingAvailable,
 	}), nil
 }

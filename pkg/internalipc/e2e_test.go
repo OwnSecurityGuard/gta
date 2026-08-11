@@ -125,6 +125,9 @@ func (f *fakeCaptureEngine) ListPlugins(ctx context.Context) ([]capturecontrol.P
 func (f *fakeCaptureEngine) GetPluginManifest(ctx context.Context, name string) ([]byte, error) {
 	return nil, nil
 }
+func (f *fakeCaptureEngine) GetRegistryAddr(ctx context.Context) (string, error) {
+	return ":9091", nil
+}
 func (f *fakeCaptureEngine) SetSessionPlugin(ctx context.Context, sessionID, plugin string) (string, error) {
 	return plugin, nil
 }

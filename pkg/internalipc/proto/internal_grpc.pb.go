@@ -33,6 +33,7 @@ const (
 	CaptureControl_TestPlugin_FullMethodName          = "/gta.internalipc.CaptureControl/TestPlugin"
 	CaptureControl_Verify_FullMethodName              = "/gta.internalipc.CaptureControl/Verify"
 	CaptureControl_SampleBytes_FullMethodName         = "/gta.internalipc.CaptureControl/SampleBytes"
+	CaptureControl_GetRegistryAddr_FullMethodName     = "/gta.internalipc.CaptureControl/GetRegistryAddr"
 )
 
 // CaptureControlClient is the client API for CaptureControl service.
@@ -78,6 +79,10 @@ type CaptureControlClient interface {
 	// SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
 	// 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
 	SampleBytes(ctx context.Context, in *SampleBytesRequest, opts ...grpc.CallOption) (*SampleBytesResponse, error)
+	// GetRegistryAddr 返回插件应连接注册中心地址（即 -registry-addr 的值，如 :9091）。
+	// gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
+	// 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
+	GetRegistryAddr(ctx context.Context, in *GetRegistryAddrRequest, opts ...grpc.CallOption) (*GetRegistryAddrResponse, error)
 }
 
 type captureControlClient struct {
@@ -237,6 +242,16 @@ func (c *captureControlClient) SampleBytes(ctx context.Context, in *SampleBytesR
 	return out, nil
 }
 
+func (c *captureControlClient) GetRegistryAddr(ctx context.Context, in *GetRegistryAddrRequest, opts ...grpc.CallOption) (*GetRegistryAddrResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRegistryAddrResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_GetRegistryAddr_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CaptureControlServer is the server API for CaptureControl service.
 // All implementations must embed UnimplementedCaptureControlServer
 // for forward compatibility.
@@ -280,6 +295,10 @@ type CaptureControlServer interface {
 	// SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
 	// 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
 	SampleBytes(context.Context, *SampleBytesRequest) (*SampleBytesResponse, error)
+	// GetRegistryAddr 返回插件应连接注册中心地址（即 -registry-addr 的值，如 :9091）。
+	// gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
+	// 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
+	GetRegistryAddr(context.Context, *GetRegistryAddrRequest) (*GetRegistryAddrResponse, error)
 	mustEmbedUnimplementedCaptureControlServer()
 }
 
@@ -331,6 +350,9 @@ func (UnimplementedCaptureControlServer) Verify(context.Context, *VerifyRequest)
 }
 func (UnimplementedCaptureControlServer) SampleBytes(context.Context, *SampleBytesRequest) (*SampleBytesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SampleBytes not implemented")
+}
+func (UnimplementedCaptureControlServer) GetRegistryAddr(context.Context, *GetRegistryAddrRequest) (*GetRegistryAddrResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRegistryAddr not implemented")
 }
 func (UnimplementedCaptureControlServer) mustEmbedUnimplementedCaptureControlServer() {}
 func (UnimplementedCaptureControlServer) testEmbeddedByValue()                        {}
@@ -598,6 +620,24 @@ func _CaptureControl_SampleBytes_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CaptureControl_GetRegistryAddr_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRegistryAddrRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).GetRegistryAddr(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_GetRegistryAddr_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).GetRegistryAddr(ctx, req.(*GetRegistryAddrRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CaptureControl_ServiceDesc is the grpc.ServiceDesc for CaptureControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -656,6 +696,10 @@ var CaptureControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SampleBytes",
 			Handler:    _CaptureControl_SampleBytes_Handler,
+		},
+		{
+			MethodName: "GetRegistryAddr",
+			Handler:    _CaptureControl_GetRegistryAddr_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

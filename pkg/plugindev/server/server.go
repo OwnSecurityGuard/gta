@@ -33,19 +33,24 @@ func New(root string) *Server {
 
 func (s *Server) Scaffold(ctx context.Context, req *pb.ScaffoldRequest) (*pb.ScaffoldResponse, error) {
 	resp, err := plugindev.Scaffold(ctx, &plugindev.ScaffoldRequest{
-		Name:            req.GetName(),
-		Protocol:        req.GetProtocol(),
-		ProtocolVersion: req.GetProtocolVersion(),
-		Hints:           req.GetHints(),
-		Root:            s.root,
+		Name:             req.GetName(),
+		Protocol:         req.GetProtocol(),
+		ProtocolVersion:  req.GetProtocolVersion(),
+		Hints:            req.GetHints(),
+		OutputDir:        req.GetOutputDir(),
+		Root:             s.root,
+		SDKVersion:       plugindev.SDKVersion,
+		FramingAvailable: plugindev.FramingAvailable,
 	})
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	return &pb.ScaffoldResponse{
-		Name:      resp.Name,
-		OutputDir: resp.OutputDir,
-		Created:   resp.Created,
+		Name:             resp.Name,
+		OutputDir:        resp.OutputDir,
+		Created:          resp.Created,
+		SdkVersion:       resp.SDKVersion,
+		FramingAvailable: resp.FramingAvailable,
 	}, nil
 }
 

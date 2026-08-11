@@ -16,7 +16,7 @@ import (
 // it an interface (rather than a raw gRPC client) makes the MCP handlers
 // trivially testable with an in-memory fake.
 type PluginDev interface {
-	Scaffold(ctx context.Context, name, protocol, protocolVersion string, hints []string) (*pb.ScaffoldResponse, error)
+	Scaffold(ctx context.Context, name, protocol, protocolVersion string, hints []string, outputDir string) (*pb.ScaffoldResponse, error)
 	ListPlugins(ctx context.Context) (*pb.ListPluginsResponse, error)
 	Build(ctx context.Context, name string, timeoutSec int) (*pb.BuildResponse, error)
 	Activate(ctx context.Context, name, registryAddr string) (*pb.ActivateResponse, error)
@@ -34,12 +34,13 @@ func NewGRPCClient(conn *grpc.ClientConn) PluginDev {
 	return &grpcClient{cc: pb.NewPluginDevClient(conn)}
 }
 
-func (c *grpcClient) Scaffold(ctx context.Context, name, protocol, protocolVersion string, hints []string) (*pb.ScaffoldResponse, error) {
+func (c *grpcClient) Scaffold(ctx context.Context, name, protocol, protocolVersion string, hints []string, outputDir string) (*pb.ScaffoldResponse, error) {
 	return c.cc.Scaffold(ctx, &pb.ScaffoldRequest{
 		Name:            name,
 		Protocol:        protocol,
 		ProtocolVersion: protocolVersion,
 		Hints:           hints,
+		OutputDir:       outputDir,
 	})
 }
 

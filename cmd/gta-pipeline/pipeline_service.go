@@ -30,18 +30,23 @@ type pipelineService struct {
 	workDir      string
 	logger       *slog.Logger // 进程级 logger，带 component=pipeline_service
 
+	// registryAddr 是插件应连接的注册中心地址（即 -registry-addr 的值，如 :9091）。
+	// 通过 GetRegistryAddr 暴露给 gta-mcp，供其 / 插件启动时获知 GTA_REGISTRY_ADDR。
+	registryAddr string
+
 	mu    sync.RWMutex
 	tasks map[string]*captureTask
 }
 
 // newPipelineService 构造 pipelineService，不启动任何会话。
-func newPipelineService(workDir string, controlStore *store.ControlStore, registry *plugin.RegistryServer, rules []*analyze.CompiledRule) *pipelineService {
+func newPipelineService(workDir string, controlStore *store.ControlStore, registry *plugin.RegistryServer, rules []*analyze.CompiledRule, registryAddr string) *pipelineService {
 	return &pipelineService{
 		workDir:      workDir,
 		controlStore: controlStore,
 		registry:     registry,
 		rules:        rules,
 		logger:       logging.With("component", "pipeline_service"),
+		registryAddr: registryAddr,
 		tasks:        make(map[string]*captureTask),
 	}
 }
@@ -327,6 +332,12 @@ func (s *pipelineService) ListPlugins(_ context.Context) ([]capturecontrol.Plugi
 // GetPluginManifest 获取指定插件的 manifest bytes（plugin.yaml 原始内容）。
 func (s *pipelineService) GetPluginManifest(_ context.Context, name string) ([]byte, error) {
 	return s.registry.GetPluginManifest(name)
+}
+
+// GetRegistryAddr 返回插件应连接的注册中心地址（即 -registry-addr 的值）。
+// gta-mcp 借此向调用方/插件暴露 GTA_REGISTRY_ADDR，避免插件「不知道该连哪里」。
+func (s *pipelineService) GetRegistryAddr(_ context.Context) (string, error) {
+	return s.registryAddr, nil
 }
 
 // DeregisterPlugin 注销指定插件（按 instance_id 或 name）。

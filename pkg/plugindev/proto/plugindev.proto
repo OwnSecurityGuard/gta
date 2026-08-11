@@ -38,12 +38,21 @@ message ScaffoldRequest {
   string protocol = 2;
   string protocol_version = 3;
   repeated string hints = 4;
+  // output_dir 严格指定生成目录：文件直接写入该目录（go.mod/main.go/plugin.yaml）。
+  // 留空则回退到服务端配置的 plugins 目录下的 <name>/。MCP 层会把用户传入的
+  // output_dir 透传到这里，确保「严格遵守输出目录」且返回实际路径。
+  string output_dir = 5;
 }
 
 message ScaffoldResponse {
   string name = 1;
   string output_dir = 2;
   repeated string created = 3;
+  // sdk_version 是脚手架固定引用的 gta-plugin-sdk 版本（与开发指南/SDK 同版本发布）。
+  string sdk_version = 4;
+  // framing_available 标记当前 SDK 版本是否包含 framing 包。为 false 时生成的
+  // main.go 不会 import framing，并显式标注「framing 不可用」，避免引用缺失的导入。
+  bool framing_available = 5;
 }
 
 message ListPluginsRequest {}

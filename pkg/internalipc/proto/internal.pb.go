@@ -2624,6 +2624,90 @@ func (x *PluginEvent) GetTimestampUnix() int64 {
 	return 0
 }
 
+// GetRegistryAddrRequest 无参数。
+type GetRegistryAddrRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRegistryAddrRequest) Reset() {
+	*x = GetRegistryAddrRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRegistryAddrRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRegistryAddrRequest) ProtoMessage() {}
+
+func (x *GetRegistryAddrRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRegistryAddrRequest.ProtoReflect.Descriptor instead.
+func (*GetRegistryAddrRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{37}
+}
+
+// GetRegistryAddrResponse 返回插件应连接的注册中心地址。
+// registry_addr 即 gta-pipeline 的 -registry-addr（如 :9091），插件启动时必须
+// 将其填入 GTA_REGISTRY_ADDR 才能向运行时注册。空字符串表示 pipeline 未配置注册中心。
+type GetRegistryAddrResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RegistryAddr  string                 `protobuf:"bytes,1,opt,name=registry_addr,json=registryAddr,proto3" json:"registry_addr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRegistryAddrResponse) Reset() {
+	*x = GetRegistryAddrResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRegistryAddrResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRegistryAddrResponse) ProtoMessage() {}
+
+func (x *GetRegistryAddrResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRegistryAddrResponse.ProtoReflect.Descriptor instead.
+func (*GetRegistryAddrResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *GetRegistryAddrResponse) GetRegistryAddr() string {
+	if x != nil {
+		return x.RegistryAddr
+	}
+	return ""
+}
+
 var File_pkg_internalipc_proto_internal_proto protoreflect.FileDescriptor
 
 const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
@@ -2857,8 +2941,10 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"instanceId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x16\n" +
 	"\x06online\x18\x04 \x01(\bR\x06online\x12%\n" +
-	"\x0etimestamp_unix\x18\x05 \x01(\x03R\rtimestampUnix2\xd8\n" +
-	"\n" +
+	"\x0etimestamp_unix\x18\x05 \x01(\x03R\rtimestampUnix\"\x18\n" +
+	"\x16GetRegistryAddrRequest\">\n" +
+	"\x17GetRegistryAddrResponse\x12#\n" +
+	"\rregistry_addr\x18\x01 \x01(\tR\fregistryAddr2\xbe\v\n" +
 	"\x0eCaptureControl\x12[\n" +
 	"\fStartCapture\x12$.gta.internalipc.StartCaptureRequest\x1a%.gta.internalipc.StartCaptureResponse\x12X\n" +
 	"\vStopCapture\x12#.gta.internalipc.StopCaptureRequest\x1a$.gta.internalipc.StopCaptureResponse\x12g\n" +
@@ -2874,7 +2960,8 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\n" +
 	"TestPlugin\x12\".gta.internalipc.TestPluginRequest\x1a#.gta.internalipc.TestPluginResponse\x12I\n" +
 	"\x06Verify\x12\x1e.gta.internalipc.VerifyRequest\x1a\x1f.gta.internalipc.VerifyResponse\x12X\n" +
-	"\vSampleBytes\x12#.gta.internalipc.SampleBytesRequest\x1a$.gta.internalipc.SampleBytesResponseB\x1bZ\x19gta/pkg/internalipc/protob\x06proto3"
+	"\vSampleBytes\x12#.gta.internalipc.SampleBytesRequest\x1a$.gta.internalipc.SampleBytesResponse\x12d\n" +
+	"\x0fGetRegistryAddr\x12'.gta.internalipc.GetRegistryAddrRequest\x1a(.gta.internalipc.GetRegistryAddrResponseB\x1bZ\x19gta/pkg/internalipc/protob\x06proto3"
 
 var (
 	file_pkg_internalipc_proto_internal_proto_rawDescOnce sync.Once
@@ -2888,7 +2975,7 @@ func file_pkg_internalipc_proto_internal_proto_rawDescGZIP() []byte {
 	return file_pkg_internalipc_proto_internal_proto_rawDescData
 }
 
-var file_pkg_internalipc_proto_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
+var file_pkg_internalipc_proto_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_pkg_internalipc_proto_internal_proto_goTypes = []any{
 	(*DecodeRawPacketsRequest)(nil),     // 0: gta.internalipc.DecodeRawPacketsRequest
 	(*DecodeRawPacketsResponse)(nil),    // 1: gta.internalipc.DecodeRawPacketsResponse
@@ -2927,19 +3014,21 @@ var file_pkg_internalipc_proto_internal_proto_goTypes = []any{
 	(*SetSessionPluginResponse)(nil),    // 34: gta.internalipc.SetSessionPluginResponse
 	(*WatchPluginsRequest)(nil),         // 35: gta.internalipc.WatchPluginsRequest
 	(*PluginEvent)(nil),                 // 36: gta.internalipc.PluginEvent
-	nil,                                 // 37: gta.internalipc.TestPluginResponse.TypeHistogramEntry
-	nil,                                 // 38: gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	nil,                                 // 39: gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	(*GetRegistryAddrRequest)(nil),      // 37: gta.internalipc.GetRegistryAddrRequest
+	(*GetRegistryAddrResponse)(nil),     // 38: gta.internalipc.GetRegistryAddrResponse
+	nil,                                 // 39: gta.internalipc.TestPluginResponse.TypeHistogramEntry
+	nil,                                 // 40: gta.internalipc.SampleBytesResponse.LengthHistogramEntry
+	nil,                                 // 41: gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
 }
 var file_pkg_internalipc_proto_internal_proto_depIdxs = []int32{
-	37, // 0: gta.internalipc.TestPluginResponse.type_histogram:type_name -> gta.internalipc.TestPluginResponse.TypeHistogramEntry
+	39, // 0: gta.internalipc.TestPluginResponse.type_histogram:type_name -> gta.internalipc.TestPluginResponse.TypeHistogramEntry
 	3,  // 1: gta.internalipc.TestPluginResponse.sample_events:type_name -> gta.internalipc.TestEventLite
 	4,  // 2: gta.internalipc.TestPluginResponse.error_samples:type_name -> gta.internalipc.TestErrorLite
 	7,  // 3: gta.internalipc.VerifyResponse.violations:type_name -> gta.internalipc.VerifyViolation
 	8,  // 4: gta.internalipc.VerifyResponse.quality:type_name -> gta.internalipc.VerifyQuality
 	11, // 5: gta.internalipc.SampleBytesResponse.packets:type_name -> gta.internalipc.SampledPacket
-	38, // 6: gta.internalipc.SampleBytesResponse.length_histogram:type_name -> gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	39, // 7: gta.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	40, // 6: gta.internalipc.SampleBytesResponse.length_histogram:type_name -> gta.internalipc.SampleBytesResponse.LengthHistogramEntry
+	41, // 7: gta.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
 	13, // 8: gta.internalipc.StartCaptureRequest.live:type_name -> gta.internalipc.PcapLiveConfig
 	14, // 9: gta.internalipc.StartCaptureRequest.file:type_name -> gta.internalipc.PcapFileConfig
 	25, // 10: gta.internalipc.ListCaptureSessionsResponse.sessions:type_name -> gta.internalipc.CaptureSessionSummary
@@ -2958,22 +3047,24 @@ var file_pkg_internalipc_proto_internal_proto_depIdxs = []int32{
 	2,  // 23: gta.internalipc.CaptureControl.TestPlugin:input_type -> gta.internalipc.TestPluginRequest
 	6,  // 24: gta.internalipc.CaptureControl.Verify:input_type -> gta.internalipc.VerifyRequest
 	10, // 25: gta.internalipc.CaptureControl.SampleBytes:input_type -> gta.internalipc.SampleBytesRequest
-	16, // 26: gta.internalipc.CaptureControl.StartCapture:output_type -> gta.internalipc.StartCaptureResponse
-	18, // 27: gta.internalipc.CaptureControl.StopCapture:output_type -> gta.internalipc.StopCaptureResponse
-	20, // 28: gta.internalipc.CaptureControl.GetCaptureStatus:output_type -> gta.internalipc.GetCaptureStatusResponse
-	24, // 29: gta.internalipc.CaptureControl.ListCaptureSessions:output_type -> gta.internalipc.ListCaptureSessionsResponse
-	22, // 30: gta.internalipc.CaptureControl.ListInterfaces:output_type -> gta.internalipc.ListInterfacesResponse
-	1,  // 31: gta.internalipc.CaptureControl.DecodeRawPackets:output_type -> gta.internalipc.DecodeRawPacketsResponse
-	28, // 32: gta.internalipc.CaptureControl.ListPlugins:output_type -> gta.internalipc.ListPluginsResponse
-	30, // 33: gta.internalipc.CaptureControl.GetPluginManifest:output_type -> gta.internalipc.GetPluginManifestResponse
-	32, // 34: gta.internalipc.CaptureControl.DeregisterPlugin:output_type -> gta.internalipc.DeregisterPluginResponse
-	34, // 35: gta.internalipc.CaptureControl.SetSessionPlugin:output_type -> gta.internalipc.SetSessionPluginResponse
-	36, // 36: gta.internalipc.CaptureControl.WatchPlugins:output_type -> gta.internalipc.PluginEvent
-	5,  // 37: gta.internalipc.CaptureControl.TestPlugin:output_type -> gta.internalipc.TestPluginResponse
-	9,  // 38: gta.internalipc.CaptureControl.Verify:output_type -> gta.internalipc.VerifyResponse
-	12, // 39: gta.internalipc.CaptureControl.SampleBytes:output_type -> gta.internalipc.SampleBytesResponse
-	26, // [26:40] is the sub-list for method output_type
-	12, // [12:26] is the sub-list for method input_type
+	37, // 26: gta.internalipc.CaptureControl.GetRegistryAddr:input_type -> gta.internalipc.GetRegistryAddrRequest
+	16, // 27: gta.internalipc.CaptureControl.StartCapture:output_type -> gta.internalipc.StartCaptureResponse
+	18, // 28: gta.internalipc.CaptureControl.StopCapture:output_type -> gta.internalipc.StopCaptureResponse
+	20, // 29: gta.internalipc.CaptureControl.GetCaptureStatus:output_type -> gta.internalipc.GetCaptureStatusResponse
+	24, // 30: gta.internalipc.CaptureControl.ListCaptureSessions:output_type -> gta.internalipc.ListCaptureSessionsResponse
+	22, // 31: gta.internalipc.CaptureControl.ListInterfaces:output_type -> gta.internalipc.ListInterfacesResponse
+	1,  // 32: gta.internalipc.CaptureControl.DecodeRawPackets:output_type -> gta.internalipc.DecodeRawPacketsResponse
+	28, // 33: gta.internalipc.CaptureControl.ListPlugins:output_type -> gta.internalipc.ListPluginsResponse
+	30, // 34: gta.internalipc.CaptureControl.GetPluginManifest:output_type -> gta.internalipc.GetPluginManifestResponse
+	32, // 35: gta.internalipc.CaptureControl.DeregisterPlugin:output_type -> gta.internalipc.DeregisterPluginResponse
+	34, // 36: gta.internalipc.CaptureControl.SetSessionPlugin:output_type -> gta.internalipc.SetSessionPluginResponse
+	36, // 37: gta.internalipc.CaptureControl.WatchPlugins:output_type -> gta.internalipc.PluginEvent
+	5,  // 38: gta.internalipc.CaptureControl.TestPlugin:output_type -> gta.internalipc.TestPluginResponse
+	9,  // 39: gta.internalipc.CaptureControl.Verify:output_type -> gta.internalipc.VerifyResponse
+	12, // 40: gta.internalipc.CaptureControl.SampleBytes:output_type -> gta.internalipc.SampleBytesResponse
+	38, // 41: gta.internalipc.CaptureControl.GetRegistryAddr:output_type -> gta.internalipc.GetRegistryAddrResponse
+	27, // [27:42] is the sub-list for method output_type
+	12, // [12:27] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
 	12, // [12:12] is the sub-list for extension extendee
 	0,  // [0:12] is the sub-list for field type_name
@@ -2994,7 +3085,7 @@ func file_pkg_internalipc_proto_internal_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_internalipc_proto_internal_proto_rawDesc), len(file_pkg_internalipc_proto_internal_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   40,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

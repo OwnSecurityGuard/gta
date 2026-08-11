@@ -27,8 +27,12 @@ type ScaffoldRequest struct {
 	Protocol        string                 `protobuf:"bytes,2,opt,name=protocol,proto3" json:"protocol,omitempty"`
 	ProtocolVersion string                 `protobuf:"bytes,3,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
 	Hints           []string               `protobuf:"bytes,4,rep,name=hints,proto3" json:"hints,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// output_dir 严格指定生成目录：文件直接写入该目录（go.mod/main.go/plugin.yaml）。
+	// 留空则回退到服务端配置的 plugins 目录下的 <name>/。MCP 层会把用户传入的
+	// output_dir 透传到这里，确保「严格遵守输出目录」且返回实际路径。
+	OutputDir     string `protobuf:"bytes,5,opt,name=output_dir,json=outputDir,proto3" json:"output_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ScaffoldRequest) Reset() {
@@ -89,13 +93,25 @@ func (x *ScaffoldRequest) GetHints() []string {
 	return nil
 }
 
+func (x *ScaffoldRequest) GetOutputDir() string {
+	if x != nil {
+		return x.OutputDir
+	}
+	return ""
+}
+
 type ScaffoldResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	OutputDir     string                 `protobuf:"bytes,2,opt,name=output_dir,json=outputDir,proto3" json:"output_dir,omitempty"`
-	Created       []string               `protobuf:"bytes,3,rep,name=created,proto3" json:"created,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	OutputDir string                 `protobuf:"bytes,2,opt,name=output_dir,json=outputDir,proto3" json:"output_dir,omitempty"`
+	Created   []string               `protobuf:"bytes,3,rep,name=created,proto3" json:"created,omitempty"`
+	// sdk_version 是脚手架固定引用的 gta-plugin-sdk 版本（与开发指南/SDK 同版本发布）。
+	SdkVersion string `protobuf:"bytes,4,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
+	// framing_available 标记当前 SDK 版本是否包含 framing 包。为 false 时生成的
+	// main.go 不会 import framing，并显式标注「framing 不可用」，避免引用缺失的导入。
+	FramingAvailable bool `protobuf:"varint,5,opt,name=framing_available,json=framingAvailable,proto3" json:"framing_available,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ScaffoldResponse) Reset() {
@@ -147,6 +163,20 @@ func (x *ScaffoldResponse) GetCreated() []string {
 		return x.Created
 	}
 	return nil
+}
+
+func (x *ScaffoldResponse) GetSdkVersion() string {
+	if x != nil {
+		return x.SdkVersion
+	}
+	return ""
+}
+
+func (x *ScaffoldResponse) GetFramingAvailable() bool {
+	if x != nil {
+		return x.FramingAvailable
+	}
+	return false
 }
 
 type ListPluginsRequest struct {
@@ -1541,17 +1571,22 @@ var File_pkg_plugindev_proto_plugindev_proto protoreflect.FileDescriptor
 
 const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\n" +
-	"#pkg/plugindev/proto/plugindev.proto\x12\rgta.plugindev\"\x82\x01\n" +
+	"#pkg/plugindev/proto/plugindev.proto\x12\rgta.plugindev\"\xa1\x01\n" +
 	"\x0fScaffoldRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bprotocol\x18\x02 \x01(\tR\bprotocol\x12)\n" +
 	"\x10protocol_version\x18\x03 \x01(\tR\x0fprotocolVersion\x12\x14\n" +
-	"\x05hints\x18\x04 \x03(\tR\x05hints\"_\n" +
+	"\x05hints\x18\x04 \x03(\tR\x05hints\x12\x1d\n" +
+	"\n" +
+	"output_dir\x18\x05 \x01(\tR\toutputDir\"\xad\x01\n" +
 	"\x10ScaffoldResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"output_dir\x18\x02 \x01(\tR\toutputDir\x12\x18\n" +
-	"\acreated\x18\x03 \x03(\tR\acreated\"\x14\n" +
+	"\acreated\x18\x03 \x03(\tR\acreated\x12\x1f\n" +
+	"\vsdk_version\x18\x04 \x01(\tR\n" +
+	"sdkVersion\x12+\n" +
+	"\x11framing_available\x18\x05 \x01(\bR\x10framingAvailable\"\x14\n" +
 	"\x12ListPluginsRequest\"P\n" +
 	"\x10DiscoveredPlugin\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +

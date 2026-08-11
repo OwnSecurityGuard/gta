@@ -110,7 +110,7 @@ func main() {
 		}
 	}()
 
-	engine := newPipelineService(absWorkDir, controlStore, registry, rules)
+	engine := newPipelineService(absWorkDir, controlStore, registry, rules, *registryAddr)
 
 	// CaptureControl gRPC server：供 gta-mcp / gta-trace 调用。
 	// 默认 :8088（TCP），可通过 -control-addr 覆盖。

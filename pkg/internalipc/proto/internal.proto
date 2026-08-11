@@ -42,6 +42,10 @@ service CaptureControl {
   // SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
   // 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
   rpc SampleBytes(SampleBytesRequest) returns (SampleBytesResponse);
+  // GetRegistryAddr 返回插件应连接注册中心地址（即 -registry-addr 的值，如 :9091）。
+  // gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
+  // 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
+  rpc GetRegistryAddr(GetRegistryAddrRequest) returns (GetRegistryAddrResponse);
 }
 
 // DecodeRawPacketsRequest 离线解码请求。
@@ -332,4 +336,14 @@ message PluginEvent {
   string name = 3;             // 插件名（manifest.name）
   bool online = 4;             // 事件后是否在线
   int64 timestamp_unix = 5;    // 事件发生时间（Unix 秒）
+}
+
+// GetRegistryAddrRequest 无参数。
+message GetRegistryAddrRequest {}
+
+// GetRegistryAddrResponse 返回插件应连接的注册中心地址。
+// registry_addr 即 gta-pipeline 的 -registry-addr（如 :9091），插件启动时必须
+// 将其填入 GTA_REGISTRY_ADDR 才能向运行时注册。空字符串表示 pipeline 未配置注册中心。
+message GetRegistryAddrResponse {
+  string registry_addr = 1;
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/google/uuid"
 
+	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
 	"gta/pkg/analyze/semantic"
 	"gta/pkg/capture"
@@ -22,7 +23,6 @@ import (
 	"gta/pkg/internalipc"
 	"gta/pkg/internalipc/capturecontrol"
 	"gta/pkg/plugin"
-	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/schema"
 	"gta/pkg/store"
 )
@@ -41,8 +41,8 @@ type captureTask struct {
 	start      time.Time
 
 	// 解码插件绑定：创建时设定，运行中可经 SetSessionPlugin 热切换（pluginMu 保护）。
-	pluginMu  sync.RWMutex
-	plugin    string
+	pluginMu sync.RWMutex
+	plugin   string
 	// reresolve 用于外部（SetSessionPlugin）通知 run 循环立即重解析解码器（buffer 1，非阻塞发送）。
 	reresolve chan struct{}
 
@@ -221,12 +221,11 @@ func (t *captureTask) run() {
 
 		// 持久化证据图：语义引擎只能在内存构建，session 结束时一次性写入
 		if semanticEngine != nil {
-			if gctx, gcancel := context.WithTimeout(context.Background(), 10*time.Second); true {
-				if err := t.writeEvidenceGraph(gctx, semanticEngine.Graph()); err != nil {
-					t.logger.Error("write evidence graph", "error", err)
-				}
-				gcancel()
+			gctx, gcancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := t.writeEvidenceGraph(gctx, semanticEngine.Graph()); err != nil {
+				t.logger.Error("write evidence graph", "error", err)
 			}
+			gcancel()
 		}
 
 		t.state.Store(int32(capture.StateClosed))
@@ -308,7 +307,7 @@ func (t *captureTask) run() {
 	semanticCfg := semantic.DefaultConfig()
 	semanticCfg.TransactionClustering = &semantic.TransactionClusterConfig{
 		NewTransactionOnRequest: true,
-		MergeGap:               200 * time.Millisecond,
+		MergeGap:                200 * time.Millisecond,
 	}
 	semanticEngine = semantic.NewEngine(semanticCfg, nil)
 
@@ -578,6 +577,12 @@ func (t *captureTask) writeEvidenceGraph(ctx context.Context, g *semantic.Eviden
 	for _, n := range g.Nodes {
 		labelsJSON, _ := json.Marshal(n.Labels)
 		propsJSON, _ := json.Marshal(n.Properties)
+		var semanticJSON string
+		if n.Semantic != nil {
+			if b, err := json.Marshal(n.Semantic); err == nil {
+				semanticJSON = string(b)
+			}
+		}
 		nodes = append(nodes, store.EvidenceNodeRow{
 			ID:         n.ID,
 			SessionID:  n.SessionID,
@@ -586,20 +591,26 @@ func (t *captureTask) writeEvidenceGraph(ctx context.Context, g *semantic.Eviden
 			Timestamp:  n.Timestamp.UnixNano(),
 			Labels:     string(labelsJSON),
 			Properties: string(propsJSON),
+			Semantic:   semanticJSON,
 		})
 	}
 
 	for _, e := range g.Edges {
 		propsJSON, _ := json.Marshal(e.Properties)
+		evidenceIDsJSON, _ := json.Marshal(e.EvidenceIDs)
 		edges = append(edges, store.EvidenceEdgeRow{
-			ID:         uuid.NewString(),
-			SessionID:  t.sessionID,
-			Source:     e.Source,
-			Target:     e.Target,
-			Type:       string(e.Type),
-			Confidence: e.Confidence,
-			Reason:     e.Reason,
-			Properties: string(propsJSON),
+			ID:          uuid.NewString(),
+			SessionID:   t.sessionID,
+			Source:      e.Source,
+			Target:      e.Target,
+			Type:        string(e.Type),
+			Confidence:  e.Confidence,
+			Reason:      e.Reason,
+			Properties:  string(propsJSON),
+			Strength:    string(e.Strength),
+			Method:      string(e.Method),
+			RuleID:      e.RuleID,
+			EvidenceIDs: string(evidenceIDsJSON),
 		})
 	}
 

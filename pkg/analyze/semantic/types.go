@@ -35,7 +35,7 @@ const SemanticContractVersion = "v1"
 const (
 	DirectionClientToServer string = "client_to_server"
 	DirectionServerToClient string = "server_to_client"
-	DirectionUnknown       string = "unknown"
+	DirectionUnknown        string = "unknown"
 )
 
 // SemanticKind 是语义事件种类。v1 固定为以下枚举，不再扩充。

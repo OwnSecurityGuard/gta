@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"gta/pkg/event"
 	"gta/pkg/schema"
@@ -158,7 +159,8 @@ CREATE TABLE IF NOT EXISTS evidence_nodes (
     analysis_run TEXT,
     timestamp INTEGER NOT NULL,
     labels TEXT,
-    properties TEXT
+    properties TEXT,
+    semantic TEXT
 );
 CREATE TABLE IF NOT EXISTS evidence_edges (
     id TEXT PRIMARY KEY,
@@ -169,10 +171,29 @@ CREATE TABLE IF NOT EXISTS evidence_edges (
     confidence REAL NOT NULL DEFAULT 1.0,
     reason TEXT,
     analysis_run TEXT,
-    properties TEXT
+    properties TEXT,
+    strength TEXT,
+    method TEXT,
+    rule_id TEXT,
+    evidence_ids TEXT
 );`
 	if _, err := s.db.Exec(evidenceGraphDDL); err != nil {
 		return err
+	}
+
+	// Phase 3 迁移：为已有证据图表补齐 v1 字段列。
+	// 新表由上面的 CREATE TABLE 直接包含；此处仅对旧表幂等补齐，
+	// 列已存在时 SQLite 报 "duplicate column"，忽略即可。
+	for _, stmt := range []string{
+		"ALTER TABLE evidence_nodes ADD COLUMN semantic TEXT",
+		"ALTER TABLE evidence_edges ADD COLUMN strength TEXT",
+		"ALTER TABLE evidence_edges ADD COLUMN method TEXT",
+		"ALTER TABLE evidence_edges ADD COLUMN rule_id TEXT",
+		"ALTER TABLE evidence_edges ADD COLUMN evidence_ids TEXT",
+	} {
+		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrate evidence graph schema: %w", err)
+		}
 	}
 
 	// 索引：支持高效查询

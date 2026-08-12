@@ -32,8 +32,8 @@ func (s *SQLiteStore) WriteEvidenceGraph(ctx context.Context, sessionID string, 
 	// 写节点
 	if len(nodes) > 0 {
 		nodeStmt, err := tx.PrepareContext(ctx, `
-			INSERT INTO evidence_nodes(id, session_id, kind, flow_id, analysis_run, timestamp, labels, properties)
-			VALUES(?,?,?,?,?,?,?,?)
+			INSERT INTO evidence_nodes(id, session_id, kind, flow_id, analysis_run, timestamp, labels, properties, semantic)
+			VALUES(?,?,?,?,?,?,?,?,?)
 		`)
 		if err != nil {
 			return err
@@ -49,7 +49,7 @@ func (s *SQLiteStore) WriteEvidenceGraph(ctx context.Context, sessionID string, 
 			if n.AnalysisRun != "" {
 				ar = sql.NullString{String: n.AnalysisRun, Valid: true}
 			}
-			if _, err := nodeStmt.ExecContext(ctx, n.ID, n.SessionID, n.Kind, flowID, ar, n.Timestamp, n.Labels, n.Properties); err != nil {
+			if _, err := nodeStmt.ExecContext(ctx, n.ID, n.SessionID, n.Kind, flowID, ar, n.Timestamp, n.Labels, n.Properties, n.Semantic); err != nil {
 				return fmt.Errorf("insert evidence node %s: %w", n.ID, err)
 			}
 		}
@@ -58,8 +58,8 @@ func (s *SQLiteStore) WriteEvidenceGraph(ctx context.Context, sessionID string, 
 	// 写边
 	if len(edges) > 0 {
 		edgeStmt, err := tx.PrepareContext(ctx, `
-			INSERT INTO evidence_edges(id, session_id, source, target, type, confidence, reason, analysis_run, properties)
-			VALUES(?,?,?,?,?,?,?,?,?)
+			INSERT INTO evidence_edges(id, session_id, source, target, type, confidence, reason, analysis_run, properties, strength, method, rule_id, evidence_ids)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
 		`)
 		if err != nil {
 			return err
@@ -71,7 +71,7 @@ func (s *SQLiteStore) WriteEvidenceGraph(ctx context.Context, sessionID string, 
 			if e.AnalysisRun != "" {
 				ar = sql.NullString{String: e.AnalysisRun, Valid: true}
 			}
-			if _, err := edgeStmt.ExecContext(ctx, e.ID, e.SessionID, e.Source, e.Target, e.Type, e.Confidence, e.Reason, ar, e.Properties); err != nil {
+			if _, err := edgeStmt.ExecContext(ctx, e.ID, e.SessionID, e.Source, e.Target, e.Type, e.Confidence, e.Reason, ar, e.Properties, e.Strength, e.Method, e.RuleID, e.EvidenceIDs); err != nil {
 				return fmt.Errorf("insert evidence edge %s: %w", e.ID, err)
 			}
 		}
@@ -102,7 +102,7 @@ func (s *SQLiteStore) QueryEvidenceGraph(ctx context.Context, q EvidenceGraphQue
 
 // QueryEvidenceEdges 按方向查询证据图边，用于节点链式追踪。
 func (s *SQLiteStore) QueryEvidenceEdges(ctx context.Context, q EvidenceEdgeQuery) ([]EvidenceEdgeRow, error) {
-	query := "SELECT id, session_id, source, target, type, confidence, COALESCE(reason,''), COALESCE(properties,'{}') FROM evidence_edges WHERE 1=1"
+	query := "SELECT id, session_id, source, target, type, confidence, COALESCE(reason,''), COALESCE(properties,'{}'), COALESCE(strength,''), COALESCE(method,''), COALESCE(rule_id,''), COALESCE(evidence_ids,'[]') FROM evidence_edges WHERE 1=1"
 	var args []any
 
 	if q.SessionID != "" {
@@ -136,7 +136,7 @@ func (s *SQLiteStore) QueryEvidenceEdges(ctx context.Context, q EvidenceEdgeQuer
 	var edges []EvidenceEdgeRow
 	for rows.Next() {
 		var e EvidenceEdgeRow
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.Source, &e.Target, &e.Type, &e.Confidence, &e.Reason, &e.Properties); err != nil {
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Source, &e.Target, &e.Type, &e.Confidence, &e.Reason, &e.Properties, &e.Strength, &e.Method, &e.RuleID, &e.EvidenceIDs); err != nil {
 			return nil, err
 		}
 		edges = append(edges, e)
@@ -150,7 +150,7 @@ func (s *SQLiteStore) QueryEvidenceNodesByIDs(ctx context.Context, sessionID str
 		return nil, nil
 	}
 
-	query := "SELECT id, session_id, kind, flow_id, timestamp, COALESCE(labels,'{}'), COALESCE(properties,'{}') FROM evidence_nodes WHERE id IN (" + placeholders(len(ids)) + ")"
+	query := "SELECT id, session_id, kind, flow_id, timestamp, COALESCE(labels,'{}'), COALESCE(properties,'{}'), COALESCE(semantic,'') FROM evidence_nodes WHERE id IN (" + placeholders(len(ids)) + ")"
 	var args []any
 	for _, id := range ids {
 		args = append(args, id)
@@ -166,7 +166,7 @@ func (s *SQLiteStore) QueryEvidenceNodesByIDs(ctx context.Context, sessionID str
 	for rows.Next() {
 		var n EvidenceNodeRow
 		var flowID sql.NullString
-		if err := rows.Scan(&n.ID, &n.SessionID, &n.Kind, &flowID, &n.Timestamp, &n.Labels, &n.Properties); err != nil {
+		if err := rows.Scan(&n.ID, &n.SessionID, &n.Kind, &flowID, &n.Timestamp, &n.Labels, &n.Properties, &n.Semantic); err != nil {
 			return nil, err
 		}
 		if flowID.Valid {
@@ -202,7 +202,7 @@ func (s *SQLiteStore) QueryEventNodeID(ctx context.Context, sessionID string, se
 }
 
 func (s *SQLiteStore) queryEvidenceNodes(ctx context.Context, q EvidenceGraphQuery) ([]EvidenceNodeRow, error) {
-	query := "SELECT id, session_id, kind, flow_id, timestamp, COALESCE(labels,'{}'), COALESCE(properties,'{}') FROM evidence_nodes WHERE 1=1"
+	query := "SELECT id, session_id, kind, flow_id, timestamp, COALESCE(labels,'{}'), COALESCE(properties,'{}'), COALESCE(semantic,'') FROM evidence_nodes WHERE 1=1"
 	var args []any
 
 	if q.SessionID != "" {
@@ -249,7 +249,7 @@ func (s *SQLiteStore) queryEvidenceNodes(ctx context.Context, q EvidenceGraphQue
 	for rows.Next() {
 		var n EvidenceNodeRow
 		var flowID sql.NullString
-		if err := rows.Scan(&n.ID, &n.SessionID, &n.Kind, &flowID, &n.Timestamp, &n.Labels, &n.Properties); err != nil {
+		if err := rows.Scan(&n.ID, &n.SessionID, &n.Kind, &flowID, &n.Timestamp, &n.Labels, &n.Properties, &n.Semantic); err != nil {
 			return nil, err
 		}
 		if flowID.Valid {
@@ -261,7 +261,7 @@ func (s *SQLiteStore) queryEvidenceNodes(ctx context.Context, q EvidenceGraphQue
 }
 
 func (s *SQLiteStore) queryEvidenceEdges(ctx context.Context, q EvidenceGraphQuery, nodes []EvidenceNodeRow) ([]EvidenceEdgeRow, error) {
-	query := "SELECT id, session_id, source, target, type, confidence, COALESCE(reason,''), COALESCE(properties,'{}') FROM evidence_edges WHERE 1=1"
+	query := "SELECT id, session_id, source, target, type, confidence, COALESCE(reason,''), COALESCE(properties,'{}'), COALESCE(strength,''), COALESCE(method,''), COALESCE(rule_id,''), COALESCE(evidence_ids,'[]') FROM evidence_edges WHERE 1=1"
 	var args []any
 
 	if q.SessionID != "" {
@@ -309,7 +309,7 @@ func (s *SQLiteStore) queryEvidenceEdges(ctx context.Context, q EvidenceGraphQue
 	var edges []EvidenceEdgeRow
 	for rows.Next() {
 		var e EvidenceEdgeRow
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.Source, &e.Target, &e.Type, &e.Confidence, &e.Reason, &e.Properties); err != nil {
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Source, &e.Target, &e.Type, &e.Confidence, &e.Reason, &e.Properties, &e.Strength, &e.Method, &e.RuleID, &e.EvidenceIDs); err != nil {
 			return nil, err
 		}
 		edges = append(edges, e)

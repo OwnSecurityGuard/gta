@@ -466,10 +466,12 @@ func TestEngine_PatternMatchResponseTo(t *testing.T) {
 
 	g := eng.Graph()
 
-	// 验证生成了 response_to 边（source 是节点 ID 即 evt_前缀 + event ID）
+	// 验证生成了 response_to 边。
+	// Graph Integrity：边的 source/target 都必须是图中节点 ID（evt_ 前缀 + event ID），
+	// 不能是裸 event.EventID，否则形成悬空边。
 	var found bool
 	for _, edge := range g.Edges {
-		if edge.Type == ResponseTo && edge.Target == "req-1" {
+		if edge.Type == ResponseTo && edge.Target == "evt_req-1" {
 			found = true
 			if edge.Confidence != 0.85 {
 				t.Errorf("pattern match edge confidence = %f, want 0.85", edge.Confidence)
@@ -564,10 +566,11 @@ func TestEngine_PatternMatchPriority(t *testing.T) {
 	g := eng.Graph()
 
 	// 响应应该匹配 req2（correlation_key 优先），而不是 req1（命名模式）
+	// target 为节点 ID 形式 evt_<event_id>。
 	for _, edge := range g.Edges {
 		if edge.Type == ResponseTo {
-			if edge.Target != "req-with-key" {
-				t.Errorf("response_to target = %s, want req-with-key (correlation_key match takes priority)", edge.Target)
+			if edge.Target != "evt_req-with-key" {
+				t.Errorf("response_to target = %s, want evt_req-with-key (correlation_key match takes priority)", edge.Target)
 			}
 			if edge.Confidence != 1.0 {
 				t.Errorf("correlation_key match confidence = %f, want 1.0", edge.Confidence)
@@ -581,10 +584,10 @@ func TestEngine_PatternMatchPriority(t *testing.T) {
 // TestTrySwapSuffix 单元测试后缀替换函数。
 func TestTrySwapSuffix(t *testing.T) {
 	cases := []struct {
-		s       string
-		old     string
-		new     string
-		want    string
+		s    string
+		old  string
+		new  string
+		want string
 	}{
 		{"LoginReq", "Req", "Resp", "LoginResp"},
 		{"LoginReq", "Request", "Response", ""},
@@ -606,7 +609,7 @@ func TestEngine_TransactionClustering_BasicRequestBoundary(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TransactionClustering = &TransactionClusterConfig{
 		NewTransactionOnRequest: true,
-		MergeGap:               100 * time.Millisecond,
+		MergeGap:                100 * time.Millisecond,
 	}
 
 	eng := NewEngine(cfg, nil)
@@ -688,7 +691,7 @@ func TestEngine_TransactionClustering_MergeGap(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TransactionClustering = &TransactionClusterConfig{
 		NewTransactionOnRequest: true,
-		MergeGap:               50 * time.Millisecond,
+		MergeGap:                50 * time.Millisecond,
 	}
 
 	eng := NewEngine(cfg, nil)
@@ -740,7 +743,7 @@ func TestEngine_TransactionClustering_NoDirection(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TransactionClustering = &TransactionClusterConfig{
 		NewTransactionOnRequest: true,
-		MergeGap:               100 * time.Millisecond,
+		MergeGap:                100 * time.Millisecond,
 	}
 
 	eng := NewEngine(cfg, nil)

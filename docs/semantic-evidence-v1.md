@@ -316,6 +316,11 @@ type EvidenceNode struct {
 
 `EventID` 字段在 event 类节点上冗余记录原始事件 ID，便于从 Evidence 回溯到 Event。
 
+> **注意区分 `eventID` 与节点 ID。**
+> `evt_<eventID>` 是节点 ID，裸 `<eventID>` 不是。任何边的 `source` / `target`
+> 都只能填节点 ID。历史上曾出现直接把 `event.EventID` 当 target 传入的缺陷，
+> 产生了 `caused_by` / `response_to` / `possible_followup` 悬空边（见 §5.3）。
+
 ### 3.3 EvidenceNode JSON 示例
 
 ```json
@@ -559,6 +564,37 @@ type EvidenceGraph struct {
 - v1 稳定的结构化字段（`Strength` / `Method` / `RuleID` / `Reason` / `EvidenceIDs` / `Semantic`）
   已足以承载可解释性需求，`Labels` / `Properties` 是历史包袱，最终会被移除。
 
+### 5.3 Graph Integrity（图完整性不变量，硬约束）
+
+> **不变量：所有 `EvidenceEdge.Source` 与 `EvidenceEdge.Target` 都必须能在
+> `EvidenceGraph.Nodes` 中找到。**
+
+这不是代码风格偏好，而是图结构的最基本前提。一旦出现悬空端点：
+
+- `trace_event_chain` 的 BFS 会走到一个不存在的节点，链路在此断裂或产出空壳节点；
+- `query_evidence_graph` / `suggest_schema` 用 `nodeMap[edge.Target]` 查表会拿到零值，
+  节点类型退化为空字符串，统计与建议结果被静默污染；
+- UI 图渲染无法为该端点定位坐标，边要么丢弃要么指向虚空。
+
+失败模式是**静默的**——不报错、不 panic，只是结果慢慢变得不可信，因此必须在写入侧拦截。
+
+实现约束：
+
+1. 节点一律经由 `Engine.addNode` 写入，同时登记到内部 `nodeIDs` 集合。
+2. `Engine.addEdgeFromNode` 在建边前校验两个端点均已登记；不满足则**丢弃该边并记录 warn**，
+   绝不写入图。这样即使未来新增建边逻辑时误传裸 `EventID`，也不会污染证据图。
+3. 指向事件的端点统一通过 `eventNodeID(id)` 构造，或经 `resolveEventNode(id)` 查得；
+   禁止在调用点手写 `string(ev.Identity.ID)` 之类的裸 ID。
+
+对应测试（`pkg/analyze/semantic/engine_integrity_test.go`）：
+
+| 测试 | 职责 |
+|---|---|
+| `TestEvidenceGraph_EdgeEndpointsAlwaysExist` | 通用不变量：遍历全图断言每条边两端都在 Nodes 中 |
+| `TestEvidenceGraph_ScenarioCoversAllEdgeTypes` | 保证上面的断言不是空跑——场景必须覆盖全部边类型 |
+| `TestEvidenceGraph_EventTargetsUseNodeIDForm` | 回归：指向事件的端点必须是 `evt_<id>` 而非裸 `EventID` |
+| `TestEngine_DropsEdgeWithUnknownEndpoint` | 结构性保证：端点不存在时边被丢弃，而非静默写入 |
+
 ---
 
 ## 6. 数据关系总览
@@ -617,7 +653,8 @@ Node#2
 4. Evidence 与 Event 明确分层（Edge 不回写 Event）。
 5. `observed / derived / inferred` 有明确语义且与 `confidence` 不混用。
 6. `confidence` 与 `strength` 不混用（两个独立字段）。
-7. 所有 `EvidenceEdge` 可定位到 `rule_id` / `method`（字段已存在，由 Phase 3 填充）。
+7. 所有 `EvidenceEdge` 可定位到 `rule_id` / `method`（字段已存在，**Phase 3 已填充**）。
+8. Graph Integrity：所有 edge 端点都可在 `Nodes` 中找到（**Phase 3 已在写入侧强制并有测试覆盖**，见 §5.3）。
 
 > 验收底线：**任何 AI 据本文档，都能独立写出与本仓库一致的 JSON。**
 
@@ -629,7 +666,7 @@ Node#2
 |---|---|---|
 | **1. Contract Freeze** | 仅定义契约 + 类型 + 本文档 | 不改 Capture / Event / Plugin RPC / MCP Tool / DB / UI |
 | **2. Semantic Projection** | `Event → SemanticEvent` 确定性映射 | 不引入 AI 推理，不自动猜 player/login |
-| **3. Evidence Graph v1 化** | 现有 Evidence Graph 迁移到 v1 Edge（补 strength/method/rule_id/evidence_ids） | 每条 edge 必须可解释 |
+| **3. Evidence Graph v1 化** ✅ | 现有 Evidence Graph 迁移到 v1：引擎产出边填充 `strength/method/rule_id/evidence_ids`；事件节点填充 `Semantic`；store 持久化并读回新字段；修复悬空边并在写入侧强制 Graph Integrity（§5.3） | 每条 edge 必须可解释、且端点必须存在 |
 | **4. 统一 Agent/UI 输出** | 让已有 MCP Tool 输出统一 v1 Contract | 不新增 Tool |
 
 建议提交顺序：

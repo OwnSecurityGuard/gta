@@ -190,9 +190,11 @@ type EvidenceNodeRow struct {
 	Kind        string `json:"kind"`
 	FlowID      string `json:"flow_id,omitempty"`
 	AnalysisRun string `json:"analysis_run,omitempty"`
-	Timestamp   int64  `json:"timestamp"`           // unix nano
+	Timestamp   int64  `json:"timestamp"`            // unix nano
 	Labels      string `json:"labels,omitempty"`     // JSON
-	Properties  string `json:"properties,omitempty"`  // JSON
+	Properties  string `json:"properties,omitempty"` // JSON
+	// Semantic 是事件节点的语义投影（Phase 2 SemanticProjector 输出），以 JSON 存储。
+	Semantic string `json:"semantic,omitempty"` // JSON *SemanticEvent
 }
 
 // EvidenceEdgeRow 是 evidence_edges 表的一行。
@@ -206,19 +208,24 @@ type EvidenceEdgeRow struct {
 	Reason      string  `json:"reason,omitempty"`
 	AnalysisRun string  `json:"analysis_run,omitempty"`
 	Properties  string  `json:"properties,omitempty"` // JSON
+	// v1 结构化字段（Phase 3 新增）：与 Confidence 分离，保证 Evidence 可解释、可溯源。
+	Strength    string `json:"strength,omitempty"`     // EvidenceStrength (observed/derived/inferred)
+	Method      string `json:"method,omitempty"`       // EvidenceMethod (plugin/correlation/name_pattern/...)
+	RuleID      string `json:"rule_id,omitempty"`      // 关联的规则 ID（如 naming pattern）
+	EvidenceIDs string `json:"evidence_ids,omitempty"` // JSON []string，支撑该关系的底层证据
 }
 
 // EvidenceGraphQuery 查询证据图。
 type EvidenceGraphQuery struct {
-	SessionID        string
-	NodeKind         string
-	FlowID           string
-	EdgeType         string
-	MinConfidence    float64
-	RootNodeID       string // 从该节点开始扩展邻接子图
-	MaxDepth         int    // 邻接扩展最大深度（0=不限制）
-	Limit            int
-	Offset           int
+	SessionID     string
+	NodeKind      string
+	FlowID        string
+	EdgeType      string
+	MinConfidence float64
+	RootNodeID    string // 从该节点开始扩展邻接子图
+	MaxDepth      int    // 邻接扩展最大深度（0=不限制）
+	Limit         int
+	Offset        int
 }
 
 // EvidenceGraphResult 是证据图的查询结果。

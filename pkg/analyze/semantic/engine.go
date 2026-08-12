@@ -43,6 +43,13 @@ type Engine struct {
 	entityIds    map[EntityKey]string     // entity key -> 节点 ID
 	eventIds     map[event.EventID]string // event id -> 节点 ID
 
+	// nodeIDs 是图中所有已存在节点 ID 的集合，用于在建边时强制校验
+	// Graph Integrity 不变量：EvidenceEdge.Source / Target 必须存在于 Nodes。
+	nodeIDs map[string]struct{}
+
+	// projector 是确定性语义投影器，用于为事件节点填充 Semantic（Phase 2 投影结果）。
+	projector *SemanticProjector
+
 	// 时间聚类状态
 	activeTransactions map[string]*activeTransaction // flow_id -> 当前活跃事务
 	transactionSeq     int64                         // 事务序号计数器
@@ -73,7 +80,9 @@ func NewEngine(config Config, baseline *BaselineManager) *Engine {
 		rawPacketIds:       make(map[string]string),
 		entityIds:          make(map[EntityKey]string),
 		eventIds:           make(map[event.EventID]string),
+		nodeIDs:            make(map[string]struct{}),
 		activeTransactions: make(map[string]*activeTransaction),
+		projector:          NewSemanticProjector(),
 	}
 }
 
@@ -144,13 +153,43 @@ func (e *Engine) Graph() *EvidenceGraph {
 	return out
 }
 
+// addNode 将节点写入图并登记到 nodeIDs 集合。
+//
+// 所有节点都必须经由此方法加入图，否则 addEdgeFromNode 的完整性校验会
+// 把指向它的边判为悬空并丢弃。
+func (e *Engine) addNode(node EvidenceNode) string {
+	e.graph.Nodes = append(e.graph.Nodes, node)
+	e.nodeIDs[node.ID] = struct{}{}
+	return node.ID
+}
+
+// eventNodeID 返回事件在证据图中的节点 ID。
+//
+// 节点 ID 的构造是确定性的（evt_<event_id>）。集中封装在此处，避免调用方
+// 各自拼接、或误把裸 event.EventID 当作节点 ID 传给 addEdge/addEdgeFromNode，
+// 从而产生 Target 无法在 Nodes 中找到的悬空边。
+func eventNodeID(id event.EventID) string {
+	return fmt.Sprintf("evt_%s", id)
+}
+
+// resolveEventNode 查找某事件已注册的图节点 ID。
+//
+// Graph Integrity 不变量：EvidenceEdge.Source / EvidenceEdge.Target 必须能在
+// EvidenceGraph.Nodes 中找到。因此建边前必须确认目标事件节点确实已创建；
+// 若未创建则返回 false，调用方必须放弃建边而不是拼一个可能不存在的 ID。
+func (e *Engine) resolveEventNode(id event.EventID) (string, bool) {
+	nodeID, ok := e.eventIds[id]
+	return nodeID, ok
+}
+
 // ensureEventNode 确保存在对应的事件节点。
 func (e *Engine) ensureEventNode(ev *event.Event) string {
 	if id, ok := e.eventIds[ev.Identity.ID]; ok {
 		return id
 	}
+	semantic := e.projector.Project(ev)
 	node := EvidenceNode{
-		ID:        fmt.Sprintf("evt_%s", ev.Identity.ID),
+		ID:        eventNodeID(ev.Identity.ID),
 		Kind:      NodeEvent,
 		SessionID: ev.Identity.SessionID,
 		FlowID:    ev.Context.FlowID,
@@ -161,11 +200,13 @@ func (e *Engine) ensureEventNode(ev *event.Event) string {
 			"source":    string(ev.Identity.Source),
 		},
 		Properties: map[string]any{
-			"event_id": string(ev.Identity.ID),
+			"event_id":  string(ev.Identity.ID),
 			"direction": ev.Context.Direction,
 		},
+		// Semantic 由 Phase 2 确定性投影器填充（不修改 Event，纯投影）。
+		Semantic: &semantic,
 	}
-	e.graph.Nodes = append(e.graph.Nodes, node)
+	e.addNode(node)
 	e.eventIds[ev.Identity.ID] = node.ID
 	return node.ID
 }
@@ -189,14 +230,14 @@ func (e *Engine) linkDecodedFrom(ev *event.Event) {
 				"raw_packet_id": rawID,
 			},
 		}
-		e.graph.Nodes = append(e.graph.Nodes, node)
-		nodeID = node.ID
+		nodeID = e.addNode(node)
 		e.rawPacketIds[rawID] = nodeID
 	}
 
 	e.addEdge(ev.Identity.ID, nodeID, DecodedFrom, 1.0,
 		fmt.Sprintf("event decoded from raw packet %s", rawID),
-		map[string]any{"raw_packet_id": rawID})
+		map[string]any{"raw_packet_id": rawID},
+		edgeMeta{Strength: EvidenceObserved, Method: MethodPlugin, EvidenceIDs: []string{rawID}})
 }
 
 // ensureStateChangeNode 确保存在 StateChange 节点并建立与实体、事件的关系。
@@ -220,11 +261,17 @@ func (e *Engine) ensureStateChangeNode(ev *event.Event, esc EnrichedStateChange)
 			"version":         esc.EntityVersion,
 		},
 	}
-	e.graph.Nodes = append(e.graph.Nodes, scNode)
+	e.addNode(scNode)
 
 	// state_change -> event (caused_by)
-	e.addEdgeFromNode(scNodeID, string(ev.Identity.ID), CausedBy, 1.0,
-		"state change caused by event", nil)
+	// 目标必须是事件节点 ID（evt_<id>），不能是裸 EventID，否则形成悬空边。
+	if evNodeID, ok := e.resolveEventNode(ev.Identity.ID); ok {
+		e.addEdgeFromNode(scNodeID, evNodeID, CausedBy, 1.0,
+			"state change caused by event", nil,
+			edgeMeta{Strength: EvidenceObserved, Method: MethodStateProjection, EvidenceIDs: []string{string(ev.Identity.ID)}})
+	} else {
+		slog.Warn("semantic engine: skip caused_by edge, event node missing", "event_id", ev.Identity.ID)
+	}
 
 	// 实体节点
 	key := EntityKey{
@@ -246,8 +293,7 @@ func (e *Engine) ensureStateChangeNode(ev *event.Event, esc EnrichedStateChange)
 				"subject_id":   key.SubjectID,
 			},
 		}
-		e.graph.Nodes = append(e.graph.Nodes, entityNode)
-		entityNodeID = entityNode.ID
+		entityNodeID = e.addNode(entityNode)
 		e.entityIds[key] = entityNodeID
 	}
 
@@ -260,7 +306,8 @@ func (e *Engine) ensureStateChangeNode(ev *event.Event, esc EnrichedStateChange)
 			"before_resolved": esc.BeforeResolved,
 			"after_resolved":  esc.AfterResolved,
 			"entity_version":  esc.EntityVersion,
-		})
+		},
+		edgeMeta{Strength: EvidenceDerived, Method: MethodStateProjection, EvidenceIDs: []string{string(ev.Identity.ID)}})
 }
 
 // linkResponseOrCorrelation 处理 response_to 与 correlated_with。
@@ -282,9 +329,16 @@ func (e *Engine) linkResponseOrCorrelation(ev *event.Event) {
 		if correlationKey != "" {
 			key := requestKey{FlowID: flowID, CorrelationKey: correlationKey}
 			if req, ok := e.pendingReqs[key]; ok {
-				e.addEdge(ev.Identity.ID, string(req.EventID), ResponseTo, 1.0,
+				reqNodeID, found := e.resolveEventNode(req.EventID)
+				if !found {
+					slog.Warn("semantic engine: skip response_to edge, request node missing", "request_event_id", req.EventID)
+					delete(e.pendingReqs, key)
+					return
+				}
+				e.addEdge(ev.Identity.ID, reqNodeID, ResponseTo, 1.0,
 					fmt.Sprintf("response matched request by correlation_key=%s", correlationKey),
-					map[string]any{"correlation_key": correlationKey, "match_method": "correlation_key"})
+					map[string]any{"correlation_key": correlationKey, "match_method": "correlation_key"},
+					edgeMeta{Strength: EvidenceDerived, Method: MethodCorrelation, RuleID: "correlation_key", EvidenceIDs: []string{string(req.EventID), string(ev.Identity.ID)}})
 				delete(e.pendingReqs, key)
 				return
 			}
@@ -337,13 +391,20 @@ func (e *Engine) linkResponseByPattern(ev *event.Event, flowID string) bool {
 		return false
 	}
 
+	reqNodeID, found := e.resolveEventNode(req.EventID)
+	if !found {
+		slog.Warn("semantic engine: skip pattern response_to edge, request node missing", "request_event_id", req.EventID)
+		return false
+	}
+
 	// 尝试每个命名模式
 	for _, pat := range e.config.ResponseNamePatterns {
 		predicted := trySwapSuffix(req.EventType, pat.RequestSuffix, pat.ResponseSuffix)
 		if predicted == respType {
-			e.addEdge(ev.Identity.ID, string(req.EventID), ResponseTo, 0.85,
+			e.addEdge(ev.Identity.ID, reqNodeID, ResponseTo, 0.85,
 				fmt.Sprintf("response matched request by naming pattern: %s→%s", req.EventType, respType),
-				map[string]any{"match_method": "naming_pattern", "request_type": req.EventType, "response_type": respType})
+				map[string]any{"match_method": "naming_pattern", "request_type": req.EventType, "response_type": respType},
+				edgeMeta{Strength: EvidenceDerived, Method: MethodNamePattern, RuleID: fmt.Sprintf("name_pattern:%s→%s", pat.RequestSuffix, pat.ResponseSuffix), EvidenceIDs: []string{string(req.EventID), string(ev.Identity.ID)}})
 			delete(e.pendingReqs, key)
 			return true
 		}
@@ -384,31 +445,65 @@ func (e *Engine) linkPossibleFollowup(ev *event.Event) {
 	if delta > e.config.PossibleFollowupWindow {
 		return
 	}
-	e.addEdge(ev.Identity.ID, string(last.ID), PossibleFollowup, 0.3,
+	lastNodeID, found := e.resolveEventNode(last.ID)
+	if !found {
+		slog.Warn("semantic engine: skip possible_followup edge, previous event node missing", "event_id", last.ID)
+		return
+	}
+	e.addEdge(ev.Identity.ID, lastNodeID, PossibleFollowup, 0.3,
 		"time-adjacent event in same flow (low confidence)",
-		map[string]any{"time_delta_ms": delta.Milliseconds()})
+		map[string]any{"time_delta_ms": delta.Milliseconds()},
+		edgeMeta{Strength: EvidenceInferred, Method: MethodTemporal, EvidenceIDs: []string{string(last.ID), string(ev.Identity.ID)}})
+}
+
+// edgeMeta 携带 EvidenceEdge 的 v1 结构化字段（Strength/Method/RuleID/EvidenceIDs），
+// 与 Confidence（判定可信度）分离，保证 Evidence 可解释、可溯源。
+type edgeMeta struct {
+	Strength    EvidenceStrength
+	Method      EvidenceMethod
+	RuleID      string
+	EvidenceIDs []string
 }
 
 // addEdge 添加一条从事件节点出发的有向边。
-func (e *Engine) addEdge(sourceEventID event.EventID, targetNodeID string, edgeType RelationType, confidence float64, reason string, props map[string]any) {
+func (e *Engine) addEdge(sourceEventID event.EventID, targetNodeID string, edgeType RelationType, confidence float64, reason string, props map[string]any, meta edgeMeta) {
 	sourceNodeID, ok := e.eventIds[sourceEventID]
 	if !ok {
 		slog.Warn("semantic engine: source event node not found", "event_id", sourceEventID)
 		return
 	}
-	e.addEdgeFromNode(sourceNodeID, targetNodeID, edgeType, confidence, reason, props)
+	e.addEdgeFromNode(sourceNodeID, targetNodeID, edgeType, confidence, reason, props, meta)
 }
 
-// addEdgeFromNode 添加一条有向边；调用方需确保 sourceNodeID 已存在。
-func (e *Engine) addEdgeFromNode(sourceNodeID, targetNodeID string, edgeType RelationType, confidence float64, reason string, props map[string]any) {
+// addEdgeFromNode 添加一条有向边。
+//
+// Graph Integrity 不变量在此强制执行：source 与 target 都必须是图中已存在的
+// 节点 ID，否则这条边会被丢弃并记录 warn。这样即使未来新增建边逻辑时误传了
+// 裸 EventID 或未创建的节点，也不会污染证据图（trace_event_chain / BFS /
+// UI 渲染都依赖端点可达）。
+func (e *Engine) addEdgeFromNode(sourceNodeID, targetNodeID string, edgeType RelationType, confidence float64, reason string, props map[string]any, meta edgeMeta) {
+	if _, ok := e.nodeIDs[sourceNodeID]; !ok {
+		slog.Warn("semantic engine: drop edge, source node not in graph",
+			"source", sourceNodeID, "target", targetNodeID, "type", edgeType)
+		return
+	}
+	if _, ok := e.nodeIDs[targetNodeID]; !ok {
+		slog.Warn("semantic engine: drop edge, target node not in graph",
+			"source", sourceNodeID, "target", targetNodeID, "type", edgeType)
+		return
+	}
 	edge := EvidenceEdge{
-		ID:         fmt.Sprintf("edge_%s_%s_%s", sourceNodeID, targetNodeID, edgeType),
-		Source:     sourceNodeID,
-		Target:     targetNodeID,
-		Type:       edgeType,
-		Confidence: confidence,
-		Reason:     reason,
-		Properties: props,
+		ID:          fmt.Sprintf("edge_%s_%s_%s", sourceNodeID, targetNodeID, edgeType),
+		Source:      sourceNodeID,
+		Target:      targetNodeID,
+		Type:        edgeType,
+		Confidence:  confidence,
+		Reason:      reason,
+		Properties:  props,
+		Strength:    meta.Strength,
+		Method:      meta.Method,
+		RuleID:      meta.RuleID,
+		EvidenceIDs: meta.EvidenceIDs,
 	}
 	e.graph.Edges = append(e.graph.Edges, edge)
 }
@@ -507,10 +602,10 @@ func (e *Engine) finalizeTransaction(tx *activeTransaction) {
 		FlowID:    tx.FlowID,
 		Timestamp: tx.StartTime,
 		Labels: map[string]string{
-			"flow_id":      tx.FlowID,
-			"event_count":  fmt.Sprintf("%d", tx.Count),
-			"first_event":  string(tx.EventIDs[0]),
-			"last_event":   string(tx.EventIDs[tx.Count-1]),
+			"flow_id":     tx.FlowID,
+			"event_count": fmt.Sprintf("%d", tx.Count),
+			"first_event": string(tx.EventIDs[0]),
+			"last_event":  string(tx.EventIDs[tx.Count-1]),
 		},
 		Properties: map[string]any{
 			"event_ids":   tx.EventIDs,
@@ -519,12 +614,13 @@ func (e *Engine) finalizeTransaction(tx *activeTransaction) {
 			"duration_ms": tx.LastTime.Sub(tx.StartTime).Milliseconds(),
 		},
 	}
-	e.graph.Nodes = append(e.graph.Nodes, txNode)
+	e.addNode(txNode)
 
 	// 创建 contains 边：Transaction → each event node
-	for _, nodeID := range tx.NodeIDs {
+	for i, nodeID := range tx.NodeIDs {
 		e.addEdgeFromNode(tx.ID, nodeID, Contains, 0.95,
 			fmt.Sprintf("event %s belongs to transaction %s", nodeID, tx.ID),
-			map[string]any{"transaction_id": tx.ID})
+			map[string]any{"transaction_id": tx.ID},
+			edgeMeta{Strength: EvidenceDerived, Method: MethodTransaction, EvidenceIDs: []string{string(tx.EventIDs[i])}})
 	}
 }

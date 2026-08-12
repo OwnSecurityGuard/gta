@@ -1283,6 +1283,520 @@ func (m *mcpCapture) handleListStateChanges(ctx context.Context, req mcp.CallToo
 	}), nil
 }
 
+// handleQueryEvidenceGraph 查询证据图（节点 + 边）。
+// 支持按 node_kind、flow_id、edge_type 过滤，以及从根节点出发扩展邻接子图。
+func (m *mcpCapture) handleQueryEvidenceGraph(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+	sessionID := req.GetString("session_id", "")
+	nodeKind := req.GetString("node_kind", "")
+	flowID := req.GetString("flow_id", "")
+	edgeType := req.GetString("edge_type", "")
+	minConfidence := req.GetFloat("min_confidence", 0)
+	rootNodeID := req.GetString("root_node_id", "")
+	maxDepth := req.GetInt("max_depth", 0)
+
+	dbPath, err := m.getDBPath(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	slog.Info("query_evidence_graph requested", "session_id", sessionID, "node_kind", nodeKind, "flow_id", flowID, "edge_type", edgeType, "root_node", rootNodeID, "max_depth", maxDepth)
+
+	reader, err := m.openReader(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	q := store.EvidenceGraphQuery{
+		SessionID:     sessionID,
+		NodeKind:      nodeKind,
+		FlowID:        flowID,
+		EdgeType:      edgeType,
+		MinConfidence: minConfidence,
+		RootNodeID:    rootNodeID,
+		MaxDepth:      maxDepth,
+		Limit:         limit,
+		Offset:        offset,
+	}
+	result, err := reader.QueryEvidenceGraph(ctx, q)
+	if err != nil {
+		return errorResult(fmt.Errorf("query evidence graph: %w", err)), nil
+	}
+
+	// 将 JSON 字符串字段转换为 json.RawMessage
+	nodes := make([]map[string]any, 0, len(result.Nodes))
+	for _, n := range result.Nodes {
+		entry := map[string]any{
+			"id":         n.ID,
+			"session_id": n.SessionID,
+			"kind":       n.Kind,
+			"timestamp":  n.Timestamp,
+			"labels":     json.RawMessage(n.Labels),
+			"properties": json.RawMessage(n.Properties),
+		}
+		if n.FlowID != "" {
+			entry["flow_id"] = n.FlowID
+		}
+		nodes = append(nodes, entry)
+	}
+
+	edges := make([]map[string]any, 0, len(result.Edges))
+	for _, e := range result.Edges {
+		entry := map[string]any{
+			"id":         e.ID,
+			"session_id": e.SessionID,
+			"source":     e.Source,
+			"target":     e.Target,
+			"type":       e.Type,
+			"confidence": e.Confidence,
+			"properties": json.RawMessage(e.Properties),
+		}
+		if e.Reason != "" {
+			entry["reason"] = e.Reason
+		}
+		edges = append(edges, entry)
+	}
+
+	slog.Info("query_evidence_graph completed", "nodes", len(nodes), "edges", len(edges))
+	return successResult(map[string]any{
+		"count": len(nodes) + len(edges),
+		"nodes": nodes,
+		"edges": edges,
+	}), nil
+}
+
+// handleTraceEventChain 追踪事件的完整上下游证据链。
+// 从指定事件节点出发，沿证据图边 BFS 遍历上游（跟随 target→source）和下游（跟随 source→target），
+// 返回按深度组织的节点链路和边关系。
+func (m *mcpCapture) handleTraceEventChain(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	eventID := req.GetString("event_id", "")
+	nodeID := req.GetString("node_id", "")
+	maxDepth := req.GetInt("max_depth", 5)
+	minConfidence := req.GetFloat("min_confidence", 0.5)
+
+	if eventID == "" && nodeID == "" {
+		return errorResult(fmt.Errorf("either event_id or node_id is required")), nil
+	}
+
+	dbPath, err := m.getDBPath(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	reader, err := m.openReader(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	// 解析起始节点 ID
+	startNodeID := nodeID
+	if startNodeID == "" {
+		startNodeID, err = reader.QueryEventNodeID(ctx, sessionID, eventID)
+		if err != nil {
+			return errorResult(fmt.Errorf("resolve event node: %w", err)), nil
+		}
+	}
+
+	slog.Info("trace_event_chain start", "session_id", sessionID, "start_node", startNodeID, "max_depth", maxDepth, "min_confidence", minConfidence)
+
+	// BFS 双向追踪
+	visited := map[string]bool{startNodeID: true}
+	type chainElem struct {
+		NodeID    string
+		Depth     int
+		Direction string // "upstream" 或 "downstream"
+	}
+	queue := []chainElem{{NodeID: startNodeID, Depth: 0, Direction: "root"}}
+	upstream := []map[string]any{}
+	downstream := []map[string]any{}
+	allEdges := []store.EvidenceEdgeRow{}
+	nodeIDSet := map[string]bool{startNodeID: true}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur.Depth >= maxDepth {
+			continue
+		}
+
+		if cur.Direction == "root" || cur.Direction == "downstream" {
+			// 下游：source = cur.NodeID, 跟随 target
+			edges, err := reader.QueryEvidenceEdges(ctx, store.EvidenceEdgeQuery{
+				SessionID: sessionID,
+				Source:    cur.NodeID,
+				Limit:     100,
+			})
+			if err != nil {
+				slog.Warn("query downstream edges", "node", cur.NodeID, "error", err)
+			} else {
+				for _, e := range edges {
+					if e.Confidence < minConfidence {
+						continue
+					}
+					if !visited[e.Target] {
+						visited[e.Target] = true
+						nodeIDSet[e.Target] = true
+						queue = append(queue, chainElem{NodeID: e.Target, Depth: cur.Depth + 1, Direction: "downstream"})
+						downstream = append(downstream, map[string]any{
+							"node_id":    e.Target,
+							"depth":      cur.Depth + 1,
+							"edge_type":  e.Type,
+							"confidence": e.Confidence,
+							"reason":     e.Reason,
+						})
+					}
+					allEdges = append(allEdges, e)
+				}
+			}
+		}
+
+		if cur.Direction == "root" || cur.Direction == "upstream" {
+			// 上游：target = cur.NodeID, 跟随 source
+			edges, err := reader.QueryEvidenceEdges(ctx, store.EvidenceEdgeQuery{
+				SessionID: sessionID,
+				Target:    cur.NodeID,
+				Limit:     100,
+			})
+			if err != nil {
+				slog.Warn("query upstream edges", "node", cur.NodeID, "error", err)
+			} else {
+				for _, e := range edges {
+					if e.Confidence < minConfidence {
+						continue
+					}
+					if !visited[e.Source] {
+						visited[e.Source] = true
+						nodeIDSet[e.Source] = true
+						queue = append(queue, chainElem{NodeID: e.Source, Depth: cur.Depth + 1, Direction: "upstream"})
+						upstream = append(upstream, map[string]any{
+							"node_id":    e.Source,
+							"depth":      cur.Depth + 1,
+							"edge_type":  e.Type,
+							"confidence": e.Confidence,
+							"reason":     e.Reason,
+						})
+					}
+					allEdges = append(allEdges, e)
+				}
+			}
+		}
+	}
+
+	// 查询涉及的节点信息
+	nodeIDs := make([]string, 0, len(nodeIDSet))
+	for id := range nodeIDSet {
+		nodeIDs = append(nodeIDs, id)
+	}
+	nodes, err := reader.QueryEvidenceNodesByIDs(ctx, sessionID, nodeIDs)
+	if err != nil {
+		slog.Warn("query nodes by ids", "error", err)
+		nodes = nil
+	}
+
+	// 格式化节点
+	nodeList := make([]map[string]any, 0, len(nodes))
+	for _, n := range nodes {
+		entry := map[string]any{
+			"id":      n.ID,
+			"kind":    n.Kind,
+			"labels":  json.RawMessage(n.Labels),
+			"flow_id": n.FlowID,
+		}
+		nodeList = append(nodeList, entry)
+	}
+
+	// 格式化边
+	edgeList := make([]map[string]any, 0, len(allEdges))
+	for _, e := range allEdges {
+		edgeList = append(edgeList, map[string]any{
+			"id":         e.ID,
+			"source":     e.Source,
+			"target":     e.Target,
+			"type":       e.Type,
+			"confidence": e.Confidence,
+			"reason":     e.Reason,
+		})
+	}
+
+	slog.Info("trace_event_chain done", "nodes", len(nodeList), "edges", len(edgeList), "upstream", len(upstream), "downstream", len(downstream))
+
+	return successResult(map[string]any{
+		"start_node_id": startNodeID,
+		"nodes":         nodeList,
+		"edges":         edgeList,
+		"upstream":      upstream,
+		"downstream":    downstream,
+	}), nil
+}
+
+// handleAnalyzeProtocolPatterns 分析会话中的协议模式，为 AI Skill 链路规则发现提供数据。
+// 返回：流统计、消息类型分布、实体/StateChange 模式、请求-响应对统计。
+func (m *mcpCapture) handleAnalyzeProtocolPatterns(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	sampleLimit := req.GetInt("sample_limit", 200)
+
+	dbPath, err := m.getDBPath(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	reader, err := m.openReader(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	result := make(map[string]any)
+
+	// 1. 流统计：每个 flow 的事件数、方向分布
+	flowRows, err := reader.RawQuery(ctx,
+		`SELECT ei.flow_id, COUNT(*) as event_count,
+			SUM(CASE WHEN ei.direction='client_to_server' THEN 1 ELSE 0 END) as c2s,
+			SUM(CASE WHEN ei.direction='server_to_client' THEN 1 ELSE 0 END) as s2c
+		FROM event_index ei WHERE ei.session_id=? AND ei.flow_id IS NOT NULL
+		GROUP BY ei.flow_id ORDER BY event_count DESC LIMIT ?`,
+		sessionID, sampleLimit)
+	if err == nil {
+		result["flows"] = flowRows
+	}
+
+	// 2. 消息类型分布
+	typeRows, err := reader.RawQuery(ctx,
+		`SELECT ei.type as event_type, COUNT(*) as count
+		FROM event_index ei WHERE ei.session_id=?
+		GROUP BY ei.type ORDER BY count DESC`,
+		sessionID)
+	if err == nil {
+		result["event_types"] = typeRows
+	}
+
+	// 3. 有 correlation_id 的请求-响应对统计
+	corrRows, err := reader.RawQuery(ctx,
+		`SELECT flow_id, COUNT(*) as correlation_count
+		FROM event_index WHERE session_id=? AND correlation_id != ''
+		GROUP BY flow_id ORDER BY correlation_count DESC LIMIT ?`,
+		sessionID, sampleLimit)
+	if err == nil {
+		result["correlated_flows"] = corrRows
+	}
+
+	// 4. 实体状态变更模式：subject 分布
+	scRows, err := reader.RawQuery(ctx,
+		`SELECT subject_type, COUNT(*) as change_count, COUNT(DISTINCT subject_id) as distinct_subjects
+		FROM state_changes WHERE session_id=?
+		GROUP BY subject_type ORDER BY change_count DESC LIMIT ?`,
+		sessionID, sampleLimit)
+	if err == nil {
+		result["state_change_subjects"] = scRows
+	}
+
+	// 5. 状态变更操作分布
+	opRows, err := reader.RawQuery(ctx,
+		`SELECT subject_type, op, path, COUNT(*) as count
+		FROM state_changes WHERE session_id=?
+		GROUP BY subject_type, op, path ORDER BY count DESC LIMIT ?`,
+		sessionID, sampleLimit)
+	if err == nil {
+		result["state_change_patterns"] = opRows
+	}
+
+	// 6. 证据图结构概览（若有）
+	graphRows, err := reader.RawQuery(ctx,
+		`SELECT kind, COUNT(*) as node_count
+		FROM evidence_nodes WHERE session_id=?
+		GROUP BY kind`,
+		sessionID)
+	if err == nil && len(graphRows) > 0 {
+		result["evidence_graph_nodes"] = graphRows
+	}
+
+	edgeRows, err := reader.RawQuery(ctx,
+		`SELECT type, COUNT(*) as edge_count, AVG(confidence) as avg_confidence
+		FROM evidence_edges WHERE session_id=?
+		GROUP BY type ORDER BY edge_count DESC`,
+		sessionID)
+	if err == nil && len(edgeRows) > 0 {
+		result["evidence_graph_edges"] = edgeRows
+	}
+
+	// 7. 方向分布统计
+	dirRows, err := reader.RawQuery(ctx,
+		`SELECT direction, COUNT(*) as count
+		FROM event_index WHERE session_id=? AND direction != ''
+		GROUP BY direction`,
+		sessionID)
+	if err == nil && len(dirRows) > 0 {
+		result["direction_distribution"] = dirRows
+	}
+
+	slog.Info("analyze_protocol_patterns completed", "session", sessionID, "flows", len(flowRows))
+	return successResult(result), nil
+}
+
+// handleSuggestLinkRules 基于证据图和协议模式自动生成链路规则建议。
+// 分析 response_to、updates、caused_by 等边的分组模式，产出结构化的规则建议，
+// 供 AI Agent 或人工审查后导入为正式链路规则。
+func (m *mcpCapture) handleSuggestLinkRules(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	minConfidence := req.GetFloat("min_confidence", 0.6)
+	minOccurrences := req.GetInt("min_occurrences", 3)
+
+	dbPath, err := m.getDBPath(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	reader, err := m.openReader(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	// 查询证据图节点和边
+	graphResult, err := reader.QueryEvidenceGraph(ctx, store.EvidenceGraphQuery{SessionID: sessionID})
+	if err != nil {
+		return errorResult(fmt.Errorf("query evidence graph: %w", err)), nil
+	}
+
+	// 构建节点 ID → 标签映射
+	type nodeInfo struct {
+		Kind   string
+		Labels []string
+		FlowID string
+	}
+	nodeMap := make(map[string]nodeInfo, len(graphResult.Nodes))
+	for _, n := range graphResult.Nodes {
+		var labels []string
+		if n.Labels != "" {
+			_ = json.Unmarshal([]byte(n.Labels), &labels)
+		}
+		nodeMap[n.ID] = nodeInfo{Kind: n.Kind, Labels: labels, FlowID: n.FlowID}
+	}
+
+	// 获取标签（优先第一个）
+	getLabel := func(ni nodeInfo) string {
+		if len(ni.Labels) > 0 {
+			return ni.Labels[0]
+		}
+		return ni.Kind
+	}
+
+	type edgePair struct {
+		SourceType string
+		TargetType string
+		EdgeType   string
+	}
+	type pairStats struct {
+		Count     int
+		TotalConf float64
+	}
+
+	pairs := make(map[edgePair]*pairStats)
+
+	for _, e := range graphResult.Edges {
+		if e.Confidence < minConfidence {
+			continue
+		}
+		src := nodeMap[e.Source]
+		tgt := nodeMap[e.Target]
+		key := edgePair{
+			SourceType: getLabel(src),
+			TargetType: getLabel(tgt),
+			EdgeType:   e.Type,
+		}
+		if ps, ok := pairs[key]; ok {
+			ps.Count++
+			ps.TotalConf += e.Confidence
+		} else {
+			pairs[key] = &pairStats{
+				Count:     1,
+				TotalConf: e.Confidence,
+			}
+		}
+	}
+
+	// 生成建议
+	type suggestion struct {
+		EdgeType     string   `json:"edge_type"`
+		SourceType   string   `json:"source_type"`
+		TargetType   string   `json:"target_type"`
+		Occurrences  int      `json:"occurrences"`
+		AvgConf      float64  `json:"avg_confidence"`
+		RuleTemplate string   `json:"rule_template"`
+		Notes        []string `json:"notes,omitempty"`
+	}
+
+	var suggestions []suggestion
+	for pair, ps := range pairs {
+		if ps.Count < minOccurrences {
+			continue
+		}
+		s := suggestion{
+			EdgeType:    pair.EdgeType,
+			SourceType:  pair.SourceType,
+			TargetType:  pair.TargetType,
+			Occurrences: ps.Count,
+			AvgConf:     ps.TotalConf / float64(ps.Count),
+		}
+
+		switch pair.EdgeType {
+		case "response_to":
+			s.RuleTemplate = fmt.Sprintf("link response_to: when %s appears, link it as response to the most recent %s in the same flow", pair.TargetType, pair.SourceType)
+			s.Notes = append(s.Notes, "Match by correlation_key or naming pattern (e.g., Req→Resp)")
+		case "updates":
+			s.RuleTemplate = fmt.Sprintf("link updates: when %s produces state changes, link them as updates to %s entity", pair.SourceType, pair.TargetType)
+			s.Notes = append(s.Notes, "Verify the subject_type matches the entity kind")
+		case "caused_by":
+			s.RuleTemplate = fmt.Sprintf("link caused_by: %s is caused by %s", pair.TargetType, pair.SourceType)
+			s.Notes = append(s.Notes, "Check if this is a push/notification triggered by the prior request")
+		case "decoded_from":
+			s.RuleTemplate = fmt.Sprintf("link decoded_from: %s originates from %s raw packet data", pair.TargetType, pair.SourceType)
+			s.Notes = append(s.Notes, "Typically auto-generated; verify the source type matches the decoder protocol")
+		case "possible_followup":
+			s.RuleTemplate = fmt.Sprintf("link possible_followup: %s may follow %s within %s", pair.TargetType, pair.SourceType, "5s")
+			s.Notes = append(s.Notes, fmt.Sprintf("Low confidence (%.2f); consider adding explicit correlation_key or tightening time window", s.AvgConf))
+		default:
+			s.RuleTemplate = fmt.Sprintf("link %s: %s → %s", pair.EdgeType, pair.SourceType, pair.TargetType)
+		}
+
+		suggestions = append(suggestions, s)
+	}
+
+	// 按出现次数降序排序
+	for i := 0; i < len(suggestions); i++ {
+		for j := i + 1; j < len(suggestions); j++ {
+			if suggestions[j].Occurrences > suggestions[i].Occurrences {
+				suggestions[i], suggestions[j] = suggestions[j], suggestions[i]
+			}
+		}
+	}
+
+	slog.Info("suggest_link_rules completed", "session", sessionID, "pairs", len(pairs), "suggestions", len(suggestions))
+
+	return successResult(map[string]any{
+		"session_id":   sessionID,
+		"suggestions":  suggestions,
+		"total_edges":  len(graphResult.Edges),
+		"total_nodes":  len(graphResult.Nodes),
+	}), nil
+}
+
 // handleDecodeRawPackets 用指定插件对离线会话的 raw_packets 批量解码，
 // 结果写入该 session 的 events 表（随后可用 list_decoded_data 查询）。
 // 仅允许解码已停止的 session；插件必须指定。
@@ -1710,7 +2224,6 @@ func main() {
 		mcp.WithDescription("Start capturing traffic on a server port, or replay a pcap file. Packets are always captured and stored; an optional plugin enables protocol decoding."),
 		mcp.WithNumber("port", mcp.Required(), mcp.Description("Server port to capture or filter, e.g. 8080")),
 		mcp.WithString("plugin", mcp.Description("Optional plugin name for protocol decoding, e.g. http. If omitted or no matching plugin is found, only raw packets are stored.")),
-		mcp.WithString("rules", mcp.Description("Optional path to a rules YAML file")),
 		mcp.WithString("pcap_file", mcp.Description("Optional pcap file to replay instead of live capture")),
 	), capture.handleStartCapture)
 
@@ -1832,6 +2345,45 @@ func main() {
 		mcp.WithString("expression", mcp.Required(), mcp.Description("expr expression, e.g. name == 'http_req_count' && value > 0")),
 		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
 	), capture.handleAggregateQuery)
+
+	// 证据图查询工具。
+	s.AddTool(mcp.NewTool("query_evidence_graph",
+		mcp.WithDescription("Query the evidence graph (nodes + edges) built by the semantic analysis engine. Supports filtering by node kind, flow ID, edge type, and confidence threshold. Use root_node_id + max_depth to expand a neighbourhood subgraph from a specific node."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+		mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max results to return")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+		mcp.WithString("node_kind", mcp.Description("Filter by node kind: event | raw_packet | entity | state_change")),
+		mcp.WithString("flow_id", mcp.Description("Filter by flow ID")),
+		mcp.WithString("edge_type", mcp.Description("Filter edges by type: response_to | decoded_from | updates | caused_by | correlated_with | parameter_from | possible_followup")),
+		mcp.WithNumber("min_confidence", mcp.Description("Min confidence threshold [0.0-1.0]; only edges at or above this value are returned")),
+		mcp.WithString("root_node_id", mcp.Description("Start node ID for neighbourhood traversal; set max_depth to control expansion radius")),
+		mcp.WithNumber("max_depth", mcp.Description("Max BFS depth from root_node_id, 0=no traversal")),
+	), capture.handleQueryEvidenceGraph)
+
+	// 事件链追踪工具。
+	s.AddTool(mcp.NewTool("trace_event_chain",
+		mcp.WithDescription("Trace the complete upstream and downstream evidence chain for an event. Starting from an event_id or node_id, performs BFS along evidence graph edges to show: upstream (who caused this event), downstream (what this event caused). Returns structured nodes, edges, and depth-organized upstream/downstream lists."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID; defaults to current session")),
+		mcp.WithString("event_id", mcp.Description("Event ID (e.g., session-local event ID) to trace. Mutually exclusive with node_id; at least one is required.")),
+		mcp.WithString("node_id", mcp.Description("Evidence graph node ID to trace from. Mutually exclusive with event_id.")),
+		mcp.WithNumber("max_depth", mcp.DefaultNumber(5), mcp.Description("Max BFS depth (default 5)")),
+		mcp.WithNumber("min_confidence", mcp.DefaultNumber(0.5), mcp.Description("Min edge confidence [0.0-1.0] to follow")),
+	), capture.handleTraceEventChain)
+
+	// 协议模式分析工具：为 AI Skill 链路规则发现提供数据基础。
+	s.AddTool(mcp.NewTool("analyze_protocol_patterns",
+		mcp.WithDescription("Analyze protocol patterns in captured traffic to support AI-driven link rule discovery. Returns flow statistics, message type distribution, entity/state change patterns, and evidence graph structure. Use this to understand protocol structure before suggesting link rules."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to analyze; defaults to current session")),
+		mcp.WithNumber("sample_limit", mcp.DefaultNumber(200), mcp.Description("Max entries per category")),
+	), capture.handleAnalyzeProtocolPatterns)
+
+	// 链路规则建议工具：基于证据图自动生成 link rule 建议。
+	s.AddTool(mcp.NewTool("suggest_link_rules",
+		mcp.WithDescription("Suggest link rules based on evidence graph analysis. Analyzes response_to, updates, caused_by, and other edge patterns from the semantic engine, then generates structured rule suggestions with confidence scores, occurrence counts, and human-readable rule templates. Use this after capturing and decoding traffic to discover protocol relationships."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to analyze; defaults to current session")),
+		mcp.WithNumber("min_confidence", mcp.DefaultNumber(0.6), mcp.Description("Min edge confidence [0.0-1.0] to include in suggestions (default 0.6)")),
+		mcp.WithNumber("min_occurrences", mcp.DefaultNumber(3), mcp.Description("Min number of occurrences for a pattern to be suggested (default 3)")),
+	), capture.handleSuggestLinkRules)
 
 	// 行为（behavior）与因果链（causation chain）工具。
 	s.AddTool(mcp.NewTool("begin_capture_run",

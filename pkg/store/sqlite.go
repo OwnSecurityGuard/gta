@@ -118,6 +118,8 @@ CREATE TABLE IF NOT EXISTS state_changes (
     before_value TEXT,
     after_value TEXT,
     version INTEGER,
+    before_resolved BOOLEAN NOT NULL DEFAULT 0,
+    after_resolved BOOLEAN NOT NULL DEFAULT 0,
     metadata TEXT
 );
 CREATE TABLE IF NOT EXISTS event_index (
@@ -141,6 +143,38 @@ CREATE TABLE IF NOT EXISTS event_index (
 	// X'80' 是空 msgpack map 的二进制表示（空 EventContext）
 	_, _ = s.db.Exec("ALTER TABLE events ADD COLUMN context BLOB NOT NULL DEFAULT X'80'")
 
+	// 迁移：为已存在的 state_changes 表添加 before_resolved / after_resolved 列
+	_, _ = s.db.Exec("ALTER TABLE state_changes ADD COLUMN before_resolved BOOLEAN NOT NULL DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE state_changes ADD COLUMN after_resolved BOOLEAN NOT NULL DEFAULT 0")
+
+	// 证据图表：以 session 为粒度写入，session_id 已由 capture.sqlite 隐式确定。
+	// 为支持 analysis_run 复现原则，analysis_run 字段预留但首阶段不建约束。
+	evidenceGraphDDL := `
+CREATE TABLE IF NOT EXISTS evidence_nodes (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    flow_id TEXT,
+    analysis_run TEXT,
+    timestamp INTEGER NOT NULL,
+    labels TEXT,
+    properties TEXT
+);
+CREATE TABLE IF NOT EXISTS evidence_edges (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    target TEXT NOT NULL,
+    type TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 1.0,
+    reason TEXT,
+    analysis_run TEXT,
+    properties TEXT
+);`
+	if _, err := s.db.Exec(evidenceGraphDDL); err != nil {
+		return err
+	}
+
 	// 索引：支持高效查询
 	indexes := []string{
 		// Event 模型索引
@@ -157,6 +191,12 @@ CREATE TABLE IF NOT EXISTS event_index (
 		"CREATE INDEX IF NOT EXISTS idx_event_index_session_time ON event_index(session_id, timestamp)",
 		"CREATE INDEX IF NOT EXISTS idx_event_index_flow ON event_index(session_id, flow_id, timestamp)",
 		"CREATE INDEX IF NOT EXISTS idx_event_index_correlation ON event_index(correlation_id)",
+		// evidence_graph 索引
+		"CREATE INDEX IF NOT EXISTS idx_evidence_nodes_session_kind ON evidence_nodes(session_id, kind)",
+		"CREATE INDEX IF NOT EXISTS idx_evidence_nodes_flow ON evidence_nodes(session_id, flow_id)",
+		"CREATE INDEX IF NOT EXISTS idx_evidence_edges_session ON evidence_edges(session_id)",
+		"CREATE INDEX IF NOT EXISTS idx_evidence_edges_source ON evidence_edges(source)",
+		"CREATE INDEX IF NOT EXISTS idx_evidence_edges_target ON evidence_edges(target)",
 	}
 	for _, idx := range indexes {
 		if _, err := s.db.Exec(idx); err != nil {

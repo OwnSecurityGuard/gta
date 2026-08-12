@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"time"
 
+	"gta/pkg/analyze/semantic"
 	"gta/pkg/decode"
 	"gta/pkg/event"
 	"gta/pkg/internalipc/capturecontrol"
@@ -164,7 +165,14 @@ func (s *pipelineService) DecodeRawPackets(ctx context.Context, req capturecontr
 	// 7. 分批读取 raw packets 并解码，结果写回 events 表与 state_changes 投影表。
 	var totalRaw, decoded, decodeErrors int64
 	var pending []*event.Event
+	var enrichedSCs []store.EnrichedStateChange
 	var sinceFlush int
+	semanticCfg := semantic.DefaultConfig()
+	semanticCfg.TransactionClustering = &semantic.TransactionClusterConfig{
+		NewTransactionOnRequest: true,
+		MergeGap:               200 * time.Millisecond,
+	}
+	semanticEngine := semantic.NewEngine(semanticCfg, nil)
 	flush := func() error {
 		if len(pending) == 0 {
 			return nil
@@ -172,8 +180,11 @@ func (s *pipelineService) DecodeRawPackets(ctx context.Context, req capturecontr
 		if err := st.AppendEvents(ctx, pending); err != nil {
 			return fmt.Errorf("append events: %w", err)
 		}
-		if err := st.WriteStateChanges(ctx, req.SessionID, pending); err != nil {
-			logger.Warn("write state changes", "error", err)
+		if len(enrichedSCs) > 0 {
+			if err := st.WriteEnrichedStateChanges(ctx, req.SessionID, enrichedSCs); err != nil {
+				logger.Warn("write enriched state changes", "error", err)
+			}
+			enrichedSCs = enrichedSCs[:0]
 		}
 		pending = nil
 		sinceFlush = 0
@@ -196,7 +207,28 @@ func (s *pipelineService) DecodeRawPackets(ctx context.Context, req capturecontr
 		if len(r.Events) == 0 {
 			return
 		}
-		pending = append(pending, r.Events...)
+		for _, ev := range r.Events {
+			if ev == nil {
+				continue
+			}
+			pending = append(pending, ev)
+			scChanges, err := semanticEngine.Process(ev)
+			if err != nil {
+				logger.Warn("semantic analyze event", "event_id", ev.Identity.ID, "error", err)
+				continue
+			}
+			for _, esc := range scChanges {
+				enrichedSCs = append(enrichedSCs, store.EnrichedStateChange{
+					StateChange:    esc.StateChange,
+					EventID:        esc.EventID,
+					FlowID:         esc.FlowID,
+					Timestamp:      esc.Timestamp,
+					BeforeResolved: esc.BeforeResolved,
+					AfterResolved:  esc.AfterResolved,
+					EntityVersion:  esc.EntityVersion,
+				})
+			}
+		}
 		decoded += int64(len(r.Events))
 		sinceFlush++
 		if sinceFlush >= rawBatchSize {

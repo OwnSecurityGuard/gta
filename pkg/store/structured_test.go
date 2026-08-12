@@ -373,3 +373,147 @@ func TestSchemaMigration_Idempotent(t *testing.T) {
 		t.Errorf("state_changes table not found after migration: %v", err)
 	}
 }
+
+// TestWriteEvidenceGraph 验证证据图节点和边的写入与查询。
+func TestWriteEvidenceGraph(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewSQLiteStore(db, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	sessionID := "test-session"
+
+	nodes := []EvidenceNodeRow{
+		{ID: "evt_ev-1", SessionID: sessionID, Kind: "event", FlowID: "flow-1", Timestamp: 1000000, Labels: `{"type":"tcp"}`, Properties: `{"direction":"client_to_server"}`},
+		{ID: "evt_ev-2", SessionID: sessionID, Kind: "event", FlowID: "flow-1", Timestamp: 2000000, Labels: `{"type":"tcp"}`, Properties: `{"direction":"server_to_client"}`},
+		{ID: "ent_1001", SessionID: sessionID, Kind: "entity", FlowID: "flow-1", Timestamp: 1500000, Labels: `{"subject_type":"Building"}`, Properties: `{}`},
+	}
+
+	edges := []EvidenceEdgeRow{
+		{ID: "edge-1", SessionID: sessionID, Source: "evt_ev-2", Target: "evt_ev-1", Type: "response_to", Confidence: 1.0, Reason: "RPC response", Properties: `{}`},
+		{ID: "edge-2", SessionID: sessionID, Source: "evt_ev-1", Target: "ent_1001", Type: "updates", Confidence: 1.0, Reason: "state change", Properties: `{"path":"level"}`},
+	}
+
+	if err := s.WriteEvidenceGraph(ctx, sessionID, "", nodes, edges); err != nil {
+		t.Fatalf("WriteEvidenceGraph: %v", err)
+	}
+
+	// 查询全部
+	result, err := s.QueryEvidenceGraph(ctx, EvidenceGraphQuery{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("QueryEvidenceGraph: %v", err)
+	}
+	if len(result.Nodes) != 3 {
+		t.Fatalf("nodes count = %d, want 3", len(result.Nodes))
+	}
+	if len(result.Edges) != 2 {
+		t.Fatalf("edges count = %d, want 2", len(result.Edges))
+	}
+
+	// 验证 response_to 边
+	found := false
+	for _, e := range result.Edges {
+		if e.Type == "response_to" {
+			found = true
+			if e.Source != "evt_ev-2" || e.Target != "evt_ev-1" {
+				t.Errorf("response_to edge: source=%q target=%q", e.Source, e.Target)
+			}
+		}
+	}
+	if !found {
+		t.Error("response_to edge not found")
+	}
+
+	// 幂等覆盖：再次写入相同 session 应替换旧数据
+	nodes2 := []EvidenceNodeRow{
+		{ID: "evt_new", SessionID: sessionID, Kind: "event", FlowID: "flow-1", Timestamp: 3000000, Labels: `{}`, Properties: `{}`},
+	}
+	if err := s.WriteEvidenceGraph(ctx, sessionID, "run-2", nodes2, nil); err != nil {
+		t.Fatalf("second WriteEvidenceGraph: %v", err)
+	}
+	result2, err := s.QueryEvidenceGraph(ctx, EvidenceGraphQuery{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("second QueryEvidenceGraph: %v", err)
+	}
+	if len(result2.Nodes) != 1 {
+		t.Fatalf("after overwrite nodes count = %d, want 1", len(result2.Nodes))
+	}
+	if result2.Nodes[0].ID != "evt_new" {
+		t.Errorf("node id = %q, want evt_new", result2.Nodes[0].ID)
+	}
+	if len(result2.Edges) != 0 {
+		t.Fatalf("after overwrite edges count = %d, want 0", len(result2.Edges))
+	}
+}
+
+// TestQueryEvidenceGraph_Neighbourhood 验证从根节点出发的邻接子图扩展。
+func TestQueryEvidenceGraph_Neighbourhood(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewSQLiteStore(db, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	sessionID := "test-session"
+
+	nodes := []EvidenceNodeRow{
+		{ID: "A", SessionID: sessionID, Kind: "event", FlowID: "f1", Timestamp: 1000, Labels: `{}`, Properties: `{}`},
+		{ID: "B", SessionID: sessionID, Kind: "event", FlowID: "f1", Timestamp: 2000, Labels: `{}`, Properties: `{}`},
+		{ID: "C", SessionID: sessionID, Kind: "event", FlowID: "f1", Timestamp: 3000, Labels: `{}`, Properties: `{}`},
+		{ID: "D", SessionID: sessionID, Kind: "event", FlowID: "f1", Timestamp: 4000, Labels: `{}`, Properties: `{}`},
+	}
+
+	edges := []EvidenceEdgeRow{
+		{ID: "e1", SessionID: sessionID, Source: "A", Target: "B", Type: "caused_by", Confidence: 1.0, Properties: `{}`},
+		{ID: "e2", SessionID: sessionID, Source: "B", Target: "C", Type: "response_to", Confidence: 1.0, Properties: `{}`},
+		{ID: "e3", SessionID: sessionID, Source: "C", Target: "D", Type: "possible_followup", Confidence: 0.5, Properties: `{}`},
+	}
+
+	if err := s.WriteEvidenceGraph(ctx, sessionID, "run-nbr", nodes, edges); err != nil {
+		t.Fatalf("WriteEvidenceGraph: %v", err)
+	}
+
+	// 从 A 出发，depth=1 应该拿到 A、B 两个节点
+	result, err := s.QueryEvidenceGraph(ctx, EvidenceGraphQuery{
+		SessionID:  sessionID,
+		RootNodeID: "A",
+		MaxDepth:   1,
+	})
+	if err != nil {
+		t.Fatalf("QueryEvidenceGraph depth=1: %v", err)
+	}
+	if len(result.Nodes) < 2 {
+		t.Fatalf("depth=1 got %d nodes, want >=2", len(result.Nodes))
+	}
+
+	// 从 A 出发，depth=2 应该拿到 A、B、C 三个节点
+	result2, err := s.QueryEvidenceGraph(ctx, EvidenceGraphQuery{
+		SessionID:  sessionID,
+		RootNodeID: "A",
+		MaxDepth:   2,
+	})
+	if err != nil {
+		t.Fatalf("QueryEvidenceGraph depth=2: %v", err)
+	}
+	if len(result2.Nodes) < 3 {
+		t.Fatalf("depth=2 got %d nodes, want >=3", len(result2.Nodes))
+	}
+
+	// 从 A 出发，depth=3 应该拿到全部 4 个节点
+	result3, err := s.QueryEvidenceGraph(ctx, EvidenceGraphQuery{
+		SessionID:  sessionID,
+		RootNodeID: "A",
+		MaxDepth:   3,
+	})
+	if err != nil {
+		t.Fatalf("QueryEvidenceGraph depth=3: %v", err)
+	}
+	if len(result3.Nodes) != 4 {
+		t.Fatalf("depth=3 got %d nodes, want 4", len(result3.Nodes))
+	}
+}

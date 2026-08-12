@@ -13,7 +13,7 @@ AI Agent (Claude / DeepSeek / ...)
         ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  gta-mcp  (:8781)                                            │
-│  37 个 MCP 工具，纯转发：零 exec / 零文件写入 / 零归因逻辑   │
+│  38 个 MCP 工具，纯转发：零 exec / 零文件写入 / 零归因逻辑   │
 └────────┬─────────────────────────────────┬───────────────────┘
          │ gRPC PluginDev                  │ gRPC CaptureControl (:9888)
          ▼                                 ▼
@@ -51,7 +51,7 @@ AI Agent (Claude / DeepSeek / ...)
 
 | 组件 | 说明 |
 |------|------|
-| **gta-mcp** | MCP 服务器，37 个工具，纯协议适配 + 路由 |
+| **gta-mcp** | MCP 服务器，38 个工具，纯协议适配 + 路由 |
 | **gta-pipeline** | Runtime Plane：抓包 / 解码 / 聚合 / 落库 / 插件注册表一体进程 |
 | **gta-plugin-dev** | Developer Plane：插件脚手架 / 编译 / 拉起 / 状态 / 失败归因。**默认由 gta-mcp 内嵌，无需单独启动** |
 | **插件系统** | 独立进程解码器，gRPC 通信，支持热加载与崩溃隔离 |
@@ -158,7 +158,7 @@ make test
 
 ## 核心功能
 
-### MCP 工具（34 个，其中 2 个原始包调试工具默认不注册）
+### MCP 工具（38 个，其中 2 个原始包调试工具默认不注册）
 
 | 类别 | 工具 | 功能 |
 |------|------|------|
@@ -167,6 +167,8 @@ make test
 | 数据查询 | `list_decoded_data` / `list_state_changes` | 解码事件与状态变更（支持 expr 过滤） |
 | | `aggregate_query` / `get_capture_schema` | 聚合指标查询、模式推断 |
 | | `trace_protocol_flow` | 时序证据链（request/response/push/entity_diff） |
+| 证据图分析 | `query_evidence_graph` / `trace_event_chain` | 查询语义证据图、BFS 双向追踪事件上下游链路 |
+| | `analyze_protocol_patterns` / `suggest_link_rules` | 协议模式分析、自动生成链路规则建议 |
 | 原始包调试 | `list_raw_packets` / `decode_raw_packets` | 需 `-enable-raw-debug`，默认关闭 |
 | 操作分析 | `begin_capture_run` / `end_capture_run` / `get_run_status` | 标记操作窗口、获取摘要 |
 | 插件开发<br>(Developer Plane) | `create_plugin` / `build_plugin` | 脚手架生成、编译（失败返回 file:line:col 诊断） |
@@ -176,6 +178,7 @@ make test
 | | `sample_bytes_plugin` | 受限取样（硬上限 20 包 / 64 字节，全量审计） |
 | 插件运行时 | `list_plugins` / `list_registered_plugins` | 目录扫描 vs 注册表在线实例 |
 | | `get_plugin_manifest` / `deregister_plugin` | 读取 manifest、强制下线 |
+| | `get_registry_addr` | 返回 pipeline 注册地址 |
 | 插件知识 | `get_plugin_contract` / `get_plugin_dev_guide` | 契约 SSOT、开发指南 |
 | 会话管理 | `list_all_sessions` / `delete_session` | 会话生命周期管理 |
 
@@ -211,6 +214,23 @@ rules:
       output: http_req_count
 ```
 
+### 语义引擎与证据图
+
+语义引擎将解码后的事件流转化为结构化证据图，供 AI Agent 分析协议逻辑。
+
+**证据节点类型**：`request` / `response` / `push_message` / `state_change` / `transaction`
+
+**证据边类型**：`ResponseTo`（请求-响应）、`DecodedFrom`（解码来源）、`PossibleFollowup`（可能后继）、`Contains`（事务包含）、`PrecededBy`（状态前驱）
+
+**核心能力**：
+
+| 能力 | 说明 |
+|------|------|
+| 消息命名模式匹配 | 当协议未显式关联请求-响应时，通过命名后缀推断（如 `LoginReq`→`LoginResp`、`CS_*`→`SC_*`），置信度 0.85 |
+| 链路规则自动建议 | 聚合证据图边模式，按（source_type, target_type, edge_type）生成结构化规则建议 |
+| 事件链双向追踪 | BFS 遍历证据图上下游，输出完整事件调用链及每一步的关联原因 |
+| 时间聚类 | 按请求边界将事件归入逻辑事务组（`NodeTransaction`），支持 `MergeGap` 合并快速连续请求，默认 200ms |
+
 ## 项目结构
 
 ```
@@ -222,7 +242,7 @@ cmd/
 pkg/
   capture/        流量来源抽象（pcap-live / pcap-file / fake）
   decode/         解码调度层
-  analyze/        实时聚合引擎（count / rate / sum）
+  analyze/        语义分析引擎（证据图构建 / 命名模式匹配 / 链路聚类 / 基线管理）
   event/          核心数据模型（Packet / Event / Metric）
   store/          SQLite 持久化层（会话库 + control.sqlite + 调试审计）
   plugin/         插件运行时（注册表 / 契约 / 质量校验 quality）

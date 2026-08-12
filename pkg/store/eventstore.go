@@ -50,12 +50,18 @@ type EventReader interface {
 type ProjectionWriter interface {
 	WriteMetrics(ctx context.Context, metrics []event.Metric) error
 	WriteStateChanges(ctx context.Context, sessionID string, events []*event.Event) error
+	WriteEnrichedStateChanges(ctx context.Context, sessionID string, changes []EnrichedStateChange) error
+	WriteEvidenceGraph(ctx context.Context, sessionID string, analysisRun string, nodes []EvidenceNodeRow, edges []EvidenceEdgeRow) error
 }
 
 // ProjectionReader 由 gta-mcp 使用，查询派生数据。
 type ProjectionReader interface {
 	QueryMetrics(ctx context.Context, q MetricQuery) ([]MetricRow, error)
 	QueryStateChanges(ctx context.Context, q StateChangeQuery) ([]StateChangeRow, error)
+	QueryEvidenceGraph(ctx context.Context, q EvidenceGraphQuery) (*EvidenceGraphResult, error)
+	QueryEvidenceEdges(ctx context.Context, q EvidenceEdgeQuery) ([]EvidenceEdgeRow, error)
+	QueryEvidenceNodesByIDs(ctx context.Context, sessionID string, ids []string) ([]EvidenceNodeRow, error)
+	QueryEventNodeID(ctx context.Context, sessionID string, sessionEventID string) (string, error)
 }
 
 // ===== 第 3 层：控制元数据 =====
@@ -124,7 +130,7 @@ type MetricRow struct {
 	Value  float64
 }
 
-// StateChangeRow 对应 state_changes 的一行。
+// StateChangeRow 对应 state_changes 表的一行。
 type StateChangeRow struct {
 	ID          string
 	EventID     string
@@ -139,6 +145,25 @@ type StateChangeRow struct {
 	After       string // JSON 字符串
 	Version     int64
 	Metadata    string // JSON 字符串
+}
+
+// EnrichedStateChange 是带基线解析标记的 StateChange。
+// Store 层独立定义，避免依赖 analyze/semantic 包。
+type EnrichedStateChange struct {
+	event.StateChange
+
+	// EventID 是产生该变更的事件 ID。
+	EventID event.EventID `json:"event_id"`
+	// FlowID 是事件所属的流/上下文 ID，用于投影查询。
+	FlowID string `json:"flow_id,omitempty"`
+	// Timestamp 是变更发生时间。
+	Timestamp time.Time `json:"timestamp"`
+	// BeforeResolved 表示 Before 是否来自真实基线；false 表示无基线。
+	BeforeResolved bool `json:"before_resolved"`
+	// AfterResolved 表示 After 是否已写入基线。
+	AfterResolved bool `json:"after_resolved"`
+	// EntityVersion 是变更后的实体版本。
+	EntityVersion int64 `json:"entity_version"`
 }
 
 // SchemaInfo 描述事件数据库的表结构（供 MCP get_capture_schema 工具使用）。
@@ -156,6 +181,60 @@ type TableSchema struct {
 type ColumnSchema struct {
 	Name string
 	Type string
+}
+
+// EvidenceNodeRow 是 evidence_nodes 表的一行。
+type EvidenceNodeRow struct {
+	ID          string `json:"id"`
+	SessionID   string `json:"session_id"`
+	Kind        string `json:"kind"`
+	FlowID      string `json:"flow_id,omitempty"`
+	AnalysisRun string `json:"analysis_run,omitempty"`
+	Timestamp   int64  `json:"timestamp"`           // unix nano
+	Labels      string `json:"labels,omitempty"`     // JSON
+	Properties  string `json:"properties,omitempty"`  // JSON
+}
+
+// EvidenceEdgeRow 是 evidence_edges 表的一行。
+type EvidenceEdgeRow struct {
+	ID          string  `json:"id"`
+	SessionID   string  `json:"session_id"`
+	Source      string  `json:"source"`
+	Target      string  `json:"target"`
+	Type        string  `json:"type"`
+	Confidence  float64 `json:"confidence"`
+	Reason      string  `json:"reason,omitempty"`
+	AnalysisRun string  `json:"analysis_run,omitempty"`
+	Properties  string  `json:"properties,omitempty"` // JSON
+}
+
+// EvidenceGraphQuery 查询证据图。
+type EvidenceGraphQuery struct {
+	SessionID        string
+	NodeKind         string
+	FlowID           string
+	EdgeType         string
+	MinConfidence    float64
+	RootNodeID       string // 从该节点开始扩展邻接子图
+	MaxDepth         int    // 邻接扩展最大深度（0=不限制）
+	Limit            int
+	Offset           int
+}
+
+// EvidenceGraphResult 是证据图的查询结果。
+type EvidenceGraphResult struct {
+	Nodes []EvidenceNodeRow `json:"nodes"`
+	Edges []EvidenceEdgeRow `json:"edges"`
+}
+
+// EvidenceEdgeQuery 按方向查询证据图边，用于节点链式追踪。
+type EvidenceEdgeQuery struct {
+	SessionID string
+	Source    string // 按 source 过滤（可选，与 Target 至少填一个）
+	Target    string // 按 target 过滤（可选）
+	EdgeType  string
+	Limit     int
+	Offset    int
 }
 
 // ===== 控制元数据类型 =====

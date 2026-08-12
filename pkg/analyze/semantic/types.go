@@ -17,6 +17,122 @@ import (
 	"gta/pkg/event"
 )
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Semantic Layer v1 (contract)
+//
+// SemanticEvent 描述一个 Event 的"语义身份"——它在协议/业务上意味着什么。
+// 它是对 Event 的投影（projection），不是 Event 本身。Event 保持 immutable 事实层不变。
+// Semantic Contract 只规定 Agent/UI 如何理解 Event 的语义身份，不规定任何业务 Schema
+// （Player/Inventory/HP/Gold/Quest 等均属于具体领域，不在本契约内）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+// SemanticContractVersion 是 Semantic/Evidence Contract 的版本标识。
+// 所有 v1 类型定义与 JSON 结构以此为稳定边界；任何破坏性变更将进入 v2。
+const SemanticContractVersion = "v1"
+
+// Direction 表示事件/语义事件的网络方向。
+// 直接复用 Event 已有的网络上下文语义（Context.Direction），不另起一套。
+const (
+	DirectionClientToServer string = "client_to_server"
+	DirectionServerToClient string = "server_to_client"
+	DirectionUnknown       string = "unknown"
+)
+
+// SemanticKind 是语义事件种类。v1 固定为以下枚举，不再扩充。
+type SemanticKind string
+
+const (
+	// SemanticMessage 仅有消息身份，尚未进一步判断语义。
+	// 例如无法判定请求/响应的心跳包，或仅透传的 CS_Login。
+	SemanticMessage SemanticKind = "message"
+	// SemanticRequest 客户端发起的请求。
+	SemanticRequest SemanticKind = "request"
+	// SemanticResponse 对请求的响应。
+	SemanticResponse SemanticKind = "response"
+	// SemanticPush 服务端主动推送（非请求-响应模型）。
+	SemanticPush SemanticKind = "push"
+	// SemanticStateChange 实体状态变更。
+	SemanticStateChange SemanticKind = "state_change"
+	// SemanticTransaction 时间聚类产生的逻辑事务组。
+	SemanticTransaction SemanticKind = "transaction"
+)
+
+// SemanticSubject 是事件作用的业务实体引用。
+// v1 不规定 Type 的具体含义（player/guild/item/npc/match/session 等由具体领域决定）。
+type SemanticSubject struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+// SemanticSource 标识语义判定的来源，供 Agent 区分"事实"与"推断"。
+type SemanticSource string
+
+const (
+	// SourcePlugin 由解码插件明确告知 GTA（如 decoder 声明 operation=login）。
+	SourcePlugin SemanticSource = "plugin"
+	// SourceRule 由显式规则映射得到（如 name→operation 规则）。
+	SourceRule SemanticSource = "rule"
+	// SourceEngine 由语义引擎推导得到。
+	SourceEngine SemanticSource = "engine"
+	// SourceUser 由用户/外部标注。
+	SourceUser SemanticSource = "user"
+)
+
+// SemanticEvent 是 v1 Semantic Contract 的核心类型。
+//
+// 它回答"这个 Event 在协议/业务上意味着什么"，而非"发生了什么"（那是 Event 的职责）。
+// Confidence 统一取值 [0,1]，但仅表示判定可信度，不表示证据强度（见 EvidenceStrength）。
+// 猜不到就不填：Operation 允许为空字符串，绝不为"完整"而强行推断。
+type SemanticEvent struct {
+	EventID   event.EventID `json:"event_id"`
+	SessionID string        `json:"session_id"`
+	FlowID    string        `json:"flow_id,omitempty"`
+
+	Kind      SemanticKind `json:"kind"`
+	Name      string       `json:"name,omitempty"`
+	Operation string       `json:"operation,omitempty"`
+
+	Direction string `json:"direction,omitempty"`
+
+	Subject *SemanticSubject `json:"subject,omitempty"`
+
+	Confidence float64 `json:"confidence"`
+
+	Source SemanticSource `json:"source"`
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Evidence Layer v1 (contract)
+//
+// Evidence 回答"为什么认为两个 Event 有关系"。它是语义层的分析产物，不修改原始 Event。
+// 关键设计：Confidence（判定可信度）与 Strength（证据强度：observed/derived/inferred）
+// 必须分开；每条边必须可定位到 method + rule_id + evidence_ids，保证可解释。
+// ─────────────────────────────────────────────────────────────────────────────
+
+// EvidenceStrength 区分证据强度，与 Confidence 独立。
+type EvidenceStrength string
+
+const (
+	// EvidenceObserved 直接事实。例如 event A decoded_from raw packet B。
+	EvidenceObserved EvidenceStrength = "observed"
+	// EvidenceDerived 由确定规则得到。例如同一 correlation_id 关联两事件。
+	EvidenceDerived EvidenceStrength = "derived"
+	// EvidenceInferred 推测。例如仅凭名字与时间推断 LoginReq → LoginResp。
+	EvidenceInferred EvidenceStrength = "inferred"
+)
+
+// EvidenceMethod 标识建立关系所使用的方法。
+type EvidenceMethod string
+
+const (
+	MethodPlugin          EvidenceMethod = "plugin"
+	MethodCorrelation     EvidenceMethod = "correlation"
+	MethodNamePattern     EvidenceMethod = "name_pattern"
+	MethodTemporal        EvidenceMethod = "temporal"
+	MethodStateProjection EvidenceMethod = "state_projection"
+	MethodTransaction     EvidenceMethod = "transaction"
+)
+
 // RelationType 是证据图中固定边类型。
 type RelationType string
 
@@ -34,6 +150,9 @@ const (
 	// Updates 表示增量更新实体字段。
 	Updates RelationType = "updates"
 	// ParameterFrom 表示参数来源。
+	//
+	// ⚠️ v1 标记为 experimental：属于更细的语义关系，容易与业务领域绑定，
+	// v1 不将其标准化。当前实现继续保留，但外部消费者不应依赖其稳定性。
 	ParameterFrom RelationType = "parameter_from"
 	// PossibleFollowup 表示低置信时间邻近关系，避免误导为真实因果。
 	PossibleFollowup RelationType = "possible_followup"
@@ -61,15 +180,24 @@ type EvidenceNode struct {
 	ID string `json:"id"`
 	// Kind 是节点类型。
 	Kind EvidenceNodeKind `json:"kind"`
+
+	// EventID 是节点对应的事件 ID；仅 event 类节点有效（raw_packet/entity/transaction 等可能为空）。
+	EventID event.EventID `json:"event_id,omitempty"`
 	// SessionID 是会话标识，用于隔离不同会话/连接的节点。
 	SessionID string `json:"session_id"`
 	// FlowID 是五元组流标识；仅对包/事件节点有效。
 	FlowID string `json:"flow_id,omitempty"`
+
+	// Semantic 是该节点对应 Event 的语义投影；仅在存在语义判定时填充。
+	Semantic *SemanticEvent `json:"semantic,omitempty"`
+
 	// Timestamp 是节点时间戳。
 	Timestamp time.Time `json:"timestamp"`
 	// Labels 是节点标签，供展示/过滤使用。
 	Labels map[string]string `json:"labels,omitempty"`
 	// Properties 是节点附加属性。
+	// 注：v1 计划移除自由 Properties，改由 EvidenceStrength/Method/RuleID 等结构化字段承载；
+	// 当前为兼容 engine 既有写入予以保留，Phase 3 评估后清理。
 	Properties map[string]any `json:"properties,omitempty"`
 }
 
@@ -81,13 +209,29 @@ type EvidenceEdge struct {
 	Source string `json:"source"`
 	// Target 是目标节点 ID。
 	Target string `json:"target"`
-	// Type 是固定边类型。
+	// Type 是固定边类型（v1 稳定集合见 RelationType 常量）。
 	Type RelationType `json:"type"`
-	// Confidence 是置信度 [0.0, 1.0]；高置信关系（如 response_to）为 1.0。
+
+	// Confidence 是判定可信度，统一取值 [0.0, 1.0]。
+	// 注意：它只表示"判定有多可信"，不表示证据强度（见 Strength）。
 	Confidence float64 `json:"confidence"`
-	// Reason 是建立该关系的证据说明。
+
+	// Strength 是证据强度，与 Confidence 独立：
+	// observed=直接事实，derived=确定规则得到，inferred=推测。
+	Strength EvidenceStrength `json:"strength"`
+	// Method 是建立该关系使用的方法（plugin/correlation/name_pattern/...）。
+	Method EvidenceMethod `json:"method"`
+	// RuleID 是产生该关系的规则 ID，与 Plugin Contract 的 rule 体系贯通，
+	// 使 Agent 可 rule_id → explain → documentation 追溯。
+	RuleID string `json:"rule_id,omitempty"`
+	// Reason 是建立该关系的证据说明（人类可读，需说明依据而非"matched by name"）。
 	Reason string `json:"reason,omitempty"`
+	// EvidenceIDs 是支撑该关系的底层 Evidence 引用（如参与的 event ID 列表）。
+	EvidenceIDs []string `json:"evidence_ids,omitempty"`
+
 	// Properties 是边附加属性。
+	// 注：v1 计划移除自由 Properties，改由上述结构化字段承载；
+	// 当前为兼容 engine 既有写入予以保留，Phase 3 评估后清理。
 	Properties map[string]any `json:"properties,omitempty"`
 }
 

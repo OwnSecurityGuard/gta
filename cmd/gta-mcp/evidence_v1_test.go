@@ -67,6 +67,9 @@ func setupEvidenceV1Session(t *testing.T) (m *mcpCapture, sessionID, dbPath stri
 			FlowID:    "flow-1",
 			Timestamp: time.Now().UnixNano(),
 			Semantic:  string(sem),
+			// 故意写入 deprecated 字段，用于验证 v1 输出会将其剥离（仅内部兼容读取保留）。
+			Labels:     `{"type":"http.request"}`,
+			Properties: `{"legacy":"keep"}`,
 		},
 		{
 			ID:        "evt_resp-1",
@@ -95,6 +98,8 @@ func setupEvidenceV1Session(t *testing.T) (m *mcpCapture, sessionID, dbPath stri
 			Strength:    string(semantic.EvidenceObserved),
 			Method:      string(semantic.MethodPlugin),
 			EvidenceIDs: string(evIDs),
+			// 故意写入 deprecated 字段，用于验证 v1 输出会将其剥离。
+			Properties: `{"raw_packet_id":"pkt-1"}`,
 		},
 		{
 			ID:          "edge_evt_resp-1_evt_req-1_response_to",
@@ -266,5 +271,62 @@ func assertField(t *testing.T, obj map[string]any, key, want string) {
 	}
 	if gs, ok := got.(string); !ok || gs != want {
 		t.Errorf("field %q = %v (%T), want %q", key, got, got, want)
+	}
+}
+
+// TestE2E_QueryEvidenceGraph_V1OmitsDeprecatedFields 锁定 v1 契约收口：
+// MCP 对外输出（Agent/UI 可见）不得包含已标记 deprecated 的 labels / properties。
+//
+// 该测试在 setup 中显式写入了 labels/properties（模拟历史数据），因此能验证"剥离"是真实发生，
+// 而非"恰好没有写入"。同时验证存储层仍保留内部读取能力（deprecated 字段仅退出对外契约，
+// 不退出内部存储），符合"内部兼容读取、v2/migration 再删除"的收口策略。
+func TestE2E_QueryEvidenceGraph_V1OmitsDeprecatedFields(t *testing.T) {
+	m, sessionID, dbPath := setupEvidenceV1Session(t)
+
+	// 1) 内部兼容读取：存储层仍能把 labels/properties 读回（EvidenceNodeRow 字段存在）。
+	st, err := store.NewSQLiteStore(dbPath, nil)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	rows, err := st.QueryEvidenceNodesByIDs(context.Background(), sessionID, []string{"evt_req-1"})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("query node: err=%v rows=%d", err, len(rows))
+	}
+	if rows[0].Labels == "" {
+		t.Error("internal compat read lost: labels should still be readable from store")
+	}
+	if rows[0].Properties == "" {
+		t.Error("internal compat read lost: properties should still be readable from store")
+	}
+
+	// 2) 对外契约：MCP v1 输出必须不含 labels / properties。
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"session_id": sessionID}
+	res, err := m.handleQueryEvidenceGraph(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleQueryEvidenceGraph: %v", err)
+	}
+	var out struct {
+		OK    bool             `json:"ok"`
+		Nodes []map[string]any `json:"nodes"`
+		Edges []map[string]any `json:"edges"`
+	}
+	if err := json.Unmarshal([]byte(contentText(res)), &out); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+
+	for _, n := range out.Nodes {
+		if _, ok := n["labels"]; ok {
+			t.Errorf("node %v must not expose deprecated 'labels' in v1 output", n["id"])
+		}
+		if _, ok := n["properties"]; ok {
+			t.Errorf("node %v must not expose deprecated 'properties' in v1 output", n["id"])
+		}
+	}
+	for _, e := range out.Edges {
+		if _, ok := e["properties"]; ok {
+			t.Errorf("edge %v must not expose deprecated 'properties' in v1 output", e["id"])
+		}
 	}
 }

@@ -1496,7 +1496,12 @@ func (m *mcpCapture) handleTraceEventChain(ctx context.Context, req mcp.CallTool
 //
 // 关键：消费 Phase 2 确定性投影产出的 Semantic（json 形式复用 SemanticEvent 的
 // json tag，保证与 SSOT 文档一致），并把 Strength/Method/RuleID/EvidenceIDs 等
-// v1 结构化字段带上。Labels/Properties 保留为过渡字段（非 v1 契约），兼容旧消费者。
+// v1 结构化字段带上。
+//
+// ⚠️ v1 契约外字段（Labels / Properties）不再对外输出：二者已标记 deprecated，
+// 仅是内部兼容读取旧数据的过渡字段，既非稳定契约、又易退化为"各自塞字段"的逃生通道，
+// 故 MCP v1 输出严格排除。存储层仍照常读取（EvidenceNodeRow.Labels/Properties），
+// 保留对历史数据的内部兼容，但不进入 Agent/UI 可见的契约。
 func v1EvidenceNodeEntry(n store.EvidenceNodeRow) map[string]any {
 	entry := map[string]any{
 		"id":         n.ID,
@@ -1506,19 +1511,6 @@ func v1EvidenceNodeEntry(n store.EvidenceNodeRow) map[string]any {
 	}
 	if n.FlowID != "" {
 		entry["flow_id"] = n.FlowID
-	}
-	// labels / properties 是过渡字段（非 v1 契约）。它们是 JSON 列，但可能为空字符串，
-	// 空字符串不是合法 JSON，直接包成 json.RawMessage 会让整段输出序列化失败。
-	// 仅在内容合法时才透出。
-	if n.Labels != "" {
-		if raw := json.RawMessage(n.Labels); json.Valid(raw) {
-			entry["labels"] = raw
-		}
-	}
-	if n.Properties != "" {
-		if raw := json.RawMessage(n.Properties); json.Valid(raw) {
-			entry["properties"] = raw
-		}
 	}
 	// Semantic 是事件节点的语义投影（Phase 2 确定性投影器产出）。
 	// 经 SemanticEvent 反序列化再序列化，保证输出严格符合 v1 Contract 的字段/枚举，
@@ -1548,11 +1540,6 @@ func v1EvidenceEdgeEntry(e store.EvidenceEdgeRow) map[string]any {
 		"target":     e.Target,
 		"type":       e.Type,
 		"confidence": e.Confidence,
-	}
-	if e.Properties != "" {
-		if raw := json.RawMessage(e.Properties); json.Valid(raw) {
-			entry["properties"] = raw
-		}
 	}
 	if e.Reason != "" {
 		entry["reason"] = e.Reason

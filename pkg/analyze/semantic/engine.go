@@ -475,12 +475,40 @@ func (e *Engine) addEdge(sourceEventID event.EventID, targetNodeID string, edgeT
 	e.addEdgeFromNode(sourceNodeID, targetNodeID, edgeType, confidence, reason, props, meta)
 }
 
+// resolveEvidenceID 校验一个 EvidenceID 是否指向图中真实存在的证据。
+//
+// v1 规定：EvidenceEdge.EvidenceIDs 只能引用图中真实存在的实体，否则 Agent 看到
+// evidence_ids 却无法追溯（与悬空端点同为"静默不可信"问题）。合法引用包括：
+//   - 图中已存在的节点 ID（直接形式，如 evt_xxx / pkt_xxx / sc_xxx / ent_xxx / txn_xxx）
+//   - 裸事件 ID（eventIds 登记的事件，对应 evt_<id> 节点）
+//   - 裸原始包 ID（rawPacketIds 登记的原始包，对应 pkt_<id> 节点）
+//
+// 无法解析的 EvidenceID 视为悬空证据引用，由 addEdgeFromNode 在建边时丢弃该边。
+func (e *Engine) resolveEvidenceID(id string) bool {
+	if id == "" {
+		return false
+	}
+	if _, ok := e.nodeIDs[id]; ok {
+		return true
+	}
+	if _, ok := e.eventIds[event.EventID(id)]; ok {
+		return true
+	}
+	if _, ok := e.rawPacketIds[id]; ok {
+		return true
+	}
+	return false
+}
+
 // addEdgeFromNode 添加一条有向边。
 //
-// Graph Integrity 不变量在此强制执行：source 与 target 都必须是图中已存在的
-// 节点 ID，否则这条边会被丢弃并记录 warn。这样即使未来新增建边逻辑时误传了
-// 裸 EventID 或未创建的节点，也不会污染证据图（trace_event_chain / BFS /
-// UI 渲染都依赖端点可达）。
+// Graph Integrity 不变量在此强制执行，分两层：
+//  1. 端点层：source 与 target 都必须是图中已存在的节点 ID，否则这条边会被丢弃。
+//  2. 证据引用层：meta.EvidenceIDs 中每个 ID 都必须能在图中解析到真实存在的
+//     事件/原始包/节点，否则这条边同样被丢弃（明确降级）并记录 warn。
+//
+// 两层都保证了：即使未来新增建边逻辑时误传了裸 EventID、未创建的节点或凭空捏造的
+// evidence_id，也不会污染证据图（trace_event_chain / BFS / UI 渲染都依赖端点与证据可达）。
 func (e *Engine) addEdgeFromNode(sourceNodeID, targetNodeID string, edgeType RelationType, confidence float64, reason string, props map[string]any, meta edgeMeta) {
 	if _, ok := e.nodeIDs[sourceNodeID]; !ok {
 		slog.Warn("semantic engine: drop edge, source node not in graph",
@@ -491,6 +519,13 @@ func (e *Engine) addEdgeFromNode(sourceNodeID, targetNodeID string, edgeType Rel
 		slog.Warn("semantic engine: drop edge, target node not in graph",
 			"source", sourceNodeID, "target", targetNodeID, "type", edgeType)
 		return
+	}
+	for _, evID := range meta.EvidenceIDs {
+		if !e.resolveEvidenceID(evID) {
+			slog.Warn("semantic engine: drop edge, evidence_id not resolvable",
+				"source", sourceNodeID, "target", targetNodeID, "type", edgeType, "evidence_id", evID)
+			return
+		}
 	}
 	edge := EvidenceEdge{
 		ID:          fmt.Sprintf("edge_%s_%s_%s", sourceNodeID, targetNodeID, edgeType),

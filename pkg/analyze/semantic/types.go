@@ -65,16 +65,32 @@ type SemanticSubject struct {
 }
 
 // SemanticSource 标识语义判定的来源，供 Agent 区分"事实"与"推断"。
+//
+// v1 实际产生者（Actual Producer）：
+//
+//	engine  ← 当前唯一实际产生 SemanticEvent 的来源（Phase 2 投影器固定为 engine）
+//
+// 以下为保留（reserved / future），v1 不实际产生，仅供契约前向兼容与未来扩展：
+//
+//	plugin  ← reserved（未来：插件显式声明语义，需引入明确标记如 _meta.semantic_source）
+//	rule    ← reserved（未来：显式规则映射）
+//	user    ← reserved（未来：用户/外部标注）
+//
+// 文档 SSOT（docs/semantic-evidence-v1.md §2.7）对四者的角色有完整说明；
+// 任何"实际运行数据"示例的 source 均为 "engine"，AI 不应据此推断 v1 会输出 plugin/rule/user。
 type SemanticSource string
 
 const (
 	// SourcePlugin 由解码插件明确告知 GTA（如 decoder 声明 operation=login）。
+	// ⚠️ reserved / future：v1 实际不产生此来源（见类型注释）。
 	SourcePlugin SemanticSource = "plugin"
 	// SourceRule 由显式规则映射得到（如 name→operation 规则）。
+	// ⚠️ reserved / future：v1 实际不产生此来源（见类型注释）。
 	SourceRule SemanticSource = "rule"
-	// SourceEngine 由语义引擎推导得到。
+	// SourceEngine 由语义引擎推导得到。当前 v1 唯一实际产生者（Phase 2 投影器固定）。
 	SourceEngine SemanticSource = "engine"
 	// SourceUser 由用户/外部标注。
+	// ⚠️ reserved / future：v1 实际不产生此来源（见类型注释）。
 	SourceUser SemanticSource = "user"
 )
 
@@ -194,10 +210,17 @@ type EvidenceNode struct {
 	// Timestamp 是节点时间戳。
 	Timestamp time.Time `json:"timestamp"`
 	// Labels 是节点标签，供展示/过滤使用。
+	//
+	// ⚠️ DEPRECATED（v1 契约外）：v1 对外输出已不再包含 labels（见 MCP v1 转换层
+	// v1EvidenceNodeEntry）。保留该字段仅为“内部兼容读取”旧数据；后续 v2 / migration
+	// 将彻底删除。Plugin / Agent / UI 不应依赖其存在或内容。
 	Labels map[string]string `json:"labels,omitempty"`
-	// Properties 是节点附加属性。
-	// 注：v1 计划移除自由 Properties，改由 EvidenceStrength/Method/RuleID 等结构化字段承载；
-	// 当前为兼容 engine 既有写入予以保留，Phase 3 评估后清理。
+	// Properties 是节点附加属性（自由 map[string]any）。
+	//
+	// ⚠️ DEPRECATED（v1 契约外）：v1 已由 EvidenceStrength / Method / RuleID / Reason /
+	// EvidenceIDs / Semantic 等结构化字段承载全部可解释性需求；自由 Properties 最终会
+	// 重新变成“大家各自塞字段”的逃生通道，故 v1 对外输出已不再包含它。
+	// 保留该字段仅为“内部兼容读取”旧数据；后续 v2 / migration 将彻底删除。
 	Properties map[string]any `json:"properties,omitempty"`
 }
 
@@ -227,11 +250,16 @@ type EvidenceEdge struct {
 	// Reason 是建立该关系的证据说明（人类可读，需说明依据而非"matched by name"）。
 	Reason string `json:"reason,omitempty"`
 	// EvidenceIDs 是支撑该关系的底层 Evidence 引用（如参与的 event ID 列表）。
+	//
+	// 完整性约束：每个 EvidenceID 都必须能在 Graph 中解析到真实存在的 Event 节点 /
+	// 原始包节点 / 节点 ID（见 Engine.addEdgeFromNode 第二层不变量），否则该边不生成。
 	EvidenceIDs []string `json:"evidence_ids,omitempty"`
 
-	// Properties 是边附加属性。
-	// 注：v1 计划移除自由 Properties，改由上述结构化字段承载；
-	// 当前为兼容 engine 既有写入予以保留，Phase 3 评估后清理。
+	// Properties 是边附加属性（自由 map[string]any）。
+	//
+	// ⚠️ DEPRECATED（v1 契约外）：v1 对外输出已不再包含它（见 MCP v1 转换层
+	// v1EvidenceEdgeEntry）。保留该字段仅为“内部兼容读取”旧数据；后续 v2 / migration
+	// 将彻底删除。Plugin / Agent / UI 不应依赖其存在或内容。
 	Properties map[string]any `json:"properties,omitempty"`
 }
 

@@ -247,14 +247,29 @@ const (
 )
 ```
 
-Agent 据此区分：
+**v1 Source enum 角色划分（重要，避免 AI 误读）：**
+
+| 值 | 角色 | v1 实际是否产生 |
+|---|---|---|
+| `engine` | 语义引擎推导 | ✅ **当前唯一实际产生者**（Phase 2 投影器 `deriveSource` 固定返回 `engine`） |
+| `plugin` | 解码插件明确告知 | ⚠️ reserved / future（未来需引入明确标记如 `_meta.semantic_source`） |
+| `rule` | 显式规则映射 | ⚠️ reserved / future |
+| `user` | 用户/外部标注 | ⚠️ reserved / future |
+
+> ⚠️ **契约红线**：v1 实际运行数据（`SemanticProjector.Project` 的输出）的 `source` **恒为 `"engine"`**。
+> `plugin` / `rule` / `user` 仅为前向兼容保留的枚举取值，v1 不会实际产生它们。
+> AI 不得据此推断"Phase 2 有时可以输出 `source=plugin`"——那是未来能力，不是当前契约。
+> 未来若需表达"插件显式声明语义"，应引入**明确来源标记**（如 `_meta.semantic_source="plugin"`），
+> 而不是复用 `_meta` 的存在性来推导。
+
+Agent 据此区分"事实"与"推断"——但所有 v1 实际产出的语义断言，`source` 均为 `engine`：
 
 ```json
-{ "operation": "login", "source": "rule",     "confidence": 0.86 }
-{ "operation": "login", "source": "plugin",   "confidence": 1.0  }
+{ "operation": "",        "source": "engine", "confidence": 1.0 }
+{ "operation": "login",   "source": "engine", "confidence": 1.0 }
 ```
 
-两者含义完全不同。
+（上述 `source` 一律为 `engine`；`plugin`/`rule`/`user` 仅为枚举占位，v1 不实际出现。）
 
 ### 2.8 SemanticEvent JSON 示例
 
@@ -269,7 +284,7 @@ Agent 据此区分：
   "direction": "client_to_server",
   "subject": { "type": "player", "id": "12345" },
   "confidence": 1.0,
-  "source": "plugin"
+  "source": "engine"
 }
 ```
 
@@ -339,7 +354,7 @@ type EvidenceNode struct {
     "operation": "login",
     "direction": "client_to_server",
     "confidence": 1.0,
-    "source": "plugin"
+    "source": "engine"
   },
   "timestamp": "2026-08-12T22:00:00Z"
 }
@@ -500,7 +515,7 @@ type EvidenceGraph struct {
         "operation": "login",
         "direction": "client_to_server",
         "confidence": 1.0,
-        "source": "plugin"
+        "source": "engine"
       },
       "timestamp": "2026-08-12T22:00:00.120Z"
     },
@@ -554,15 +569,29 @@ type EvidenceGraph struct {
 }
 ```
 
-### 5.2 Labels / Properties 收口（过渡字段，非 v1 契约）
+### 5.2 Labels / Properties 收口（DEPRECATED，已退出 v1 对外契约）
 
-`EvidenceNode` 与 `EvidenceEdge` 当前仍保留 `Labels` 与 `Properties` 两个自由字段，
-**它们不属于 v1 契约**，仅为兼容现有 engine 的既有写入而暂存，将在 Phase 3 评估后清理：
+`EvidenceNode` 与 `EvidenceEdge` 仍保留 `Labels` 与 `Properties` 两个自由字段，但已**标记 deprecated**，
+并做出如下「最终判定」：
 
-- 它们是「过渡字段」，**不进入 v1 JSON 契约**——本文档所有 JSON 示例均不含二者。
-- 消费者（Plugin / Agent / UI）**不应依赖** `Labels` / `Properties` 的存在或内容。
-- v1 稳定的结构化字段（`Strength` / `Method` / `RuleID` / `Reason` / `EvidenceIDs` / `Semantic`）
-  已足以承载可解释性需求，`Labels` / `Properties` 是历史包袱，最终会被移除。
+```
+Labels / Properties
+        ↓  标记 deprecated
+        ↓  不再作为 MCP v1 输出
+        ↓  内部兼容读取（store 仍读旧数据，内部逻辑可用）
+        ↓  以后 v2 / migration 再删除
+```
+
+- **v1 对外契约已不含二者**：MCP v1 转换层（`v1EvidenceNodeEntry` / `v1EvidenceEdgeEntry`）
+  已不再发射 `labels` / `properties`。本文档所有 JSON 示例均不含二者，AI 据此产出的 JSON 亦不得包含。
+- **保留内部兼容读取**：存储层 `EvidenceNodeRow.Labels / Properties` 仍照常读写，历史 session 数据
+  不丢失、内部逻辑（如 trace 链路的节点命名）仍可用。这是「稳妥过渡」而非「直接删除」——
+  直接删除会让旧数据读取与内部消费者瞬间断裂。
+- **最终移除**：`Labels` / `Properties` 是历史包袱，自由 `map[string]any` 一旦重新对外，必会退化成
+  「大家各自塞字段」的逃生通道，破坏「Plugin / Agent / UI 共享同一语义协议」的目标。故其生存边界
+  止于内部兼容，待 v2 或数据迁移时彻底删除。
+- **消费者约束**：Plugin / Agent / UI **不应依赖** `Labels` / `Properties` 的存在或内容；其可解释性
+  需求应全部经由 v1 结构化字段（`Strength` / `Method` / `RuleID` / `Reason` / `EvidenceIDs` / `Semantic`）满足。
 
 ### 5.3 Graph Integrity（图完整性不变量，硬约束）
 

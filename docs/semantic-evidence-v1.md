@@ -655,6 +655,7 @@ Node#2
 6. `confidence` 与 `strength` 不混用（两个独立字段）。
 7. 所有 `EvidenceEdge` 可定位到 `rule_id` / `method`（字段已存在，**Phase 3 已填充**）。
 8. Graph Integrity：所有 edge 端点都可在 `Nodes` 中找到（**Phase 3 已在写入侧强制并有测试覆盖**，见 §5.3）。
+9. MCP 输出已统一为 v1 Contract（`query_evidence_graph` / `trace_event_chain` 输出 `Semantic` 投影与边 v1 字段，**Phase 4 已落地并端到端测试**）。
 
 > 验收底线：**任何 AI 据本文档，都能独立写出与本仓库一致的 JSON。**
 
@@ -667,7 +668,7 @@ Node#2
 | **1. Contract Freeze** | 仅定义契约 + 类型 + 本文档 | 不改 Capture / Event / Plugin RPC / MCP Tool / DB / UI |
 | **2. Semantic Projection** | `Event → SemanticEvent` 确定性映射 | 不引入 AI 推理，不自动猜 player/login |
 | **3. Evidence Graph v1 化** ✅ | 现有 Evidence Graph 迁移到 v1：引擎产出边填充 `strength/method/rule_id/evidence_ids`；事件节点填充 `Semantic`；store 持久化并读回新字段；修复悬空边并在写入侧强制 Graph Integrity（§5.3） | 每条 edge 必须可解释、且端点必须存在 |
-| **4. 统一 Agent/UI 输出** | 让已有 MCP Tool 输出统一 v1 Contract | 不新增 Tool |
+| **4. 统一 Agent/UI 输出** ✅ | 让已有 MCP Tool 输出统一 v1 Contract：事件节点带 `Semantic` 投影，边带 `strength/method/rule_id/evidence_ids`（与 `confidence` 并列）；经 `SemanticEvent` 反序列化再序列化保证输出严格符合本契约 | 不新增 Tool |
 
 建议提交顺序：
 

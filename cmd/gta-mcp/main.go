@@ -23,13 +23,14 @@ import (
 	"google.golang.org/grpc"
 	"gopkg.in/yaml.v3"
 
+	"gta/pkg/analyze/semantic"
 	"gta/pkg/config"
 	"gta/pkg/internalipc"
 	pb "gta/pkg/internalipc/proto"
 	"gta/pkg/logging"
+	"gta/pkg/plugin/skills"
 	plugindevclient "gta/pkg/plugindev/client"
 	plugindevserver "gta/pkg/plugindev/server"
-	"gta/pkg/plugin/skills"
 	"gta/pkg/schema"
 	"gta/pkg/store"
 
@@ -1328,38 +1329,15 @@ func (m *mcpCapture) handleQueryEvidenceGraph(ctx context.Context, req mcp.CallT
 		return errorResult(fmt.Errorf("query evidence graph: %w", err)), nil
 	}
 
-	// 将 JSON 字符串字段转换为 json.RawMessage
+	// 将节点/边转换为统一的 v1 Contract 输出（含 Semantic 投影与 Strength/Method/RuleID/EvidenceIDs）。
 	nodes := make([]map[string]any, 0, len(result.Nodes))
 	for _, n := range result.Nodes {
-		entry := map[string]any{
-			"id":         n.ID,
-			"session_id": n.SessionID,
-			"kind":       n.Kind,
-			"timestamp":  n.Timestamp,
-			"labels":     json.RawMessage(n.Labels),
-			"properties": json.RawMessage(n.Properties),
-		}
-		if n.FlowID != "" {
-			entry["flow_id"] = n.FlowID
-		}
-		nodes = append(nodes, entry)
+		nodes = append(nodes, v1EvidenceNodeEntry(n))
 	}
 
 	edges := make([]map[string]any, 0, len(result.Edges))
 	for _, e := range result.Edges {
-		entry := map[string]any{
-			"id":         e.ID,
-			"session_id": e.SessionID,
-			"source":     e.Source,
-			"target":     e.Target,
-			"type":       e.Type,
-			"confidence": e.Confidence,
-			"properties": json.RawMessage(e.Properties),
-		}
-		if e.Reason != "" {
-			entry["reason"] = e.Reason
-		}
-		edges = append(edges, entry)
+		edges = append(edges, v1EvidenceEdgeEntry(e))
 	}
 
 	slog.Info("query_evidence_graph completed", "nodes", len(nodes), "edges", len(edges))
@@ -1447,13 +1425,7 @@ func (m *mcpCapture) handleTraceEventChain(ctx context.Context, req mcp.CallTool
 						visited[e.Target] = true
 						nodeIDSet[e.Target] = true
 						queue = append(queue, chainElem{NodeID: e.Target, Depth: cur.Depth + 1, Direction: "downstream"})
-						downstream = append(downstream, map[string]any{
-							"node_id":    e.Target,
-							"depth":      cur.Depth + 1,
-							"edge_type":  e.Type,
-							"confidence": e.Confidence,
-							"reason":     e.Reason,
-						})
+						downstream = append(downstream, v1ChainHop(e, e.Target, cur.Depth+1))
 					}
 					allEdges = append(allEdges, e)
 				}
@@ -1478,13 +1450,7 @@ func (m *mcpCapture) handleTraceEventChain(ctx context.Context, req mcp.CallTool
 						visited[e.Source] = true
 						nodeIDSet[e.Source] = true
 						queue = append(queue, chainElem{NodeID: e.Source, Depth: cur.Depth + 1, Direction: "upstream"})
-						upstream = append(upstream, map[string]any{
-							"node_id":    e.Source,
-							"depth":      cur.Depth + 1,
-							"edge_type":  e.Type,
-							"confidence": e.Confidence,
-							"reason":     e.Reason,
-						})
+						upstream = append(upstream, v1ChainHop(e, e.Source, cur.Depth+1))
 					}
 					allEdges = append(allEdges, e)
 				}
@@ -1503,29 +1469,16 @@ func (m *mcpCapture) handleTraceEventChain(ctx context.Context, req mcp.CallTool
 		nodes = nil
 	}
 
-	// 格式化节点
+	// 格式化节点（统一 v1 Contract 输出：含 Semantic 投影）
 	nodeList := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
-		entry := map[string]any{
-			"id":      n.ID,
-			"kind":    n.Kind,
-			"labels":  json.RawMessage(n.Labels),
-			"flow_id": n.FlowID,
-		}
-		nodeList = append(nodeList, entry)
+		nodeList = append(nodeList, v1EvidenceNodeEntry(n))
 	}
 
-	// 格式化边
+	// 格式化边（统一 v1 Contract 输出：含 Strength/Method/RuleID/EvidenceIDs）
 	edgeList := make([]map[string]any, 0, len(allEdges))
 	for _, e := range allEdges {
-		edgeList = append(edgeList, map[string]any{
-			"id":         e.ID,
-			"source":     e.Source,
-			"target":     e.Target,
-			"type":       e.Type,
-			"confidence": e.Confidence,
-			"reason":     e.Reason,
-		})
+		edgeList = append(edgeList, v1EvidenceEdgeEntry(e))
 	}
 
 	slog.Info("trace_event_chain done", "nodes", len(nodeList), "edges", len(edgeList), "upstream", len(upstream), "downstream", len(downstream))
@@ -1537,6 +1490,118 @@ func (m *mcpCapture) handleTraceEventChain(ctx context.Context, req mcp.CallTool
 		"upstream":      upstream,
 		"downstream":    downstream,
 	}), nil
+}
+
+// v1EvidenceNodeEntry 将 EvidenceNodeRow 转换为统一的 v1 Contract 节点输出。
+//
+// 关键：消费 Phase 2 确定性投影产出的 Semantic（json 形式复用 SemanticEvent 的
+// json tag，保证与 SSOT 文档一致），并把 Strength/Method/RuleID/EvidenceIDs 等
+// v1 结构化字段带上。Labels/Properties 保留为过渡字段（非 v1 契约），兼容旧消费者。
+func v1EvidenceNodeEntry(n store.EvidenceNodeRow) map[string]any {
+	entry := map[string]any{
+		"id":         n.ID,
+		"session_id": n.SessionID,
+		"kind":       n.Kind,
+		"timestamp":  n.Timestamp,
+	}
+	if n.FlowID != "" {
+		entry["flow_id"] = n.FlowID
+	}
+	// labels / properties 是过渡字段（非 v1 契约）。它们是 JSON 列，但可能为空字符串，
+	// 空字符串不是合法 JSON，直接包成 json.RawMessage 会让整段输出序列化失败。
+	// 仅在内容合法时才透出。
+	if n.Labels != "" {
+		if raw := json.RawMessage(n.Labels); json.Valid(raw) {
+			entry["labels"] = raw
+		}
+	}
+	if n.Properties != "" {
+		if raw := json.RawMessage(n.Properties); json.Valid(raw) {
+			entry["properties"] = raw
+		}
+	}
+	// Semantic 是事件节点的语义投影（Phase 2 确定性投影器产出）。
+	// 经 SemanticEvent 反序列化再序列化，保证输出严格符合 v1 Contract 的字段/枚举，
+	// 不被存储层可能的历史格式漂移污染。
+	if n.Semantic != "" {
+		var sem semantic.SemanticEvent
+		if err := json.Unmarshal([]byte(n.Semantic), &sem); err == nil {
+			if raw, mErr := json.Marshal(sem); mErr == nil {
+				entry["semantic"] = json.RawMessage(raw)
+			}
+		} else {
+			slog.Warn("query_evidence_graph: skip invalid semantic blob", "node", n.ID, "error", err)
+		}
+	}
+	return entry
+}
+
+// v1EvidenceEdgeEntry 将 EvidenceEdgeRow 转换为统一的 v1 Contract 边输出。
+//
+// Confidence（判定可信度）与 Strength（证据强度）并列输出，二者含义不同，
+// 不可合并；Method/RuleID/EvidenceIDs 提供可解释性与溯源。
+func v1EvidenceEdgeEntry(e store.EvidenceEdgeRow) map[string]any {
+	entry := map[string]any{
+		"id":         e.ID,
+		"session_id": e.SessionID,
+		"source":     e.Source,
+		"target":     e.Target,
+		"type":       e.Type,
+		"confidence": e.Confidence,
+	}
+	if e.Properties != "" {
+		if raw := json.RawMessage(e.Properties); json.Valid(raw) {
+			entry["properties"] = raw
+		}
+	}
+	if e.Reason != "" {
+		entry["reason"] = e.Reason
+	}
+	if e.Strength != "" {
+		entry["strength"] = e.Strength
+	}
+	if e.Method != "" {
+		entry["method"] = e.Method
+	}
+	if e.RuleID != "" {
+		entry["rule_id"] = e.RuleID
+	}
+	// EvidenceIDs 以 JSON 数组原样输出（如 ["pkt-1"] 或 ["reqID","respID"]）。
+	if e.EvidenceIDs != "" {
+		if raw := json.RawMessage(e.EvidenceIDs); json.Valid(raw) {
+			entry["evidence_ids"] = raw
+		}
+	}
+	return entry
+}
+
+// v1ChainHop 把一条边封装为链路追踪里 upstream/downstream 的轻量跳点。
+//
+// nodeID 是该跳点所到达的邻接节点（下游为 target，上游为 source）。除基础字段外，
+// 一并带上 v1 结构化字段（strength/method/rule_id/evidence_ids），使 AI 无需回查边表即可判断关系性质。
+func v1ChainHop(e store.EvidenceEdgeRow, nodeID string, depth int) map[string]any {
+	hop := map[string]any{
+		"node_id":    nodeID,
+		"depth":      depth,
+		"edge_type":  e.Type,
+		"confidence": e.Confidence,
+		"reason":     e.Reason,
+	}
+	if e.Strength != "" {
+		hop["strength"] = e.Strength
+	}
+	if e.Method != "" {
+		hop["method"] = e.Method
+	}
+	if e.RuleID != "" {
+		hop["rule_id"] = e.RuleID
+	}
+	if e.EvidenceIDs != "" {
+		if raw := json.RawMessage(e.EvidenceIDs); json.Valid(raw) {
+			hop["evidence_ids"] = raw
+		}
+	}
+	return hop
 }
 
 // handleAnalyzeProtocolPatterns 分析会话中的协议模式，为 AI Skill 链路规则发现提供数据。
@@ -1790,10 +1855,10 @@ func (m *mcpCapture) handleSuggestLinkRules(ctx context.Context, req mcp.CallToo
 	slog.Info("suggest_link_rules completed", "session", sessionID, "pairs", len(pairs), "suggestions", len(suggestions))
 
 	return successResult(map[string]any{
-		"session_id":   sessionID,
-		"suggestions":  suggestions,
-		"total_edges":  len(graphResult.Edges),
-		"total_nodes":  len(graphResult.Nodes),
+		"session_id":  sessionID,
+		"suggestions": suggestions,
+		"total_edges": len(graphResult.Edges),
+		"total_nodes": len(graphResult.Nodes),
 	}), nil
 }
 

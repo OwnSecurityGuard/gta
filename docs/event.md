@@ -748,12 +748,19 @@ CREATE TABLE events (
     origin_id TEXT,
 
 
+    context BLOB NOT NULL,
+
+
     payload BLOB NOT NULL,
 
 
     created_at INTEGER NOT NULL
 );
 ```
+
+> **Live schema authority.** The authoritative column set and indexes are returned by
+> the `get_capture_schema` MCP tool at runtime. This section is a snapshot; if it ever
+> drifts from `get_capture_schema`, trust the runtime schema.
 
 ---
 

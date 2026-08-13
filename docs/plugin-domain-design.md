@@ -1,5 +1,11 @@
 # MCP Plugin Domain 设计 v2：三平面 + 双状态空间
 
+> ⚠️ **过期设计稿（未实现），且部分架构描述已与实际不符。** 实际 MCP 工具面以
+> `cmd/gta-mcp/main.go` 的 `AddTool` 注册为准（约 40 个工具，非本文的 13 个）；插件
+> 生命周期与状态模型以运行时 `plugin.status` / `list_plugins` 的真实返回为准。本文仅作
+> 架构演进史料，不要据此判断"有哪些可用工具"。文中示例插件名 `http` 仅为占位示例，
+> 不代表仓库中存在该插件。
+
 > 状态：设计稿（未实现）
 > 涉及仓库：`E:\gta`（MCP + Pipeline + Event Store + Plugin 管理）、`E:\ai_workspace\gta-plugin-sdk`（契约定义 + SDK Runtime）
 > v2 变更：按评审意见重构。核心变化是引入 Developer Plane，把 build/activate 移出 MCP 进程；状态从单一状态机拆为 Artifact / Runtime 双状态空间。
@@ -109,7 +115,7 @@ offline → registered → active → bound
 
 - **失效规则**：任何一次 `build` 成功，Artifact 立即从 `validated` 降级回 `compiled`
 - **溯源**：`validated` 必须携带 `proof: { verify_run_id, session_id, verdict, at }`，不能是一个裸 bool
-- **陈旧判定**：`binary_stale` 由 `main.go` 与 `*.exe` 的 mtime 比较得出（`tools/hotreload/hotreload.go` 的实践已经在用这个信号），stale 时 `next_action` 强制指向 `build`
+- **陈旧判定**：`binary_stale` 由 `main.go` 与 `*.exe` 的 mtime 比较得出（stale 时 `next_action` 强制指向 `build`）
 
 ### 2.3 失败不该建成状态
 
@@ -208,7 +214,7 @@ rules:
 ```json
 {
   "local":   [{ "name": "my-game", "artifact_state": "compiled", "binary_stale": false }],
-  "runtime": [{ "name": "http", "runtime_state": "active", "instance_id": "..." }]
+  "runtime": [{ "name": "example-decoder", "runtime_state": "active", "instance_id": "..." }]
 }
 ```
 

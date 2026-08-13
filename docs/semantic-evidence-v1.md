@@ -79,6 +79,13 @@ Player / Inventory / HP / Gold / Quest / Guild / Item / NPC / Match ...
 这些全部属于具体游戏领域，由插件（Plugin）在 `payload` 与 `_state_changes` 中承载，
 不在核心 Contract 之内。
 
+> **插件侧声明规范以 SDK 为准。** 本文档只定义语义/证据的"含义"，不规定插件
+> "如何声明"。`_state_changes` 的字段结构、`op` 取值（`set`/`delete`/`merge`）、
+> 宿主投影流程（`event.ExtractStateChanges` → `state_changes` 表）与校验规则已并入
+> `gta-plugin-sdk`：见 `contract.yaml` 的 `reserved_payload_fields._state_changes`
+> 与 `docs/decoder-development.md` 的 "State projection (`_state_changes`)" 章节
+> （规则 id `state-changes-required`）。插件作者读 SDK 即可拿到完整指令，无需回溯本仓库。
+
 同理，v1 **明确不做**：统一业务 Schema、UI Component Schema、AI Reasoning Trace、
 Vector / Embedding、知识图谱数据库（Neo4j）、跨 Session Knowledge Graph、
 自动 AI 推理、自动生成业务 ontology、重构 Event、重构 Payload。

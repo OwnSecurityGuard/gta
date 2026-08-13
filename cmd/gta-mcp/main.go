@@ -1284,6 +1284,56 @@ func (m *mcpCapture) handleListStateChanges(ctx context.Context, req mcp.CallToo
 	}), nil
 }
 
+// handleQueryCaptureTable 提供对内部投影/审计表的只读出口。
+// event_index（schema indexable_fields 投影）与 plugin_debug_access（采样审计留痕）
+// 此前没有任何专用 MCP 工具暴露，AI 无法验证其是否生效；本工具以白名单方式安全开放
+// SELECT（表名来自固定允许列表，杜绝注入），limit/offset 走参数化。
+func (m *mcpCapture) handleQueryCaptureTable(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	allowed := map[string]bool{
+		"event_index":         true,
+		"plugin_debug_access": true,
+		"raw_packets":         true,
+		"events":              true,
+		"state_changes":       true,
+		"aggregated_metrics":  true,
+		"evidence_nodes":      true,
+		"evidence_edges":      true,
+	}
+	sessionID := req.GetString("session_id", "")
+	table := req.GetString("table", "")
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+	if sessionID == "" {
+		return errorResult(fmt.Errorf("session_id is required")), nil
+	}
+	if !allowed[table] {
+		return errorResult(fmt.Errorf("table %q is not in the allowlist; use one of: event_index, plugin_debug_access, raw_packets, events, state_changes, aggregated_metrics, evidence_nodes, evidence_edges", table)), nil
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	reader, err := m.openReader(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	query := fmt.Sprintf("SELECT * FROM %s WHERE session_id=? ORDER BY rowid LIMIT ? OFFSET ?", table)
+	rows, err := reader.RawQuery(ctx, query, sessionID, limit, offset)
+	if err != nil {
+		return errorResult(fmt.Errorf("query %s: %w", table, err)), nil
+	}
+	return successResult(map[string]any{
+		"table": table,
+		"count": len(rows),
+		"rows":  rows,
+	}), nil
+}
+
 // handleQueryEvidenceGraph 查询证据图（节点 + 边）。
 // 支持按 node_kind、flow_id、edge_type 过滤，以及从根节点出发扩展邻接子图。
 func (m *mcpCapture) handleQueryEvidenceGraph(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -2328,6 +2378,7 @@ func main() {
 		mcp.WithDescription("Attribute the most recent build or activate failure of a plugin (design §2.3 / P3a). Reads the Developer Plane's last attempt and returns structured findings (category + optional SDK contract rule_id + why + fix), plus a next_action. The returned ref is what status_plugin's last_attempt.explain_ref points back to. On a failed build/activate the Developer Plane already auto-runs this, so status surfaces the ref immediately."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case), e.g. my-game-decoder")),
 		mcp.WithString("action", mcp.Description("Optional: which attempt to explain (build | activate | deactivate). Omit to explain the latest attempt")),
+		mcp.WithObject("verify", mcp.Description("Optional verify result from plugin.verify, shape {violations, quality, verdict}. When provided, decode-class attribution is derived from it; when omitted, the Developer Plane attributes the most recent recorded verify result.")),
 	), capture.handleExplainPlugin)
 
 	s.AddTool(mcp.NewTool("get_plugin_contract",
@@ -2392,6 +2443,14 @@ func main() {
 		mcp.WithString("flow_id", mcp.Description("Filter by flow ID")),
 	), capture.handleListStateChanges)
 
+	s.AddTool(mcp.NewTool("query_capture_table",
+		mcp.WithDescription("Read-only escape hatch for internal projection/audit tables that have no dedicated tool. Whitelisted tables: event_index (schema indexable_fields projection), plugin_debug_access (audit trail of sampled bytes), raw_packets, events, state_changes, aggregated_metrics, evidence_nodes, evidence_edges. The table name is constrained to the allowlist (no SQL injection possible); limit/offset are parameterized. Use this to verify event_index projections were built, or to inspect plugin_debug_access audit rows."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID to query")),
+		mcp.WithString("table", mcp.Required(), mcp.Description("Whitelisted table: event_index | plugin_debug_access | raw_packets | events | state_changes | aggregated_metrics | evidence_nodes | evidence_edges")),
+		mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max rows (clamped to 1000)")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+	), capture.handleQueryCaptureTable)
+
 	s.AddTool(mcp.NewTool("aggregate_query",
 		mcp.WithDescription("Query aggregated metrics/statistics using an expr expression over {name, window, value, group}."),
 		mcp.WithString("expression", mcp.Required(), mcp.Description("expr expression, e.g. name == 'http_req_count' && value > 0")),
@@ -2439,13 +2498,13 @@ func main() {
 
 	// 行为（behavior）与因果链（causation chain）工具。
 	s.AddTool(mcp.NewTool("begin_capture_run",
-		mcp.WithDescription("Mark the start of a user operation or behavior without clearing existing capture data. Returns run_id for later correlation."),
+		mcp.WithDescription("Mark the start of a user operation or behavior WITHOUT starting capture. It records a run window and returns run_id for later correlation (end_capture_run / get_run_status / trace_protocol_flow). plugin_name/device/filter/port are DESCRIPTIVE HINTS only and do NOT auto-start capture. To actually capture, call start_capture separately; if no capture is running this tool only returns a time_window_only uncertainty telling you to call start_capture first."),
 		mcp.WithString("feature_name", mcp.Required(), mcp.Description("Name of the feature/behavior being tested, e.g. 'upgrade_building'")),
 		mcp.WithString("project_path", mcp.Required(), mcp.Description("Path to the load-test project where code will be generated")),
-		mcp.WithString("plugin_name", mcp.Description("Optional plugin name for auto_start")),
+		mcp.WithString("plugin_name", mcp.Description("Optional descriptive hint recorded for the run window. NOT used to auto-start capture; call start_capture separately.")),
 		mcp.WithString("device", mcp.Description("Optional device identifier")),
 		mcp.WithString("filter", mcp.Description("Optional capture filter")),
-		mcp.WithNumber("port", mcp.Description("Optional server port for auto_start")),
+		mcp.WithNumber("port", mcp.Description("Optional descriptive hint recorded for the run window. NOT used to auto-start capture.")),
 	), capture.handleBeginCaptureRun)
 
 	s.AddTool(mcp.NewTool("end_capture_run",

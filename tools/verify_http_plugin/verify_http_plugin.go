@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"log"
 	"time"
@@ -14,7 +15,25 @@ import (
 	pb "gta/pkg/internalipc/proto"
 )
 
+// verify_plugin is a dev harness that captures live traffic for a given plugin
+// and inspects the decoded events written to the session SQLite database.
+//
+// It is generic: pass the plugin name and traffic port via flags. Generate the
+// traffic against -port with your own client/server (for an HTTP decoder,
+// examples/http/server is a ready-made generator — but that is unrelated to any
+// specific plugin binary).
 func main() {
+	var (
+		plugin = flag.String("plugin", "", "plugin name to verify (must be registered/active)")
+		port   = flag.Int("port", 8984, "capture port for live traffic")
+		device = flag.String("device", "\\Device\\NPF_Loopback", "pcap capture device")
+		prefix = flag.String("prefix", "verify", "session id prefix")
+	)
+	flag.Parse()
+	if *plugin == "" {
+		log.Fatal("-plugin is required")
+	}
+
 	conn, err := grpc.NewClient("localhost:8088", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatal(err)
@@ -23,16 +42,15 @@ func main() {
 
 	client := pb.NewCaptureControlClient(conn)
 
-	// Start capture on port 8984 (examples/http/server).
-	sessionID := fmt.Sprintf("http-verify-%d", time.Now().Unix())
+	sessionID := fmt.Sprintf("%s-%d", *prefix, time.Now().Unix())
 	startResp, err := client.StartCapture(context.Background(), &pb.StartCaptureRequest{
 		SessionId: sessionID,
-		Plugin:    "http",
-		Port:      8984,
+		Plugin:    *plugin,
+		Port:      int32(*port),
 		Source: &pb.StartCaptureRequest_Live{
 			Live: &pb.PcapLiveConfig{
-				Device: "\\Device\\NPF_Loopback",
-				Bpf:    "tcp port 8984",
+				Device: *device,
+				Bpf:    fmt.Sprintf("tcp port %d", *port),
 			},
 		},
 	})

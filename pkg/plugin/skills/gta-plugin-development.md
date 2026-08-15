@@ -164,6 +164,63 @@ meta:
   description: HTTP protocol decoder
 ```
 
+### 3.1 语义契约声明（Semantic Contract v1，四层）
+
+> 宿主在**插件注册时**会跑六层声明校验（runtime/schema/state/evidence/rule），error 级违规直接拒绝注册；
+> `verify_plugin` 还会逐事件校验 payload 与声明 schema 的符合度。声明写错不会再静默通过。
+> 完整规范见 SDK `docs/plugin-semantic-contract-v1.md`。
+
+manifest 在基础字段之外可声明语义契约。`contract:` 块声明契约版本，`capabilities:` 打开对应层，
+随后 `schemas` / `states` / `evidence` / `rules` 四段声明插件能产出什么：
+
+```yaml
+api_version: gta.decoder/v2
+name: game-decoder
+protocol: game
+type: decoder
+
+contract:
+  name: gta.plugin
+  version: 1
+
+capabilities:
+  decode: true
+  schema: true
+  state: true        # 打开后 states 声明必填、_state_changes 参与校验
+  evidence: false
+  rules: false
+
+schemas:
+  - id: game.player.v1
+    version: 1
+    strict: true
+    fields:
+      player_id: { type: string, semantic: entity_id, queryable: true, alias: pid }
+      hp:        { type: uint32, semantic: health, unit: hp, aggregatable: true }
+      level:     { type: uint16, optional: true }
+
+states:
+  - subject_type: player
+    schema: game.player.v1
+    id_field: player_id
+    paths: [hp, level]
+```
+
+要点：
+
+| 层 | 声明段 | 作用 | 运行期载体 |
+|----|--------|------|-----------|
+| Schema | `schemas[]` | payload 字段类型/语义/查询位；`get_capture_schema` 与事件校验的真源 | 事件 `schema_id` + payload |
+| State | `states[]` | 实体状态投影白名单（subject/path） | payload 保留键 `_state_changes` |
+| Evidence | `evidence[]` | 可产出的证据语义与强度区间 | payload 保留键 `_evidence` |
+| Rule | `rules[]` | 插件领域规则（id 非 `gta.` 前缀），供归因引用 | manifest 声明本身 |
+
+- `schema_id` 必须在 `schemas` 中声明，否则 verify 报 `gta.schema.undeclared`。
+- `event_type` / `schema_id` 不得使用保留前缀 `gta.`。
+- 声明了 `state: true` 时，`_state_changes` 的 `subject_type` / `path` 必须落在 `states[]` 白名单内。
+- 声明了 `evidence: true` 时，插件只能产出 `observation` / `derivation`（`assessment` 由宿主产出）。
+- 旧式 `indexable_fields` 仍可解析，会升格为对应字段的 `queryable + alias`（向后兼容）。
+
 ---
 
 ## 4. Decode RPC 契约 (v2)
@@ -172,7 +229,7 @@ meta:
 
 - **传输层**：Unix Domain Socket（Unix）、Named Pipe（Windows）或 TCP（跨机器）
 - **RPC 框架**：gRPC 双向流（DecodeV2）
-- **端点发现**：环境变量 `GTA_REGISTRY_ADDR` > `--registry` flag（**两者均未设置则 fatal，必须显式指定**）
+- **端点发现**：`GTA_REGISTRY_ADDR` 环境变量 > `--registry=` flag > SDK 默认 `:9091`（与 SDK `ResolveRegistryAddr` 一致；显式设置可避免连到非预期地址）
 
 ### DecodeRequest
 
@@ -436,7 +493,7 @@ func main() {
 
 ```
 1. 读取当前目录 plugin.yaml → manifest bytes
-2. 端点发现：GTA_REGISTRY_ADDR > --registry（未设置则直接 fatal，必须显式指定）
+2. 端点发现：GTA_REGISTRY_ADDR > --registry= > 默认 :9091
 3. 建立 gRPC 连接到 RegistryServer
 4. 调用 Register RPC（携带 manifest）
 5. 注册成功 → 启动心跳循环（默认 5s）
@@ -448,18 +505,16 @@ func main() {
 
 | 变量 | 说明 | 示例 |
 |------|------|------|
-| `GTA_REGISTRY_ADDR` | 注册中心地址（**必须显式设置**，无默认兜底） | 见下方说明 |
+| `GTA_REGISTRY_ADDR` | 注册中心地址（env > `--registry=` > 默认 `:9091`；显式设置可避免连到非预期地址） | 见下方说明 |
 | `GTA_DECODER_ADDR` | 插件 Decode 服务监听地址（跨机器设 TCP `host:port`；留空=本地 socket） | `0.0.0.0:9092` |
 | `GTA_DECODER_PUBLIC_ADDR` | pipeline 回拨插件的可达地址（跨机器必填，填插件真实 IP） | `10.12.34.57:9092` |
 
-> **`GTA_REGISTRY_ADDR` 的真实取值**：由 gta-pipeline 启动时打印在日志 `GTA_REGISTRY_ADDR` 字段中。
+> **`GTA_REGISTRY_ADDR` 的真实取值**：由 gta-pipeline 启动时打印在日志 `GTA_REGISTRY_ADDR` 字段中；MCP 工具 `get_registry_addr` 亦可直接获取。
 > - Windows（命名管道）：`npipe:\\.\pipe\gta-registry`
 > - Linux/macOS（Unix socket）：`unix:<workdir>/run/registry.sock`
 > - 跨机器（TCP）：`host:port`（gta-pipeline 用 `-registry-addr` 开启）
 >
-> SDK **不再提供默认地址**——未设置 `GTA_REGISTRY_ADDR` 会直接 fatal，避免连到错误端点。必须显式设置（或 `--registry=`）。
 > 插件进程运行时的工作目录需包含 `plugin.yaml`。
-| `GTA_DECODER_UNIX_SOCKET_DIR` | Unix socket 目录（pipeline 侧） | `./work` |
 
 ### 跨机器部署（进程不在同一台机器）
 
@@ -546,7 +601,7 @@ import "github.com/OwnSecurityGuard/gta-plugin-sdk"
 // 读取 manifest（自动校验）
 manifestBytes, err := sdk.ReadManifest()
 
-// 解析 registry 地址（env > flag，无默认）
+// 解析 registry 地址（env > flag > 默认 :9091）
 addr := sdk.ResolveRegistryAddr()
 ```
 

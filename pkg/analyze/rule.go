@@ -34,8 +34,11 @@ type CompiledRule struct {
 	Enrich       map[string]*vm.Program
 	GroupBy      []*vm.Program
 	GroupByNames []string
-	Value        *vm.Program
-	Aggregate    event.Aggregator
+	// ValueName / GroupByNames 保留原始表达式文本，供宿主做 manifest 契约对齐
+	// （data.* 字段是否声明 aggregatable/groupable，Semantic Contract v1 §13）。
+	Value     *vm.Program
+	ValueName string
+	Aggregate event.Aggregator
 }
 
 // ruleEnv 用于 expr 编译期类型推断。
@@ -81,6 +84,7 @@ func CompileRule(r RawRule, s *schema.Schema) (*CompiledRule, error) {
 			return nil, fmt.Errorf("value compile: %w", err)
 		}
 		cr.Value = prog
+		cr.ValueName = r.Aggregate.Value
 	}
 	window, err := time.ParseDuration(r.Aggregate.Window)
 	if err != nil {
@@ -99,6 +103,16 @@ func CompileRule(r RawRule, s *schema.Schema) (*CompiledRule, error) {
 	return cr, nil
 }
 
+// DataPaths 返回表达式中引用的 data.* 字段路径（去掉 data. 前缀，如 "hp"、"payload.damage"）。
+// 供 schema 校验与 manifest 契约对齐复用。
+func DataPaths(expr string) []string {
+	var out []string
+	for _, m := range dataPathRe.FindAllStringSubmatch(expr, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
 func validateRuleSchema(s *schema.Schema, r RawRule) error {
 	if s == nil {
 		return nil
@@ -112,9 +126,8 @@ func validateRuleSchema(s *schema.Schema, r RawRule) error {
 		if e == "" {
 			continue
 		}
-		for _, m := range dataPathRe.FindAllStringSubmatch(e, -1) {
-			path := m[1]
-			if _, err := s.Lookup(path); err != nil {
+		for _, path := range DataPaths(e) {
+			if _, err := schema.Lookup(s, path); err != nil {
 				return fmt.Errorf("rule %s schema error: %w", r.Name, err)
 			}
 		}

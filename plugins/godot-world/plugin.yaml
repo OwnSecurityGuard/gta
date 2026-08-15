@@ -1,0 +1,59 @@
+api_version: gta.decoder/v2
+name: godot-world
+protocol: godot-world
+protocol_version: "1"
+type: decoder
+hints:
+  - websocket
+  - godot
+  - scenemultiplayer
+  - port:8087
+  - mmo
+  - ekonia
+event:
+  fields:
+    direction: { type: string, enum: [client_to_server, server_to_client, unknown] }
+    msg_name:  { type: string }
+    is_push:   { type: boolean }
+  data:
+    schema:
+      fields:
+        peer_id:           { type: int }
+        cmd:               { type: string }
+        node:              { type: string }
+        method:            { type: string }
+        request_id:        { type: int }
+        type:              { type: string }
+        args:              { type: any }
+        data:              { type: any }
+        instance_id:       { type: string }
+        map_path:          { type: string }
+        auth_token:        { type: string }
+        psc_id:            { type: int }
+        path:              { type: string }
+        eid:               { type: int }
+        entity_id:         { type: int }
+        pairs:             { type: array }
+        map_updates:       { type: array }
+        objects:           { type: array }
+        spawns:            { type: array }
+        despawns:          { type: array }
+        ops_named:         { type: array }
+        error:             { type: any }
+        raw_hex:           { type: string }
+meta:
+  author: opencode
+  description: >-
+    Decoder for the Godot Tiny MMO (Ekonia) client<->world-server traffic on
+    127.0.0.1:8087. The world server speaks WebSocket (RFC6455 binary frames)
+    with Godot 4.6 SceneMultiplayer binary packets on top. Decodes the full
+    connection handshake (peer-id assignment, SYS auth), the path-simplify
+    psc_id cache (SIMPLIFY_PATH/CONFIRM_PATH), the game's data RPCs
+    (_data_request / _data_response / data_push with request_id, type string,
+    args dict, instance_id), instance join (charge_new_instance,
+    ready_to_enter_instance), and the custom wire-codec state sync (bootstrap,
+    entity deltas, container props). Uses framing.ExtractL7 + Reassembler and
+    a per-flow WebSocket parser.
+  game: godot-tiny-mmo
+  transport: websocket-scenemultiplayer
+  decoded_directions: [client_to_server, server_to_client]

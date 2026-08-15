@@ -22,13 +22,14 @@ event:
         endpoint:          { type: string }
         method:            { type: string }
         path:              { type: string }
+        status_code:       { type: int }
         account_username:  { type: string }
         account_password:  { type: string }
         client_version:    { type: string }
         token:             { type: string }
-        world_id:          { type: int }
+        world_id:          { type: string }
         account_id:        { type: int }
-        character_id:      { type: int }
+        character_id:      { type: string }
         character_name:    { type: string }
         skin:              { type: int }
         session_id:        { type: string }
@@ -36,15 +37,21 @@ event:
         world_address:     { type: string }
         world_port:        { type: int }
         auth_token:        { type: string }
+        error:             { type: any }
         error_name:        { type: string }
-        endpoint_inferred: { type: boolean }
+        error_message:     { type: string }
+        ok:                { type: bool }
+        endpoint_inferred: { type: bool }
+        worlds:            { type: array }
+        characters:        { type: array }
 meta:
-  author: workbuddy
+  author: opencode
   description: >-
     Decoder for the Godot Tiny MMO (Ekonia) client<->gateway auth/routing traffic.
-    Gateway speaks plain HTTP/1.1 REST with JSON bodies. Decodes the 8 /v1/*
-    endpoints, expanding wire-short keys (a-u, a-p, t-id, w-id, c-id, c-v) into
-    readable fields and mapping server error codes to names.
+    The gateway speaks plain HTTP/1.1 REST with JSON bodies on 127.0.0.1:8088
+    (dev). Decodes all 8 /v1/* endpoints, expanding wire-short keys (a-u, a-p,
+    t-id, w-id, c-id, c-v) into readable fields and mapping server error codes to
+    names. Uses framing.ExtractL7 + Reassembler for loopback frames.
   game: godot-tiny-mmo
   transport: http-json
   decoded_directions: [client_to_server, server_to_client]

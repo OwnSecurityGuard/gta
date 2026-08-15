@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"gta/pkg/event"
+
+	sdkevidence "github.com/OwnSecurityGuard/gta-plugin-sdk/evidence"
+	sdkrule "github.com/OwnSecurityGuard/gta-plugin-sdk/rule"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,5 +363,101 @@ func DefaultNamePatterns() []RespNamePattern {
 		{RequestSuffix: "Req", ResponseSuffix: "Rsp"},
 		{RequestSuffix: "C2S", ResponseSuffix: "S2C"},
 		{RequestSuffix: "CS", ResponseSuffix: "SC"},
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SDK Evidence / Rule 类型桥接 — Semantic Contract v1
+//
+// 以下类型别名将 SDK 的 evidence 与 rule 包类型桥接到 gta 内部语义分析引擎，
+// 使 MCP 查询层、证据图存储层与插件证据产出层共用同一套契约定义。
+// ─────────────────────────────────────────────────────────────────────────────
+
+// SDKEvidence 是 SDK evidence.Evidence 的类型别名，表示一条领域证据主张。
+type SDKEvidence = sdkevidence.Evidence
+
+// SDKEvidenceKind 是证据性质（observation/derivation/assessment）。
+type SDKEvidenceKind = sdkevidence.Kind
+
+// SDKEvidenceSourceKind 是证据来源种类（raw_packet/event/state_change/external）。
+type SDKEvidenceSourceKind = sdkevidence.SourceKind
+
+// SDKEvidenceRef 引用一个证据来源。
+type SDKEvidenceRef = sdkevidence.Ref
+
+// SDKEvidenceMethod 是证据产生方法（decode/correlate/threshold/model/manual）。
+type SDKEvidenceMethod = sdkevidence.Method
+
+// SDKEvidenceRelation 是证据图边关系（produces/changes/supports/contradicts/refines/precedes/references）。
+type SDKEvidenceRelation = sdkevidence.Relation
+
+// SDKEvidenceEdge 是证据图中的一条边。
+type SDKEvidenceEdge = sdkevidence.Edge
+
+// SDKEvidenceGraph 是证据图（节点 + 边）。
+type SDKEvidenceGraph = sdkevidence.Graph
+
+// SDKRule 是 SDK rule.Rule 的类型别名。
+type SDKRule = sdkrule.Rule
+
+// SDKRuleSeverity 是规则严重级别。
+type SDKRuleSeverity = sdkrule.Severity
+
+// SDKRuleLayer 是规则所属的语义契约层。
+type SDKRuleLayer = sdkrule.Layer
+
+// SDKRuleRegistry 是规则注册表。
+type SDKRuleRegistry = sdkrule.Registry
+
+// EvidenceStrengthToSDK 将内部 EvidenceStrength 映射到 SDK evidence 的强度概念。
+// 注意：内部 EvidenceStrength (observed/derived/inferred) 描述的是证据可靠性层次，
+// 而 SDK 的 evidence.Kind (observation/derivation/assessment) 描述的是证据性质。
+// 此函数提供语义映射，用于 MCP 输出层转换。
+func EvidenceStrengthToSDK(s EvidenceStrength) SDKEvidenceKind {
+	switch s {
+	case EvidenceObserved:
+		return sdkevidence.KindObservation
+	case EvidenceDerived:
+		return sdkevidence.KindDerivation
+	case EvidenceInferred:
+		return sdkevidence.KindDerivation // inferred → derivation (SDK 无 inferred kind)
+	default:
+		return sdkevidence.KindObservation
+	}
+}
+
+// EvidenceMethodToSDK 将内部 EvidenceMethod 映射到 SDK evidence.Method。
+func EvidenceMethodToSDK(m EvidenceMethod) SDKEvidenceMethod {
+	switch m {
+	case MethodPlugin:
+		return sdkevidence.MethodDecode
+	case MethodCorrelation:
+		return sdkevidence.MethodCorrelate
+	case MethodTemporal:
+		return sdkevidence.MethodThreshold
+	case MethodStateProjection:
+		return sdkevidence.MethodModel
+	default:
+		return sdkevidence.MethodCorrelate
+	}
+}
+
+// RelationTypeToSDK 将内部 RelationType 映射到 SDK evidence.Relation。
+func RelationTypeToSDK(r RelationType) SDKEvidenceRelation {
+	switch r {
+	case DecodedFrom:
+		return sdkevidence.RelProduces
+	case ResponseTo:
+		return sdkevidence.RelPrecedes
+	case CausedBy:
+		return sdkevidence.RelSupports
+	case CorrelatedWith:
+		return sdkevidence.RelReferences
+	case Updates:
+		return sdkevidence.RelChanges
+	case Contains:
+		return sdkevidence.RelRefines
+	default:
+		return sdkevidence.RelReferences
 	}
 }

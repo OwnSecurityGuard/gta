@@ -1,4 +1,4 @@
-module godot-gateway
+module godot-world
 
 go 1.25.5
 
@@ -18,6 +18,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-// 本地开发：framing 包尚未发布到 v0.1.0，replace 指向本地 SDK 源码。
-// 分发给用户时去掉 replace，改用已发布远程模块。
 replace github.com/OwnSecurityGuard/gta-plugin-sdk => E:\ai_workspace\gta-plugin-sdk

@@ -12,7 +12,8 @@ func main() {
 
 // decodePacket implements sdk.DecodeFuncV2 (gta.decoder/v2).
 // req.Payload is a complete link-layer frame on pcap paths; we strip it with
-// framing.ExtractL7 and reassemble the per-flow TCP stream before parsing HTTP.
+// framing.ExtractL7, reassemble the per-flow TCP stream, parse WebSocket frames,
+// then decode each Godot SceneMultiplayer packet.
 func decodePacket(req *pb.DecodeRequest, stream pb.Decoder_DecodeV2Server) error {
 	events, err := Decode(req)
 	if err != nil {

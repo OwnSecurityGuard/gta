@@ -301,6 +301,8 @@ func (t *captureTask) run() {
 			dispatcher = d
 			decoderClient = found
 			t.logger.Info("decoder attached via hot-reload", "plugin", t.getPlugin())
+			// Semantic Contract v1 §13：规则聚合字段 ↔ manifest aggregatable/groupable 对齐（仅告警）。
+			t.checkAggregationContract(found)
 		}
 	}
 	engine = analyze.NewEngine(t.rules, t.logger)

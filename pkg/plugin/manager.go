@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	sdkcontract "github.com/OwnSecurityGuard/gta-plugin-sdk/contract"
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/schema"
 
@@ -154,6 +155,16 @@ func (s *RegistryServer) Register(ctx context.Context, req *pb.RegisterRequest) 
 	if err := CheckManifestVersion(m); err != nil {
 		return nil, fmt.Errorf("version check: %w", err)
 	}
+	// 3.5 语义契约声明期校验（Semantic Contract v1 六层：runtime/schema/state/evidence/rule）。
+	//     error 级违规拒绝注册；warn 级放行但记日志，让插件作者能在 plugin.verify 看到全量报告。
+	if report := sdkcontract.NewPluginChecker().Check(m); report != nil {
+		if report.HasErrors() {
+			return nil, fmt.Errorf("semantic contract check failed: %s", formatReport(report))
+		}
+		for _, v := range report.Violations {
+			slog.Warn("plugin manifest semantic warn", "name", m.Name, "rule", v.RuleID, "detail", v.Message)
+		}
+	}
 	// 4. 拨号到插件的 Decode socket 验证可达
 	//    SocketPath 可能是 host:port（跨机器部署）、unix:/path 或 npipe:\\.\pipe\name。
 	conn, err := dialDecoder(ctx, req.SocketPath)
@@ -201,6 +212,23 @@ func (s *RegistryServer) Register(ctx context.Context, req *pb.RegisterRequest) 
 		InstanceId:           instanceID,
 		HeartbeatIntervalSec: s.heartbeatSec,
 	}, nil
+}
+
+// formatReport 把语义契约 Report 压缩为适合注册错误消息的单行摘要，
+// 完整 JSON 形态由 plugin.verify 输出。
+func formatReport(r *sdkcontract.Report) string {
+	var sb strings.Builder
+	for i, v := range r.Violations {
+		if i >= 5 {
+			fmt.Fprintf(&sb, " (+%d more)", len(r.Violations)-i)
+			break
+		}
+		if i > 0 {
+			sb.WriteString("; ")
+		}
+		sb.WriteString(v.Error())
+	}
+	return sb.String()
 }
 
 // Heartbeat 处理插件心跳，更新 LastHeartbeat 并标记为在线。
@@ -340,6 +368,23 @@ func (s *RegistryServer) GetPluginManifest(name string) ([]byte, error) {
 		return nil, fmt.Errorf("plugin %q instance not found", name)
 	}
 	return yaml.Marshal(rp.Manifest)
+}
+
+// NameByClient 返回给定 DecoderClient 对应的插件 manifest name。
+// 用于 capture 侧在解码器挂载时反查插件身份（Find/FindByName 只返回 client），
+// 进而取 manifest 做规则契约对齐。client 不在任何在线插件下时返回 false。
+func (s *RegistryServer) NameByClient(c pb.DecoderClient) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, rp := range s.plugins {
+		if rp.Client == c {
+			return rp.Manifest.Name, true
+		}
+	}
+	return "", false
 }
 
 // List 返回当前已注册插件的快照（全量，含下线状态）。

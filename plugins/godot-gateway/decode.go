@@ -2,17 +2,20 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
-	"net"
 	"strconv"
 	"strings"
-	"sync"
+
+	"github.com/OwnSecurityGuard/gta-plugin-sdk/framing"
+	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 )
 
+// ra reassembles the per-flow TCP byte stream across captured segments. One
+// instance is shared by the whole plugin process (goroutine-safe), keyed by
+// FlowKey with one directional buffer per stream.
+var ra = framing.NewReassembler()
+
 // Event is the decoded representation of one HTTP message on the gateway link.
-// The gtasdk harness turns it into one DecodeResponseV2 (non-terminal), followed
-// by a terminal Done response.
 type Event struct {
 	EventType        string
 	SchemaID         string
@@ -33,78 +36,45 @@ type httpMsg struct {
 	body       []byte
 }
 
-// Reassembly buffers, keyed by directional TCP flow. The gta-pipeline's loopback
-// capture path does NOT reassemble TCP streams before invoking the decoder, so
-// HTTP requests/responses arrive segmented across several raw packets, and the
-// payload is a complete link-layer frame (LINKTYPE_NULL + IPv4 + TCP on loopback).
-// We strip the headers (see stripToTCP) and rebuild the complete HTTP messages
-// per flow here. Captures that already deliver L7 are handled by decodeL7.
-var (
-	reasmMu   sync.Mutex
-	reasmBufs = map[string]*reasmStream{}
-)
-
-type reasmStream struct {
-	buf []byte
-}
-
-func flowKey(srcIP string, srcPort int, dstIP string, dstPort int) string {
-	return srcIP + ":" + strconv.Itoa(srcPort) + "->" + dstIP + ":" + strconv.Itoa(dstPort)
-}
-
-// Decode turns one captured packet into zero or more gateway events. It never
+// Decode turns one captured frame into zero or more gateway events. It never
 // panics and never returns an error on malformed input — it yields whatever
 // complete messages it can and ignores truncated/unknown bytes (contract rules:
 // malformed-input-safe, one-input-may-carry-many-messages).
-func Decode(pkt []byte) (events []*Event, err error) {
+func Decode(req *pb.DecodeRequest) (events []*Event, err error) {
 	events = []*Event{} // never nil, even with no decodable messages
-	// Defensive: a single bad input must not crash the plugin process.
 	defer func() {
 		if r := recover(); r != nil {
 			events = []*Event{}
 		}
 	}()
 
-	// Peel the link/network/transport headers. On the loopback capture path the
-	// pipeline hands the full frame (LINKTYPE_NULL + IPv4 + TCP); on an L7
-	// capture it hands the HTTP bytes directly (ok=false here).
-	payload, srcIP, srcPort, dstIP, dstPort, ok := stripToTCP(pkt)
-	if !ok {
-		return decodeL7(pkt), nil
-	}
-	if len(payload) == 0 {
-		return events, nil // pure ACK / empty segment: nothing to decode
+	// Strip the encapsulation selected by link_type. Loopback frames (Null=0,
+	// Loop=108) carry a 4-byte AF_* header; Ethernet 14 bytes; RawIP none.
+	seg, ok := framing.ExtractL7(req.GetPayload(), req.GetLinkType())
+	if !ok || len(seg.Payload) == 0 {
+		// Non-IP traffic, truncated frame, or a pure ACK / handshake / FIN.
+		return events, nil
 	}
 
-	key := flowKey(srcIP, srcPort, dstIP, dstPort)
-	reasmMu.Lock()
-	defer reasmMu.Unlock()
-
-	st, exists := reasmBufs[key]
-	if !exists {
-		st = &reasmStream{}
-		reasmBufs[key] = st
-	}
-	st.buf = append(st.buf, payload...)
-	// Guard against unbounded growth on a flow that never completes a message.
-	if len(st.buf) > 8*1024*1024 {
-		st.buf = st.buf[:0]
-	}
-
-	msgs, consumed := splitHTTPMessages(st.buf)
-	for _, m := range msgs {
-		if m == nil {
-			continue
+	s := ra.Push(seg)
+	for {
+		raw := s.Bytes()
+		if len(raw) == 0 {
+			break // not enough contiguous bytes yet (gap, or all consumed)
 		}
-		events = append(events, messageToEvent(m)...)
-	}
-
-	// Keep any partial trailing message for the next segment.
-	if consumed > 0 {
-		if consumed >= len(st.buf) {
-			st.buf = st.buf[:0]
-		} else {
-			st.buf = append([]byte(nil), st.buf[consumed:]...)
+		msgs, consumed := splitHTTPMessages(raw)
+		if consumed == 0 {
+			break // incomplete message: wait for the next segment
+		}
+		s.Consume(consumed)
+		for _, m := range msgs {
+			if m == nil {
+				continue
+			}
+			events = append(events, messageToEvent(m)...)
+		}
+		if consumed < len(raw) && len(msgs) == 0 {
+			break
 		}
 	}
 	return events, nil
@@ -125,32 +95,6 @@ func messageToEvent(m *httpMsg) []*Event {
 		return nil
 	}
 	return []*Event{buildResponseEvent(endpoint, inferred, fields, m.statusCode)}
-}
-
-// decodeL7 handles payloads the pipeline already delivered as L7 (HTTP or bare JSON). Used when
-// the pipeline delivers stripped payloads rather than full frames.
-func decodeL7(pkt []byte) []*Event {
-	events := []*Event{}
-	l7 := extractL7(pkt)
-	msgs, _ := splitHTTPMessages(l7)
-	for _, m := range msgs {
-		if m == nil {
-			continue
-		}
-		events = append(events, messageToEvent(m)...)
-	}
-	if len(msgs) == 0 {
-		if e := decodeBareJSON(pkt); e != nil {
-			events = append(events, e)
-		}
-	}
-	return events
-}
-
-// extractL7 is a pass-through for the L7-delivered fallback. When stripToTCP returns
-// ok=false the pipeline has already stripped link headers, so nothing to do.
-func extractL7(pkt []byte) []byte {
-	return pkt
 }
 
 // splitHTTPMessages extracts every complete HTTP message from the stream and
@@ -394,9 +338,6 @@ func buildResponseEvent(endpoint string, inferred bool, fields map[string]any, s
 // Responses carry no URL, so the endpoint is inferred from the body shape and
 // flagged via endpoint_inferred. (Client→gateway requests are the primary target
 // per the task; responses are decoded opportunistically.)
-//
-// recognized is false when the body does not look like any gateway response, so
-// the caller can leave non-gateway traffic for the generic http plugin.
 func decodeResponseBody(body map[string]any) (endpoint string, inferred bool, fields map[string]any, recognized bool) {
 	fields = map[string]any{}
 	if len(body) == 0 {
@@ -439,62 +380,11 @@ func decodeResponseBody(body map[string]any) (endpoint string, inferred bool, fi
 		fields["worlds"] = decodeWorlds(w)
 		return "worlds", false, fields, true
 	}
-	// Top-level keys look like character ids, each {name, level, skin}.
 	if isCharList(body) {
 		fields["characters"] = decodeCharacters(body)
 		return "world_characters", true, fields, true
 	}
 	return "unknown", false, fields, false
-}
-
-// decodeBareJSON handles the case where the pipeline hands only the JSON body
-// (no HTTP framing). It only claims traffic that clearly looks like the gateway.
-func decodeBareJSON(pkt []byte) *Event {
-	trimmed := bytes.TrimSpace(pkt)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil
-	}
-	body := parseBody(trimmed)
-	if len(body) == 0 {
-		return nil
-	}
-
-	// Request-shaped: carries client-sent short keys.
-	if hasAnyKey(body, keyAccountUser, keyAccountPass, keyTokenID, keyWorldID, keyCharID, keyClientVersion) {
-		_, fields := decodeRequestBody("/v1/unknown", body)
-		if fields == nil {
-			fields = map[string]any{}
-		}
-		fields["endpoint"] = "unknown"
-		fields["method"] = "POST"
-		fields["path"] = "<bare-json-body>"
-		return &Event{
-			EventType: "godot-gateway.request",
-			SchemaID:  "godot-gateway.request.v1",
-			Payload:   fields,
-			Meta: map[string]any{
-				"direction": "client_to_server",
-				"msg_name":  "unknown",
-				"is_push":   false,
-			},
-		}
-	}
-
-	// Response-shaped.
-	endpoint, inferred, fields, recognized := decodeResponseBody(body)
-	if !recognized {
-		return nil
-	}
-	return buildResponseEvent(endpoint, inferred, fields, 0)
-}
-
-func hasAnyKey(m map[string]any, keys ...string) bool {
-	for _, k := range keys {
-		if _, ok := m[k]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 // isCharList reports whether every top-level value looks like a character entry
@@ -515,8 +405,11 @@ func isCharList(body map[string]any) bool {
 	return true
 }
 
-func decodeWorlds(w any) []map[string]any {
-	out := []map[string]any{}
+// decodeWorlds / decodeCharacters return []any of map[string]any so the SDK's
+// event.ValueFromAny encodes them as msgpack arrays of objects (a bare
+// []map[string]any has no ValueFromAny case and would degrade to a string).
+func decodeWorlds(w any) []any {
+	out := []any{}
 	m, ok := w.(map[string]any)
 	if !ok {
 		return out
@@ -535,8 +428,8 @@ func decodeWorlds(w any) []map[string]any {
 	return out
 }
 
-func decodeCharacters(body map[string]any) []map[string]any {
-	out := []map[string]any{}
+func decodeCharacters(body map[string]any) []any {
+	out := []any{}
 	for id, val := range body {
 		entry := map[string]any{"character_id": id}
 		if c, ok := val.(map[string]any); ok {
@@ -547,70 +440,4 @@ func decodeCharacters(body map[string]any) []map[string]any {
 		out = append(out, entry)
 	}
 	return out
-}
-
-// stripToTCP peels LINKTYPE_NULL loopback + IPv4/IPv6 + TCP headers off a
-// captured frame and returns the TCP payload plus the 4-tuple (so the caller can
-// reassemble per flow). Returns ok=false when pkt is not a recognized IPv4/IPv6
-// TCP frame (e.g., an already-L7 payload, or non-TCP traffic).
-func stripToTCP(pkt []byte) (payload []byte, srcIP string, srcPort int, dstIP string, dstPort int, ok bool) {
-	b := pkt
-
-	// LINKTYPE_NULL (BSD loopback): 4-byte address-family header. Values are
-	// host-endian in practice; check both endiannesses for AF_INET/AF_INET6.
-	if len(b) >= 4 {
-		famLE := binary.LittleEndian.Uint32(b[:4])
-		famBE := binary.BigEndian.Uint32(b[:4])
-		if famLE == 2 || famBE == 2 || famLE == 30 || famBE == 30 || famLE == 23 || famBE == 23 || famLE == 24 || famBE == 24 {
-			b = b[4:]
-		}
-	}
-
-	// IPv4
-	if len(b) >= 20 && (b[0]&0xf0) == 0x40 {
-		ihl := int(b[0]&0x0f) * 4
-		if ihl < 20 || ihl > len(b) {
-			return nil, "", 0, "", 0, false
-		}
-		if b[9] != 6 { // TCP only
-			return nil, "", 0, "", 0, false
-		}
-		srcIP = net.IPv4(b[12], b[13], b[14], b[15]).String()
-		dstIP = net.IPv4(b[16], b[17], b[18], b[19]).String()
-		p, sport, dport, ok := stripTCP(b[ihl:])
-		if !ok {
-			return nil, "", 0, "", 0, false
-		}
-		return p, srcIP, sport, dstIP, dport, true
-	}
-
-	// IPv6
-	if len(b) >= 40 && (b[0]&0xf0) == 0x60 {
-		if b[6] != 6 { // TCP only
-			return nil, "", 0, "", 0, false
-		}
-		srcIP = net.IP(b[8:24]).String()
-		dstIP = net.IP(b[24:40]).String()
-		p, sport, dport, ok := stripTCP(b[40:])
-		if !ok {
-			return nil, "", 0, "", 0, false
-		}
-		return p, srcIP, sport, dstIP, dport, true
-	}
-
-	return nil, "", 0, "", 0, false
-}
-
-// stripTCP returns the payload of a TCP segment together with its ports.
-func stripTCP(l4 []byte) (payload []byte, srcPort, dstPort int, ok bool) {
-	if len(l4) < 20 {
-		return nil, 0, 0, false
-	}
-	dataOff := int(l4[12]>>4) * 4
-	if dataOff < 20 || dataOff > len(l4) {
-		return nil, 0, 0, false
-	}
-	srcPort = int(binary.BigEndian.Uint16(l4[0:2]))
-	dstPort = int(binary.BigEndian.Uint16(l4[2:4]))
-	return l4[dataOff:], srcPort, dstPort, true
 }

@@ -112,15 +112,26 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 	}
 
 	startTime := time.Now()
+
+	// 获取插件 manifest 快照，用于 MCP 层查询四层契约声明（Schema/State/Evidence/Rule）。
+	var manifestSnapshot string
+	if manifestBytes, err := s.registry.GetPluginManifest(req.Plugin); err == nil && len(manifestBytes) > 0 {
+		manifestSnapshot = string(manifestBytes)
+		slog.Debug("captured manifest snapshot for session", "session_id", sessionID, "plugin", req.Plugin, "size", len(manifestBytes))
+	} else {
+		slog.Warn("unable to capture manifest snapshot", "plugin", req.Plugin, "error", err)
+	}
+
 	if err := s.controlStore.CreateSession(ctx, store.SessionMeta{
-		SessionID: sessionID,
-		StartedAt: startTime,
-		Status:    "running",
-		Port:      req.Port,
-		Plugin:    req.Plugin,
-		Interface: iface,
-		PCAPFile:  pcapFile,
-		DBPath:    dbPath,
+		SessionID:        sessionID,
+		StartedAt:        startTime,
+		Status:           "running",
+		Port:             req.Port,
+		Plugin:           req.Plugin,
+		Interface:        iface,
+		PCAPFile:         pcapFile,
+		DBPath:           dbPath,
+		ManifestSnapshot: manifestSnapshot,
 	}); err != nil {
 		_ = st.Close()
 		return capturecontrol.StartSessionResult{}, fmt.Errorf("create session record: %w", err)

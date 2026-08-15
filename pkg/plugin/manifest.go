@@ -21,8 +21,6 @@ type (
 	DataSpec       = sdk.DataSpec
 	DataSchema     = sdk.DataSchema
 	ManifestMeta   = sdk.ManifestMeta
-	SchemaDecl     = sdk.SchemaDecl
-	IndexableField = sdk.IndexableField
 )
 
 // ParseManifest 解析 plugin.yaml 原文返回 Manifest。
@@ -50,14 +48,14 @@ func ToSchemaRegistry(m *Manifest) *schema.Registry {
 	}
 	for _, s := range m.Schemas {
 		decl := &schema.SchemaDecl{
-			ID:              s.ID,
-			Version:         s.Version,
+			ID:              s.Ref.ID,
+			Version:         s.Ref.Version,
 			IndexableFields: make([]schema.IndexableField, len(s.IndexableFields)),
 		}
 		for i, f := range s.IndexableFields {
 			decl.IndexableFields[i] = schema.IndexableField{
 				Path:  f.Path,
-				Type:  f.Type,
+				Type:  string(f.Type),
 				Alias: f.Alias,
 			}
 		}

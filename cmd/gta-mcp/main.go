@@ -28,6 +28,7 @@ import (
 	"gta/pkg/internalipc"
 	pb "gta/pkg/internalipc/proto"
 	"gta/pkg/logging"
+	"gta/pkg/plugin"
 	"gta/pkg/plugin/skills"
 	plugindevclient "gta/pkg/plugindev/client"
 	plugindevserver "gta/pkg/plugindev/server"
@@ -53,6 +54,10 @@ type sessionMetadata struct {
 	DurationSec  float64                `json:"duration_sec,omitempty"`
 	DBPath       string                 `json:"db_path"`
 	Extra        map[string]interface{} `json:"extra,omitempty"`
+
+	// ManifestSnapshot 是会话创建时的插件 manifest 快照（plugin.yaml 原文）。
+	// 从 controlStore.SessionMeta.ManifestSnapshot 同步，用于 MCP get_session_status 输出。
+	ManifestSnapshot string `json:"manifest_snapshot,omitempty"`
 }
 
 // pluginEventJSON 是插件事件 SSE 推送的 JSON 负载，与 proto PluginEvent 对应。
@@ -546,7 +551,7 @@ func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToo
 	if err != nil || sess == nil {
 		return successResult(map[string]any{"state": "closed", "session_id": sessionID}), nil
 	}
-	return successResult(map[string]any{
+	result := map[string]any{
 		"session_id":    sess.SessionID,
 		"state":         sess.Status,
 		"port":          sess.Port,
@@ -559,7 +564,11 @@ func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToo
 		"decode_errors": sess.DecodeErrors,
 		"duration_sec":  sess.DurationSec,
 		"db_path":       sess.DBPath,
-	}), nil
+	}
+	if sess.ManifestSnapshot != "" {
+		result["manifest_snapshot"] = sess.ManifestSnapshot
+	}
+	return successResult(result), nil
 }
 
 func (m *mcpCapture) handleListPlugins(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -796,7 +805,53 @@ func (m *mcpCapture) handleAggregateQuery(ctx context.Context, req mcp.CallToolR
 		}
 	}
 	slog.Info("aggregate_query completed", "expression", expression, "matched", len(matched))
-	return successResult(map[string]any{"count": len(matched), "metrics": matched}), nil
+	out := map[string]any{"count": len(matched), "metrics": matched}
+	// Semantic Contract v1 §13：从 manifest 快照派生可聚合字段（contract.CanAggregate），
+	// 供 Agent 编写 rules.yaml 的 value/group_by 时对齐声明。
+	if fields := aggregatableContractFields(m.getManifestSnapshot(sessionID)); len(fields) > 0 {
+		out["aggregatable_fields"] = fields
+	}
+	return successResult(out), nil
+}
+
+// aggregatableFieldView 是 aggregate_query 返回的 manifest 可聚合字段视图。
+type aggregatableFieldView struct {
+	Schema string `json:"schema"`
+	Field  string `json:"field"`
+	Alias  string `json:"alias,omitempty"`
+}
+
+// aggregatableContractFields 用 SDK 契约入口 contract.CanAggregate 列出 manifest 中
+// 声明为 aggregatable 的字段。快照缺失或解析失败时返回 nil（契约信息为可选补充）。
+func aggregatableContractFields(snapshot string) []aggregatableFieldView {
+	if snapshot == "" {
+		return nil
+	}
+	m, err := plugin.ParseManifest([]byte(snapshot))
+	if err != nil {
+		return nil
+	}
+	idx := contract.ManifestSchemaIndex(m)
+	var out []aggregatableFieldView
+	for wire, s := range idx {
+		for name, f := range s.Fields {
+			if !contract.CanAggregate(m, wire, name) {
+				continue
+			}
+			v := aggregatableFieldView{Schema: wire, Field: name}
+			if f != nil {
+				v.Alias = f.Alias
+			}
+			out = append(out, v)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Schema != out[j].Schema {
+			return out[i].Schema < out[j].Schema
+		}
+		return out[i].Field < out[j].Field
+	})
+	return out
 }
 
 func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -813,7 +868,7 @@ func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToo
 
 	sessionDir := filepath.Dir(dbPath)
 
-	// 打开 reader 用于 loadDataFields 采样推断
+	// 打开 reader 用于 loadDataFields 采样推断（manifest 缺失时的兜底路径）
 	reader, err := m.openReader(sessionID)
 	if err != nil {
 		return errorResult(fmt.Errorf("open reader: %w", err)), nil
@@ -840,10 +895,26 @@ func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToo
 	decodedColumns := make([]map[string]any, len(queryFields))
 	copy(decodedColumns, queryFields)
 
-	// 读取 schema.json 或采样推断 data.* 字段
-	dataFields, err := loadDataFields(ctx, sessionDir, reader)
-	if err != nil {
-		slog.Warn("load data fields failed", "error", err)
+	// data.* 字段三优先级：manifest 声明（Semantic Contract 真源）> schema.json > event_index 采样。
+	var dataFields []dataField
+	fieldSource := "event_index_sampling"
+	if snapshot := m.getManifestSnapshot(sessionID); snapshot != "" {
+		if mf, ok := manifestDataFields(snapshot); ok {
+			dataFields = mf
+			fieldSource = "manifest"
+		}
+	}
+	if dataFields == nil {
+		mf, err := loadDataFields(ctx, sessionDir, reader)
+		if err != nil {
+			slog.Warn("load data fields failed", "error", err)
+		}
+		if mf != nil {
+			dataFields = mf
+			if _, err := os.Stat(filepath.Join(sessionDir, "schema.json")); err == nil {
+				fieldSource = "schema.json"
+			}
+		}
 	}
 	for _, f := range dataFields {
 		decodedColumns = append(decodedColumns, map[string]any{
@@ -901,8 +972,12 @@ func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToo
 	// 4. 生成示例表达式
 	examples := buildExamples(dataFields, rules)
 
-	slog.Info("get_capture_schema completed", "session_dir", sessionDir, "decoded_columns", len(decodedColumns), "rules", len(rules))
-	return successResult(map[string]any{
+	// 5. Semantic Contract 声明视图（schema/state/evidence/rule 四层，从 manifest 快照派生）
+	var manifestView map[string]any
+	if snapshot := m.getManifestSnapshot(sessionID); snapshot != "" {
+		manifestView = manifestDeclarationView(snapshot)
+	}
+	result := map[string]any{
 		"sources": []map[string]any{
 			{
 				"name":        "events",
@@ -920,15 +995,151 @@ func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToo
 				"columns":     metricColumns,
 			},
 		},
-		"query_fields": queryFields,
-		"rules":        rules,
-		"examples":     examples,
-	}), nil
+		"query_fields":  queryFields,
+		"rules":         rules,
+		"examples":      examples,
+		"field_source":  fieldSource,
+	}
+	if manifestView != nil {
+		result["manifest"] = manifestView
+	}
+
+	slog.Info("get_capture_schema completed", "session_dir", sessionDir, "field_source", fieldSource, "decoded_columns", len(decodedColumns), "rules", len(rules))
+	return successResult(result), nil
 }
 
 type dataField struct {
 	name string
 	typ  string
+}
+
+// getManifestSnapshot 返回会话创建时保存的 plugin manifest 快照（plugin.yaml 原文）。
+// 优先 ControlStore（持久层），无则返回空串。
+func (m *mcpCapture) getManifestSnapshot(sessionID string) string {
+	if m.controlStore != nil && sessionID != "" {
+		if meta, err := m.controlStore.GetSession(context.Background(), sessionID); err == nil && meta != nil {
+			return meta.ManifestSnapshot
+		}
+	}
+	return ""
+}
+
+// manifestDataFields 从 manifest 快照派生 data.* 字段清单（Semantic Contract 真源）。
+// 返回 ok=false 表示快照缺失或未声明任何 schema 字段，调用方回退到 schema.json / 采样。
+func manifestDataFields(snapshot string) ([]dataField, bool) {
+	m, err := plugin.ParseManifest([]byte(snapshot))
+	if err != nil {
+		return nil, false
+	}
+	idx := contract.ManifestSchemaIndex(m)
+	if len(idx) == 0 {
+		return nil, false
+	}
+	var fields []dataField
+	for _, s := range idx {
+		for name, f := range s.Fields {
+			if f == nil {
+				continue
+			}
+			fields = append(fields, dataField{name: name, typ: string(f.Type)})
+		}
+	}
+	if len(fields) == 0 {
+		return nil, false
+	}
+	sort.Slice(fields, func(i, j int) bool { return fields[i].name < fields[j].name })
+	return fields, true
+}
+
+// manifestDeclarationView 把 manifest 的四层声明（schema/state/evidence/rule）压成
+// MCP 可返回的紧凑视图，让 Agent 无需连接插件即可了解会话的语义契约能力。
+func manifestDeclarationView(snapshot string) map[string]any {
+	m, err := plugin.ParseManifest([]byte(snapshot))
+	if err != nil {
+		return nil
+	}
+	// capabilities：转成字符串列表。
+	var caps []string
+	for cap, on := range m.Capabilities {
+		if on {
+			caps = append(caps, string(cap))
+		}
+	}
+	sort.Strings(caps)
+	out := map[string]any{
+		"name":         m.Name,
+		"protocol":     m.Protocol,
+		"capabilities": caps,
+	}
+
+	// schema 层：字段 + semantic / 查询能力位。
+	type fieldView struct {
+		Name         string `json:"name"`
+		Type         string `json:"type"`
+		Semantic     string `json:"semantic,omitempty"`
+		Queryable    bool   `json:"queryable,omitempty"`
+		Aggregatable bool   `json:"aggregatable,omitempty"`
+		Groupable    bool   `json:"groupable,omitempty"`
+		Alias        string `json:"alias,omitempty"`
+	}
+	var schemas []map[string]any
+	idx := contract.ManifestSchemaIndex(m)
+	for wire, s := range idx {
+		var fvs []fieldView
+		for name, f := range s.Fields {
+			if f == nil {
+				continue
+			}
+			fvs = append(fvs, fieldView{
+				Name: name, Type: string(f.Type), Semantic: string(f.Semantic),
+				Queryable: f.Queryable, Aggregatable: f.Aggregatable,
+				Groupable: f.Groupable, Alias: f.Alias,
+			})
+		}
+		sort.Slice(fvs, func(i, j int) bool { return fvs[i].Name < fvs[j].Name })
+		schemas = append(schemas, map[string]any{"id": wire, "fields": fvs})
+	}
+	if len(schemas) > 0 {
+		out["schemas"] = schemas
+	}
+
+	// state 层：subject 类型 + id 字段 + 路径白名单。
+	if len(m.States) > 0 {
+		var states []map[string]any
+		for _, s := range m.States {
+			states = append(states, map[string]any{
+				"subject_type": s.Type, "id_field": s.IDField, "paths": s.Paths,
+			})
+		}
+		out["states"] = states
+	}
+
+	// evidence 层：声明可产出的 evidence 语义与强度区间。
+	if len(m.Evidence) > 0 {
+		var evs []map[string]any
+		for _, e := range m.Evidence {
+			ev := map[string]any{
+				"semantic": e.Semantic, "kind": string(e.Kind), "method": string(e.Method),
+			}
+			if len(e.StrengthRange) == 2 {
+				ev["strength_min"], ev["strength_max"] = e.StrengthRange[0], e.StrengthRange[1]
+			}
+			evs = append(evs, ev)
+		}
+		out["evidence"] = evs
+	}
+
+	// rule 层：插件声明的 domain 规则（供 plugin.explain 归因引用）。
+	if len(m.Rules) > 0 {
+		var rules []map[string]any
+		for _, r := range m.Rules {
+			rules = append(rules, map[string]any{
+				"id": r.ID, "severity": string(r.Severity), "statement": r.Statement,
+			})
+		}
+		out["rules"] = rules
+	}
+	return out
 }
 
 func loadDataFields(ctx context.Context, sessionDir string, reader captureReader) ([]dataField, error) {
@@ -939,7 +1150,7 @@ func loadDataFields(ctx context.Context, sessionDir string, reader captureReader
 		if err := json.Unmarshal(schemaData, &s); err == nil && s.Fields != nil {
 			fields := make([]dataField, 0, len(s.Fields))
 			for name, f := range s.Fields {
-				fields = append(fields, dataField{name: name, typ: f.Type})
+				fields = append(fields, dataField{name: name, typ: string(f.Type)})
 			}
 			sort.Slice(fields, func(i, j int) bool { return fields[i].name < fields[j].name })
 			return fields, nil
@@ -2452,7 +2663,7 @@ func main() {
 	), capture.handleQueryCaptureTable)
 
 	s.AddTool(mcp.NewTool("aggregate_query",
-		mcp.WithDescription("Query aggregated metrics/statistics using an expr expression over {name, window, value, group}."),
+		mcp.WithDescription("Query aggregated metrics/statistics using an expr expression over {name, window, value, group}. Metrics are precomputed by rules.yaml; the aggregatable source fields are declared per-schema in the plugin manifest (see get_capture_schema manifest.schemas[].fields[].aggregatable)."),
 		mcp.WithString("expression", mcp.Required(), mcp.Description("expr expression, e.g. name == 'http_req_count' && value > 0")),
 		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
 	), capture.handleAggregateQuery)

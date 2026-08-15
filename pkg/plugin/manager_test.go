@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,67 @@ hints:
   - tcp
   - "port:7000"
 `
+
+// TestRegister_RejectsBadSemanticDeclaration 验证注册期六层语义校验：
+// schema 声明非法（未知类型）必须被 PluginChecker.Check 拦下，
+// 且发生在拨号验证之前（无需真实 decoder socket 即可断言）。
+func TestRegister_RejectsBadSemanticDeclaration(t *testing.T) {
+	bad := `api_version: gta.decoder/v2
+name: bad-schema-decoder
+protocol: test_proto
+type: decoder
+capabilities:
+  decode: true
+  schema: true
+schemas:
+  - id: test.player.v1
+    version: 1
+    fields:
+      hp: { type: not_a_real_type }
+`
+	s := NewRegistryServer(10)
+	_, err := s.Register(context.Background(), &pb.RegisterRequest{
+		SocketPath: "unix:/nonexistent/decoder.sock",
+		Manifest:   []byte(bad),
+	})
+	if err == nil {
+		t.Fatal("Register should reject a manifest with an invalid schema field type")
+	}
+	if !strings.Contains(err.Error(), "semantic contract check failed") {
+		t.Fatalf("error %q should be a semantic contract rejection", err.Error())
+	}
+}
+
+// TestRegister_AcceptsSemanticDeclaration 验证合法的四层声明能通过注册校验：
+// 语义层不拦截（grpc.Dial 为惰性连接，socket 不存在不影响注册结果），
+// 注册成功并返回 instance_id。
+func TestRegister_AcceptsSemanticDeclaration(t *testing.T) {
+	good := `api_version: gta.decoder/v2
+name: good-schema-decoder
+protocol: test_proto
+type: decoder
+capabilities:
+  decode: true
+  schema: true
+schemas:
+  - id: test.player.v1
+    version: 1
+    strict: true
+    fields:
+      hp: { type: uint32, semantic: health, unit: hp, aggregatable: true }
+`
+	s := NewRegistryServer(10)
+	resp, err := s.Register(context.Background(), &pb.RegisterRequest{
+		SocketPath: "unix:/nonexistent/decoder.sock",
+		Manifest:   []byte(good),
+	})
+	if err != nil {
+		t.Fatalf("valid declaration should pass the semantic check, got: %v", err)
+	}
+	if resp.GetInstanceId() == "" {
+		t.Fatal("expected non-empty instance_id")
+	}
+}
 
 // TestRegistryServer_RegisterAndLifecycle 覆盖 Register 后的完整生命周期：
 // Find（按 protocol / hint / 未知）、Heartbeat、List、CheckOffline、GetPluginManifest、Deregister。

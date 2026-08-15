@@ -89,7 +89,7 @@ func Verify(corpus []DecodeIO) *plugindev.VerifyResult {
 			}
 			if spec, ok := sdkcontract.Default().RuleByID(v.RuleID); ok {
 				e.Topic = spec.Topic
-				e.Severity = spec.Severity
+				e.Severity = string(spec.Severity)
 				e.Statement = spec.Statement
 				e.DocRef = spec.DocRef
 			}
@@ -172,14 +172,27 @@ func Verify(corpus []DecodeIO) *plugindev.VerifyResult {
 	return res
 }
 
+// RecomputeVerdict re-evaluates the verdict of a VerifyResult after the caller
+// appended extra violations (e.g. semantic-contract CheckEvent results) to it.
+// Callers must have finished mutating res.Violations / res.Quality beforehand.
+func RecomputeVerdict(res *plugindev.VerifyResult) {
+	if res == nil {
+		return
+	}
+	if res.Quality == nil {
+		res.Quality = &plugindev.QualityStats{}
+	}
+	res.Verdict = verdict(res, res.Quality)
+}
+
 // verdict merges SDK violations with statistical signals into pass|warn|fail.
 func verdict(res *plugindev.VerifyResult, q *plugindev.QualityStats) string {
 	hasErr, hasWarn := false, false
 	for _, v := range res.Violations {
 		switch v.Severity {
-		case sdkcontract.SeverityError:
+		case string(sdkcontract.SeverityError):
 			hasErr = true
-		case sdkcontract.SeverityWarn:
+		case string(sdkcontract.SeverityWarn):
 			hasWarn = true
 		}
 	}

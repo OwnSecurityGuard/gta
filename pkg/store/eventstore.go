@@ -264,4 +264,10 @@ type SessionMeta struct {
 	DurationSec  float64        `json:"duration_sec,omitempty"`
 	DBPath       string         `json:"db_path"` // 该 session 的 capture.sqlite 绝对路径
 	Extra        map[string]any `json:"extra,omitempty"`
+
+	// ManifestSnapshot 是会话创建时的插件 manifest 快照（plugin.yaml 原文）。
+	// 用于 MCP 层查询插件声明的 Schema/State/Evidence/Rule 四层契约声明，
+	// 使 Agent 无需连接插件即可了解会话的语义契约能力。
+	// 空字符串表示会话创建时未获取到 manifest（如插件未注册）。
+	ManifestSnapshot string `json:"manifest_snapshot,omitempty"`
 }

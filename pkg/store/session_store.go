@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     decode_errors INTEGER DEFAULT 0,
     duration_sec  REAL,
     db_path       TEXT NOT NULL,
-    extra         TEXT
+    extra         TEXT,
+    manifest_snapshot TEXT DEFAULT ''
 );`
 	if _, err := cs.db.Exec(schema); err != nil {
 		return err
@@ -109,11 +110,11 @@ func (cs *ControlStore) CreateSession(ctx context.Context, meta SessionMeta) err
 	}
 	_, err := cs.db.ExecContext(ctx, `
 INSERT INTO sessions(session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
-                     raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                     raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		meta.SessionID, meta.StartedAt, stoppedAt, meta.Status, meta.Port, meta.Plugin,
 		meta.Interface, meta.PCAPFile, meta.RawPackets, meta.Events, meta.Metrics,
-		meta.DecodeErrors, meta.DurationSec, meta.DBPath, extraJSON,
+		meta.DecodeErrors, meta.DurationSec, meta.DBPath, extraJSON, meta.ManifestSnapshot,
 	)
 	return err
 }
@@ -122,7 +123,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 func (cs *ControlStore) GetSession(ctx context.Context, sessionID string) (*SessionMeta, error) {
 	row := cs.db.QueryRowContext(ctx, `
 SELECT session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
-       raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra
+       raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot
 FROM sessions WHERE session_id=?`, sessionID)
 	meta, err := scanSession(row)
 	if err != nil {
@@ -135,7 +136,7 @@ FROM sessions WHERE session_id=?`, sessionID)
 func (cs *ControlStore) ListSessions(ctx context.Context) ([]SessionMeta, error) {
 	rows, err := cs.db.QueryContext(ctx, `
 SELECT session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
-       raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra
+       raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot
 FROM sessions ORDER BY started_at DESC`)
 	if err != nil {
 		return nil, err
@@ -168,11 +169,13 @@ func (cs *ControlStore) UpdateSession(ctx context.Context, meta SessionMeta) err
 	}
 	res, err := cs.db.ExecContext(ctx, `
 UPDATE sessions SET started_at=?, stopped_at=?, status=?, port=?, plugin=?, interface=?, pcap_file=?,
-                    raw_packets=?, events=?, metrics=?, decode_errors=?, duration_sec=?, db_path=?, extra=?
+                    raw_packets=?, events=?, metrics=?, decode_errors=?, duration_sec=?, db_path=?, extra=?,
+                    manifest_snapshot=?
 WHERE session_id=?`,
 		meta.StartedAt, stoppedAt, meta.Status, meta.Port, meta.Plugin,
 		meta.Interface, meta.PCAPFile, meta.RawPackets, meta.Events, meta.Metrics,
-		meta.DecodeErrors, meta.DurationSec, meta.DBPath, extraJSON, meta.SessionID,
+		meta.DecodeErrors, meta.DurationSec, meta.DBPath, extraJSON,
+		meta.ManifestSnapshot, meta.SessionID,
 	)
 	if err != nil {
 		return err
@@ -219,6 +222,7 @@ func scanSession(s sessionScanner) (*SessionMeta, error) {
 		&meta.SessionID, &meta.StartedAt, &stoppedAt, &meta.Status, &meta.Port, &meta.Plugin,
 		&meta.Interface, &meta.PCAPFile, &meta.RawPackets, &meta.Events, &meta.Metrics,
 		&meta.DecodeErrors, &meta.DurationSec, &meta.DBPath, &extraJSON,
+		&meta.ManifestSnapshot,
 	); err != nil {
 		return nil, err
 	}

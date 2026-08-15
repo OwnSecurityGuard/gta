@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	sdk "github.com/OwnSecurityGuard/gta-plugin-sdk"
+	sdkschema "github.com/OwnSecurityGuard/gta-plugin-sdk/schema"
 )
 
 // Manifest 的解析与字段校验现由 SDK 单一持有，其单元测试也在 SDK
@@ -19,9 +20,11 @@ func TestManifestIsSDKAlias(t *testing.T) {
 	var s sdk.Manifest = m // 编译期即断言等价
 	_ = s
 
-	var decl SchemaDecl = sdk.SchemaDecl{ID: "x", Version: 1}
-	if decl.ID != "x" {
-		t.Fatalf("SchemaDecl alias broken: %+v", decl)
+	// SchemaDecl 已迁入 SDK schema 子包（sdkschema.Schema），不再作为 plugin 包别名。
+	// 验证 Manifest.Schemas 类型与 SDK 一致。
+	var schemas []sdkschema.Schema = m.Schemas
+	if schemas != nil {
+		t.Fatalf("uninitialized Schemas should be nil, got %+v", schemas)
 	}
 }
 
@@ -96,16 +99,15 @@ type: decoder
 
 func TestToSchemaRegistry(t *testing.T) {
 	m := &Manifest{
-		Schemas: []SchemaDecl{
+		Schemas: []sdkschema.Schema{
 			{
-				ID:      "lol.login",
-				Version: 1,
-				IndexableFields: []IndexableField{
+				Ref:      sdkschema.Ref{ID: "lol.login", Version: 1},
+				IndexableFields: []sdkschema.IndexableField{
 					{Path: "cmd_id", Type: "number", Alias: "cmd"},
 					{Path: "user.name", Type: "string"},
 				},
 			},
-			{ID: "lol.move", Version: 2},
+			{Ref: sdkschema.Ref{ID: "lol.move", Version: 2}},
 		},
 	}
 

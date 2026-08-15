@@ -7,10 +7,16 @@ import (
 	"math"
 	"time"
 
+	sdk "github.com/OwnSecurityGuard/gta-plugin-sdk"
+	sdkcontract "github.com/OwnSecurityGuard/gta-plugin-sdk/contract"
+	sdkevent "github.com/OwnSecurityGuard/gta-plugin-sdk/event"
+
 	"gta/pkg/decode"
+	"gta/pkg/event"
 	"gta/pkg/internalipc/capturecontrol"
-	"gta/pkg/plugindev"
+	"gta/pkg/plugin"
 	"gta/pkg/plugin/quality"
+	"gta/pkg/plugindev"
 	"gta/pkg/store"
 )
 
@@ -64,6 +70,20 @@ func (s *pipelineService) Verify(ctx context.Context, req capturecontrol.VerifyR
 	}
 	defer dispatcher.Close()
 
+	// 语义契约阶段（Semantic Contract v1）：声明期 Check + 运行期逐事件 CheckEvent。
+	// manifest 拿不到时降级为纯传输层校验（不阻断 verify），只记 warn。
+	var manifest *sdk.Manifest
+	if raw, merr := s.registry.GetPluginManifest(req.Plugin); merr == nil && len(raw) > 0 {
+		if m, perr := plugin.ParseManifest(raw); perr == nil {
+			manifest = m
+		} else {
+			logger.Warn("verify: parse manifest snapshot failed, semantic checks skipped", "error", perr)
+		}
+	} else {
+		logger.Warn("verify: manifest unavailable, semantic checks skipped", "error", merr)
+	}
+	sem := newSemCollector()
+
 	var corpus []quality.DecodeIO
 	loopErr := forEachRawDecoded(ctx, st, dispatcher, decodeRawOptions{
 		Protocol: req.Protocol,
@@ -72,12 +92,24 @@ func (s *pipelineService) Verify(ctx context.Context, req capturecontrol.VerifyR
 		Limit:    req.Limit,
 	}, func(r rawDecodeResult) {
 		corpus = append(corpus, decodeIOsFromResult(r)...)
+		if manifest != nil {
+			for _, ev := range r.Events {
+				sem.checkEvent(manifest, ev)
+			}
+		}
 	})
 	if loopErr != nil {
 		return capturecontrol.VerifyResult{}, loopErr
 	}
 
+	if manifest != nil {
+		// 声明期六层校验（runtime/schema/state/evidence/rule）一并并入报告。
+		sem.addReport(sdkcontract.NewPluginChecker().Check(manifest))
+	}
+
 	result := quality.Verify(corpus)
+	result.Violations = append(result.Violations, sem.violations()...)
+	quality.RecomputeVerdict(result)
 
 	// 跨平面回写：把 validated 证明落到 Developer Plane 的 Tracker。
 	runID := fmt.Sprintf("verify_%d", time.Now().UnixNano())
@@ -191,9 +223,9 @@ func (s *pipelineService) SampleBytes(ctx context.Context, req capturecontrol.Sa
 			Src:         r.Src,
 			Dst:         r.Dst,
 			Length:      int64(len(r.Payload)),
-			Hex:        hex.EncodeToString(payload),
-			Entropy:    ent,
-			FirstByte:  firstByte,
+			Hex:         hex.EncodeToString(payload),
+			Entropy:     ent,
+			FirstByte:   firstByte,
 		})
 		bucket := int32((len(r.Payload) / 16) * 16)
 		out.LengthHistogram[bucket]++
@@ -276,4 +308,80 @@ func shannonBits(b []byte) float64 {
 		h -= p * math.Log2(p)
 	}
 	return h
+}
+
+// semCollector 聚合语义契约（Semantic Contract v1）校验违规，
+// 按 RuleID 去重计数，形态对齐 quality.Verify 的传输层违规输出。
+type semCollector struct {
+	viol  map[string]*plugindev.Violation
+	order []string
+}
+
+func newSemCollector() *semCollector {
+	return &semCollector{viol: map[string]*plugindev.Violation{}}
+}
+
+func (c *semCollector) add(v sdkcontract.Violation) {
+	e, ok := c.viol[v.RuleID]
+	if !ok {
+		e = &plugindev.Violation{RuleID: v.RuleID}
+		c.viol[v.RuleID] = e
+		c.order = append(c.order, v.RuleID)
+	}
+	e.Count++
+	if e.Sample == "" {
+		e.Sample = v.Message
+	}
+	if spec, ok := v.Spec(); ok {
+		e.Topic = spec.Topic
+		e.Severity = string(spec.Severity)
+		e.Statement = spec.Statement
+		e.DocRef = spec.DocRef
+	}
+	if e.Severity == "" {
+		e.Severity = string(v.Severity)
+	}
+}
+
+// addReport 并入一份 SDK Report（可空）。
+func (c *semCollector) addReport(r *sdkcontract.Report) {
+	if r == nil {
+		return
+	}
+	for _, v := range r.Violations {
+		c.add(v)
+	}
+}
+
+// checkEvent 把单条解码事件转为 SDK Draft 并跑 event/schema/state/evidence 层校验。
+// gta event.Value 与 SDK event.Value 的 MsgPack wire 格式一致，经序列化互转即可。
+func (c *semCollector) checkEvent(m *sdk.Manifest, ev *event.Event) {
+	if ev == nil {
+		return
+	}
+	b, err := ev.Payload.Value.MarshalMsgpack()
+	if err != nil {
+		return
+	}
+	v, err := sdkevent.UnmarshalValueMsgpack(b)
+	if err != nil {
+		return
+	}
+	d := &sdkevent.Draft{
+		Type:      sdkevent.EventType(ev.Identity.Type),
+		SchemaRef: ev.Payload.SchemaID,
+		Value:     v,
+	}
+	c.addReport(sdkcontract.NewPluginChecker().CheckEvent(m, d))
+}
+
+func (c *semCollector) violations() []*plugindev.Violation {
+	if len(c.order) == 0 {
+		return nil
+	}
+	out := make([]*plugindev.Violation, 0, len(c.order))
+	for _, id := range c.order {
+		out = append(out, c.viol[id])
+	}
+	return out
 }

@@ -3,13 +3,13 @@
 # ============================================================================
 # 用法：
 #   1. 复制本文件为你的插件目录下的 go.mod（把 module 行改为你的插件名）。
-#   2. SDK 版本须与脚手架 / 开发指南同版本发布；当前固定 gta-plugin-sdk v0.1.0
+#   2. SDK 版本须与脚手架 / 开发指南同版本发布；当前固定 gta-plugin-sdk v0.3.0
 #      （与 pkg/plugindev/version.go 的 SDKVersion 常量保持一致）。
 #   3. 本地开发时临时加 replace 指向 SDK 源码：
 #        go mod edit -replace github.com/OwnSecurityGuard/gta-plugin-sdk=<sdk路径>
 #   4. 分发给用户时去掉 replace，直接引用已发布远程模块：
-#        go get github.com/OwnSecurityGuard/gta-plugin-sdk@v0.1.0
-#   5. 间接依赖（indirect）为 v0.1.0 在 plugins/http 实测锁定的版本；
+#        go get github.com/OwnSecurityGuard/gta-plugin-sdk@v0.3.0
+#   5. 间接依赖（indirect）为参考插件实测锁定的版本；
 #      go mod tidy 会按下方版本自动补全/对齐。
 # ============================================================================
 
@@ -17,7 +17,7 @@ module <your-plugin-name>
 
 go 1.25.5
 
-require github.com/OwnSecurityGuard/gta-plugin-sdk v0.1.0
+require github.com/OwnSecurityGuard/gta-plugin-sdk v0.3.0
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect

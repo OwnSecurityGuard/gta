@@ -28,7 +28,7 @@ jobs:
           go test -tags pcap ./... > /tmp/test.log 2>&1
           code=$?
           if [ $code -ne 0 ]; then
-            MSG=$(grep -E '^(--- FAIL|FAIL|panic)|signal: killed|out of memory' /tmp/test.log | head -25 | sed 's/"/\\"/g' | tr '\n' ';')
+            MSG=$(grep -A4 -E '^(--- FAIL|panic)|signal: killed|out of memory' /tmp/test.log | head -40 | sed 's/"/\\"/g' | tr '\n' ';')
             echo "::error title=go test failures::$MSG"
             exit $code
           fi

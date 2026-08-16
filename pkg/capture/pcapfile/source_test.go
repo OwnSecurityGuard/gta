@@ -53,8 +53,11 @@ func TestOpen(t *testing.T) {
 	if pkt.Metadata == nil {
 		t.Fatal("metadata should not be nil")
 	}
-	if src.State() != capture.StateRunning {
-		t.Fatalf("expected state running, got %s", src.State())
+	// 单包文件读到包后可能已耗尽 EOF 并转入 closed —— running 与 closed
+	// 都是合法终态，取决于读取 goroutine 与本断言的调度先后（慢速 CI 上
+	// 常见后者），不构成失败。
+	if st := src.State(); st != capture.StateRunning && st != capture.StateClosed {
+		t.Fatalf("expected state running or closed, got %s", st)
 	}
 }
 

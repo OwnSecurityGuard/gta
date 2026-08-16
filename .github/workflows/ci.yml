@@ -23,7 +23,15 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test
-        run: go test -tags pcap ./...
+        run: |
+          set -o pipefail
+          go test -tags pcap ./... 2>&1 | tee /tmp/test.log || {
+            {
+              echo '## Failing tests'
+              grep -E '^(--- FAIL|FAIL|panic)' /tmp/test.log || true
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
 
   readme-drift:
     runs-on: ubuntu-latest

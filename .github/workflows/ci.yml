@@ -24,14 +24,14 @@ jobs:
         run: go vet ./...
       - name: Test
         run: |
-          set -o pipefail
-          go test -tags pcap ./... 2>&1 | tee /tmp/test.log || {
-            {
-              echo '## Failing tests'
-              grep -E '^(--- FAIL|FAIL|panic)' /tmp/test.log || true
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          }
+          set +e
+          go test -tags pcap ./... > /tmp/test.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            MSG=$(grep -E '^(--- FAIL|FAIL|panic)|signal: killed|out of memory' /tmp/test.log | head -25 | sed 's/"/\\"/g' | tr '\n' ';')
+            echo "::error title=go test failures::$MSG"
+            exit $code
+          fi
 
   readme-drift:
     runs-on: ubuntu-latest

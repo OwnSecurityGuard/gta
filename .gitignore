@@ -82,7 +82,7 @@ runs/
 sessions/
 cap/
 current.json
-workflows/
+/workflows/
 
 # Windows 保留名伪文件
 NUL

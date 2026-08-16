@@ -111,7 +111,6 @@ func genSection(tools []tool) string {
 	for _, t := range tools {
 		fmt.Fprintf(&b, "| `%s` | %s |\n", t.name, t.desc)
 	}
-	fmt.Fprintf(&b, "\n%s", endMarker)
 	return b.String()
 }
 

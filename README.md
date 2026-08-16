@@ -206,7 +206,6 @@ make test
 | `delete_session` | Delete a capture session and its data |
 
 <!-- END TOOL TABLE -->
-<!-- END TOOL TABLE -->
 
 ### 双状态空间
 

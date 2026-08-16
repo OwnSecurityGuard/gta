@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -36,8 +37,12 @@ func TestArtifactStateTransitions(t *testing.T) {
 	}
 
 	// Binary newer than source → compiled, not stale.
+	binName := name
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
 	writeFile(t, filepath.Join(dir, "main.go"), "package main", past)
-	writeFile(t, filepath.Join(dir, name+".exe"), "ELF", recent)
+	writeFile(t, filepath.Join(dir, binName), "ELF", recent)
 	got := plugindev.ArtifactStateOf(root, name)
 	if got.State != "compiled" {
 		t.Fatalf("expected compiled, got %q", got.State)

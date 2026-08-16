@@ -31,7 +31,7 @@ import (
 	pb "gta/pkg/internalipc/proto"
 	"gta/pkg/logging"
 	"gta/pkg/plugin"
-	"gta/pkg/plugin/skills"
+	"gta/docs"
 	plugindevclient "gta/pkg/plugindev/client"
 	plugindevserver "gta/pkg/plugindev/server"
 	"gta/pkg/schema"
@@ -610,7 +610,7 @@ func (m *mcpCapture) handleGetPluginContract(ctx context.Context, req mcp.CallTo
 }
 
 func (m *mcpCapture) handleGetPluginDevGuide(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return successResult(map[string]any{"guide": string(skills.DevGuide())}), nil
+	return successResult(map[string]any{"guide": string(docs.DevGuide())}), nil
 }
 
 func (m *mcpCapture) handleListRegisteredPlugins(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1314,7 +1314,7 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 	}
 
 	// Query all events (no LIMIT) for application-level filtering.
-	eventRows, err := reader.QueryEvents(ctx, sessionID, 0, 0)
+	eventRows, err := reader.QueryEventsDesc(ctx, sessionID, 0, 0)
 	if err != nil {
 		return errorResult(fmt.Errorf("query events: %w", err)), nil
 	}
@@ -2707,6 +2707,10 @@ func main() {
 	s.AddTool(mcp.NewTool("get_registry_addr",
 		mcp.WithDescription("Return the registry address the pipeline is currently listening on (its -registry-addr, e.g. :9091). Plugins MUST connect here by setting GTA_REGISTRY_ADDR at startup; this tool removes the guesswork of reading pipeline startup logs. Use it to learn where a freshly launched plugin should register, or to confirm activate_plugin's resolved address."),
 	), capture.handleGetRegistryAddr)
+
+	s.AddTool(mcp.NewTool("get_capabilities",
+		mcp.WithDescription("Return a self-describing catalog of all MCP tools grouped by workflow (capture / query / evidence / behavior / plugin-dev / plugin-verify / plugin-runtime / plugin-knowledge / raw-debug) plus recommended call chains. Call this FIRST when unsure which tool to use or how tools relate; it replaces reading the README."),
+	), capture.handleGetCapabilities)
 
 	s.AddTool(mcp.NewTool("list_registered_plugins",
 		mcp.WithDescription("List all plugins currently registered with the pipeline (active via gRPC PluginRegistry). Different from list_plugins which scans the plugins directory for binary files."),

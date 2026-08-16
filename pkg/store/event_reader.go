@@ -79,14 +79,24 @@ func scanEvent(sc eventScanner) (*event.Event, error) {
 	return e, nil
 }
 
-// QueryEvents 查询 Event。
+// QueryEvents 查询 Event（时间正序）。内部消费方（trace 构建、run 摘要）
+// 依赖时间正序作为存储层默认；展示层的"最新在前"用 QueryEventsDesc。
 func (s *SQLiteStore) QueryEvents(ctx context.Context, sessionID string, limit, offset int) ([]*event.Event, error) {
+	return s.queryEventsOrdered(ctx, sessionID, limit, offset, "ASC")
+}
+
+// QueryEventsDesc 查询 Event（时间倒序），供 list_decoded_data 等展示层使用。
+func (s *SQLiteStore) QueryEventsDesc(ctx context.Context, sessionID string, limit, offset int) ([]*event.Event, error) {
+	return s.queryEventsOrdered(ctx, sessionID, limit, offset, "DESC")
+}
+
+func (s *SQLiteStore) queryEventsOrdered(ctx context.Context, sessionID string, limit, offset int, order string) ([]*event.Event, error) {
 	query := `
 		SELECT id, session_id, type, schema_id, source, timestamp,
 		       causation_id, correlation_id, origin_id, context, payload
 		FROM events
 		WHERE session_id = ?
-		ORDER BY timestamp DESC
+		ORDER BY timestamp ` + order + `
 	`
 	// limit<=0 视为"无限制"（与 applyLimitOffset 语义一致），
 	// 避免调用方传 limit=0 时生成 LIMIT 0 导致返回 0 行。

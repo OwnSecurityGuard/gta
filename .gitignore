@@ -75,3 +75,14 @@ cap/
 
 # Stray/junk file
 NUL
+
+# 运行时产物（本地生成，不入库）
+bin/
+runs/
+sessions/
+cap/
+current.json
+workflows/
+
+# Windows 保留名伪文件
+NUL

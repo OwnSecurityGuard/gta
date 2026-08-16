@@ -1,5 +1,13 @@
 # GTA 全栈 AI 能力审计与可用性报告
 
+> 📌 **2026-08-16 复核更新**：以下发现已在本轮整改中解决，正文保留原始审计记录：
+> - `query_capture_table` 已实际注册（allowlist 含 `event_index` / `plugin_debug_access`），并随 README 工具表由脚本生成而可发现；
+> - `explain_plugin` 的 `verify` 参数已在工具 schema 中声明；`begin_capture_run` 的提示性参数已在描述与 `get_capabilities` 中注明"不会自动启动抓包"；
+> - 新增 `get_capabilities` 自描述工具目录；README 工具表改为 `go run ./scripts/gen_tool_table` 生成，杜绝计数漂移；
+> - SDK 侧 `winio.DialPipe` 已按平台拆分（Linux CI 通过），SDK tag v0.3.0 与 host `SDKVersion` 对齐；
+> - `tools/hotreload` 死代码与 `docs/sdk-agents-md-patch.md` 已删除，过期设计稿移入 `docs/archive/`。
+> 其余未列条目仍为有效发现。
+
 > 审计范围：`gta`（host）、`gta-plugin-sdk`（插件 SDK）、`gta/plugins`（插件仓库）
 > 方法：4 个并行 Explore agent 逐文件清点 + 代码↔文档交叉核对；报告中"发现路径/缺口"均带 file:line，关键项已人工抽样复核。
 > AI 视角定义：① 控制面 AI（调 MCP 工具）② 插件作者 AI（读 SDK）③ 分析 AI（读语义/证据文档）。

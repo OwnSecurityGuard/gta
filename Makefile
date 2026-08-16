@@ -43,3 +43,7 @@ run-pipeline:
 
 run-plugin-dev:
 	go run -tags $(TAGS) ./cmd/gta-plugin-dev
+
+# 重新生成 README 中的 MCP 工具目录（与 cmd/gta-mcp/main.go 对齐）。
+docs:
+	go run ./scripts/gen_tool_table

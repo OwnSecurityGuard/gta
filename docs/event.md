@@ -4,6 +4,9 @@
 **Status:** Proposed
 **Purpose:** Define the core event model used by GTA data pipeline, event storage, MCP query, replay, and analysis systems.
 
+> ⚠️ 本文是设计稿，部分 DDL 已落后于实现（如缺 `context` 列、`origin_id` 索引）。
+> 线上真实 schema 以 `pkg/store` 建表代码为唯一事实来源。
+
 ---
 
 # 1. Overview

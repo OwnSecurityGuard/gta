@@ -18,7 +18,6 @@ require (
 
 // 契约单向流动：SDK 定义，gta 消费。
 // 开发期指向同级工作区的 SDK 源码，发布时去掉 replace 用打 tag 的版本。
-replace github.com/OwnSecurityGuard/gta-plugin-sdk => ../ai_workspace/gta-plugin-sdk
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

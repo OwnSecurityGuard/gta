@@ -33,6 +33,8 @@ type EventWriter interface {
 // EventReader 由 gta-mcp 使用，查询事件流。
 type EventReader interface {
 	QueryEvents(ctx context.Context, sessionID string, limit, offset int) ([]*event.Event, error)
+	// QueryEventsDesc 时间倒序版本，供展示层"最新在前"。
+	QueryEventsDesc(ctx context.Context, sessionID string, limit, offset int) ([]*event.Event, error)
 	GetEventByID(ctx context.Context, id string) (*event.Event, error)
 	QueryEventsByType(ctx context.Context, sessionID, eventType string, limit, offset int) ([]*event.Event, error)
 	QueryEventsByCorrelation(ctx context.Context, correlationID string, limit, offset int) ([]*event.Event, error)

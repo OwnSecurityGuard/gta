@@ -70,5 +70,8 @@ current.json
 # AI working memory (tool-internal, not project source)
 .workbuddy/
 
+# Runtime capture artifacts (binaries, recorded packets, reports)
+cap/
+
 # Stray/junk file
 NUL

@@ -13,6 +13,31 @@ import type {
   StopCaptureResult,
 } from "@/types/registered-plugin";
 import type { TestPluginResult, TestPluginVars } from "@/types/plugin-test";
+import type { AggregateQueryResult, AnalyzePatternsResult } from "@/types/analytics";
+import type {
+  EvidenceGraphResult,
+  TraceEventChainResult,
+  SuggestLinkRulesResult,
+} from "@/types/evidence";
+import type {
+  SessionStatusResult,
+  ListInterfacesResult,
+  DeleteSessionResult,
+} from "@/types/session-extra";
+import type {
+  CreatePluginResult,
+  BuildPluginResult,
+  PluginStatusResult,
+  ExplainPluginResult,
+  PluginManifestResult,
+} from "@/types/plugin-dev";
+import type {
+  BeginCaptureRunResult,
+  EndCaptureRunResult,
+  RunStatusResult,
+  TraceProtocolFlowResult,
+} from "@/types/behavior";
+import type { QueryCaptureTableResult } from "@/types/table-browser";
 
 /** 查询 session 列表 */
 export function useSessions() {
@@ -233,6 +258,295 @@ export function usePluginEventStream() {
     };
     return () => es.close();
   }, [queryClient]);
+}
+
+// ===== 分析（聚合统计）=====
+
+/** aggregate_query：用 expr 表达式查询预计算聚合指标。 */
+export function useAggregateQuery(expression: string, sessionId: string | null) {
+  const expr = expression.trim();
+  return useQuery({
+    queryKey: ["aggregate", sessionId, expr],
+    queryFn: () =>
+      mcpClient.callTool<AggregateQueryResult>("aggregate_query", {
+        expression: expr,
+        session_id: sessionId ?? undefined,
+      }),
+    enabled: !!sessionId && expr.length > 0,
+    staleTime: 30_000,
+  });
+}
+
+/** analyze_protocol_patterns：协议模式分析（流/消息类型/相关性/状态变更/证据图/方向）。 */
+export function useAnalyzePatterns(sessionId: string | null) {
+  return useQuery({
+    queryKey: ["patterns", sessionId],
+    queryFn: () =>
+      mcpClient.callTool<AnalyzePatternsResult>("analyze_protocol_patterns", {
+        session_id: sessionId ?? undefined,
+      }),
+    enabled: !!sessionId,
+    staleTime: 30_000,
+  });
+}
+
+// ===== 关系（证据图 / 因果链 / 链路规则）=====
+
+/** query_evidence_graph：查询语义证据图（节点 + 边）。 */
+export function useEvidenceGraph(
+  sessionId: string | null,
+  options: {
+    nodeKind?: string;
+    edgeType?: string;
+    flowId?: string;
+    minConfidence?: number;
+    rootNodeId?: string;
+    maxDepth?: number;
+    limit?: number;
+    offset?: number;
+  },
+) {
+  const { nodeKind, edgeType, flowId, minConfidence, rootNodeId, maxDepth, limit, offset } = options;
+  return useQuery({
+    queryKey: ["evidenceGraph", sessionId, options],
+    queryFn: () =>
+      mcpClient.callTool<EvidenceGraphResult>("query_evidence_graph", {
+        session_id: sessionId ?? undefined,
+        node_kind: nodeKind || undefined,
+        edge_type: edgeType || undefined,
+        flow_id: flowId || undefined,
+        min_confidence: minConfidence,
+        root_node_id: rootNodeId || undefined,
+        max_depth: maxDepth,
+        limit: limit ?? 200,
+        offset: offset ?? 0,
+      }),
+    enabled: !!sessionId,
+    staleTime: 15_000,
+  });
+}
+
+/** trace_event_chain：追踪某事件/节点的完整上下游证据链。 */
+export function useTraceEventChain(
+  sessionId: string | null,
+  options: { eventId?: string; nodeId?: string; maxDepth?: number; minConfidence?: number },
+) {
+  const { eventId, nodeId, maxDepth, minConfidence } = options;
+  return useQuery({
+    queryKey: ["traceChain", sessionId, options],
+    queryFn: () =>
+      mcpClient.callTool<TraceEventChainResult>("trace_event_chain", {
+        session_id: sessionId ?? undefined,
+        event_id: eventId || undefined,
+        node_id: nodeId || undefined,
+        max_depth: maxDepth ?? 5,
+        min_confidence: minConfidence ?? 0.5,
+      }),
+    enabled: !!sessionId && (!!eventId || !!nodeId),
+    staleTime: 15_000,
+  });
+}
+
+/** suggest_link_rules：基于证据图自动生成链路规则建议。 */
+export function useSuggestLinkRules(
+  sessionId: string | null,
+  minConfidence = 0.6,
+  minOccurrences = 3,
+) {
+  return useQuery({
+    queryKey: ["linkRules", sessionId, minConfidence, minOccurrences],
+    queryFn: () =>
+      mcpClient.callTool<SuggestLinkRulesResult>("suggest_link_rules", {
+        session_id: sessionId ?? undefined,
+        min_confidence: minConfidence,
+        min_occurrences: minOccurrences,
+      }),
+    enabled: !!sessionId,
+    staleTime: 30_000,
+  });
+}
+
+// ===== 会话增强（状态 / 删除 / 网卡）=====
+
+/** get_session_status：查询指定会话的实时状态（gRPC 优先，失败降级元数据）。 */
+export function useSessionStatus(sessionId: string | null) {
+  return useQuery({
+    queryKey: ["sessionStatus", sessionId],
+    queryFn: () =>
+      mcpClient.callTool<SessionStatusResult>("get_session_status", {
+        session_id: sessionId ?? undefined,
+      }),
+    enabled: !!sessionId,
+    refetchInterval: 5000,
+  });
+}
+
+/** list_interfaces：列出可用抓包网卡。 */
+export function useListInterfaces() {
+  return useQuery({
+    queryKey: ["interfaces"],
+    queryFn: () => mcpClient.callTool<ListInterfacesResult>("list_interfaces"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** delete_session：删除一个会话及其数据（破坏性，调用方需二次确认）。 */
+export function useDeleteSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { sessionId: string }) =>
+      mcpClient.callTool<DeleteSessionResult>("delete_session", { session_id: vars.sessionId }),
+    onSuccess: (_data, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessionStatus", vars.sessionId] });
+    },
+  });
+}
+
+// ===== 插件开发平面（脚手架 / 编译 / 状态 / 归因 / manifest）=====
+
+/** create_plugin：从模板脚手架一个新解码插件工程。 */
+export function useCreatePlugin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      name: string;
+      protocol: string;
+      protocolVersion?: string;
+      hints?: string[];
+      outputDir?: string;
+    }) =>
+      mcpClient.callTool<CreatePluginResult>("create_plugin", {
+        name: vars.name,
+        protocol: vars.protocol,
+        protocol_version: vars.protocolVersion ?? "",
+        hints: vars.hints && vars.hints.length > 0 ? JSON.stringify(vars.hints) : "",
+        output_dir: vars.outputDir ?? "",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["plugins"] });
+    },
+  });
+}
+
+/** build_plugin：编译脚手架插件，返回结构化诊断。 */
+export function useBuildPlugin() {
+  return useMutation({
+    mutationFn: (vars: { name: string; timeoutSec?: number }) =>
+      mcpClient.callTool<BuildPluginResult>("build_plugin", {
+        name: vars.name,
+        timeout_sec: vars.timeoutSec ?? 120,
+      }),
+  });
+}
+
+/** status_plugin：查询插件双态视图（制品态 + 运行时态）。 */
+export function usePluginStatus(name: string | null) {
+  return useQuery({
+    queryKey: ["pluginStatus", name],
+    queryFn: () => mcpClient.callTool<PluginStatusResult>("status_plugin", { name: name! }),
+    enabled: !!name,
+    refetchInterval: name ? 5000 : false,
+  });
+}
+
+/** explain_plugin：归因插件最近一次构建/激活失败。 */
+export function useExplainPlugin() {
+  return useMutation({
+    mutationFn: (vars: { name: string; action?: string }) =>
+      mcpClient.callTool<ExplainPluginResult>("explain_plugin", {
+        name: vars.name,
+        action: vars.action ?? "",
+      }),
+  });
+}
+
+/** get_plugin_manifest：返回已注册插件的 plugin.yaml 原文。 */
+export function usePluginManifest(name: string | null) {
+  return useQuery({
+    queryKey: ["pluginManifest", name],
+    queryFn: () => mcpClient.callTool<PluginManifestResult>("get_plugin_manifest", { name: name! }),
+    enabled: !!name,
+  });
+}
+
+// ===== 行为 / 因果（Runs）=====
+
+/** begin_capture_run：标记一次用户操作窗口的开始。 */
+export function useBeginCaptureRun() {
+  return useMutation({
+    mutationFn: (vars: {
+      featureName: string;
+      projectPath: string;
+      pluginName?: string;
+      device?: string;
+      filter?: string;
+      port?: number;
+    }) =>
+      mcpClient.callTool<BeginCaptureRunResult>("begin_capture_run", {
+        feature_name: vars.featureName,
+        project_path: vars.projectPath,
+        plugin_name: vars.pluginName ?? "",
+        device: vars.device ?? "",
+        filter: vars.filter ?? "",
+        port: vars.port ?? 0,
+      }),
+  });
+}
+
+/** end_capture_run：关闭操作窗口，返回窗口内增量统计（幂等）。 */
+export function useEndCaptureRun() {
+  return useMutation({
+    mutationFn: (vars: { runId: string; timeTo?: string }) =>
+      mcpClient.callTool<EndCaptureRunResult>("end_capture_run", {
+        run_id: vars.runId,
+        time_to: vars.timeTo ?? "",
+      }),
+  });
+}
+
+/** get_run_status：快速检查某 run 是否有用数据。 */
+export function useRunStatus(runId: string | null) {
+  return useQuery({
+    queryKey: ["runStatus", runId],
+    queryFn: () => mcpClient.callTool<RunStatusResult>("get_run_status", { run_id: runId! }),
+    enabled: !!runId,
+    refetchInterval: runId ? 3000 : false,
+  });
+}
+
+/** trace_protocol_flow：构建一次行为的时序证据链。 */
+export function useTraceProtocolFlow() {
+  return useMutation({
+    mutationFn: (vars: { runId: string; flowId: string; featureName: string }) =>
+      mcpClient.callTool<TraceProtocolFlowResult>("trace_protocol_flow", {
+        run_id: vars.runId,
+        flow_id: vars.flowId,
+        feature_name: vars.featureName,
+      }),
+  });
+}
+
+// ===== 表浏览器（只读逃生口）=====
+
+/** query_capture_table：只读查询内部投影/审计表。 */
+export function useQueryCaptureTable(
+  sessionId: string | null,
+  table: string,
+  options: { limit?: number; offset?: number },
+) {
+  return useQuery({
+    queryKey: ["captureTable", sessionId, table, options],
+    queryFn: () =>
+      mcpClient.callTool<QueryCaptureTableResult>("query_capture_table", {
+        session_id: sessionId ?? undefined,
+        table,
+        limit: options.limit ?? 100,
+        offset: options.offset ?? 0,
+      }),
+    enabled: !!sessionId && table.length > 0,
+    staleTime: 15_000,
+  });
 }
 
 // 轻量错误日志（避免引入额外依赖）。

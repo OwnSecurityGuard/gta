@@ -10,37 +10,139 @@ hints:
   - port:8087
   - mmo
   - ekonia
-event:
-  fields:
-    direction: { type: string, enum: [client_to_server, server_to_client, unknown] }
-    msg_name:  { type: string }
-    is_push:   { type: boolean }
-  data:
-    schema:
-      fields:
-        peer_id:           { type: int }
-        cmd:               { type: string }
-        node:              { type: string }
-        method:            { type: string }
-        request_id:        { type: int }
-        type:              { type: string }
-        args:              { type: any }
-        data:              { type: any }
-        instance_id:       { type: string }
-        map_path:          { type: string }
-        auth_token:        { type: string }
-        psc_id:            { type: int }
-        path:              { type: string }
-        eid:               { type: int }
-        entity_id:         { type: int }
-        pairs:             { type: array }
-        map_updates:       { type: array }
-        objects:           { type: array }
-        spawns:            { type: array }
-        despawns:          { type: array }
-        ops_named:         { type: array }
-        error:             { type: any }
-        raw_hex:           { type: string }
+# === 能力位（spec v3 §6）：声明 decode + schema ===
+capabilities:
+  decode: true
+  schema: true
+# === 语义契约版本块（spec v3 §3）===
+contract:
+  name: gta.plugin
+  version: 1
+# === schema 声明（宿主 ToSchemaRegistry 实际消费此段）===
+# 字段均为 best-effort 解码，可变载荷标 optional:true；strict:false 使未知字段仅 WARN。
+# 注意：instance_rpc / data_request / data_response 的 schema_id 在 decode.go 中由
+# 常量字符串 + ".v1" 动态拼出，此处用其展开后的稳定 id 声明。
+schemas:
+  - id: godot_world.handshake
+    version: 1
+    name: World handshake (HTTP upgrade)
+    strict: false
+    fields:
+      request_line: { type: string, optional: true }
+      path:         { type: string, optional: true }
+      status:       { type: string, optional: true }
+  - id: godot_world.peer_id
+    version: 1
+    name: World peer id assignment
+    strict: false
+    fields:
+      peer_id: { type: int64, queryable: true }
+  - id: godot_world.sys
+    version: 1
+    name: World SYS control message
+    strict: false
+    fields:
+      sys_cmd: { type: int64, queryable: true }
+  - id: godot_world.path_cache
+    version: 1
+    name: World path cache (simplify/confirm)
+    strict: false
+    fields:
+      cmd:   { type: string, queryable: true }
+      psc_id: { type: int64, queryable: true }
+      path:  { type: string, optional: true }
+  - id: godot_world.raw
+    version: 1
+    name: World unrecognized command (raw)
+    strict: false
+    fields:
+      cmd:     { type: string, queryable: true }
+      raw_hex: { type: string, optional: true }
+  - id: godot_world.auth
+    version: 1
+    name: World SYS auth
+    strict: false
+    fields:
+      challenge:  { type: string, optional: true }
+      auth_token: { type: string, sensitive: true, optional: true }
+  - id: godot_world.instance_charge
+    version: 1
+    name: World instance charge (charge_new_instance)
+    strict: false
+    fields:
+      map_path:    { type: string, queryable: true }
+      instance_id: { type: string, queryable: true }
+  - id: godot_world.instance_rpc
+    version: 1
+    name: World instance lifecycle RPC (spawn/despawn/ready)
+    strict: false
+    fields:
+      method:       { type: string, queryable: true }
+      instance_id:  { type: string, optional: true }
+  - id: godot_world.state_bootstrap
+    version: 1
+    name: World state bootstrap (on_bootstrap)
+    strict: false
+    fields:
+      method: { type: string, optional: true }
+  - id: godot_world.client_delta
+    version: 1
+    name: World client delta (on_client_delta)
+    strict: false
+    fields:
+      blocks: { type: array, optional: true }
+      count:  { type: int64, optional: true }
+  - id: godot_world.props_bootstrap
+    version: 1
+    name: World props bootstrap (on_props_bootstrap)
+    strict: false
+    fields:
+      method: { type: string, optional: true }
+  - id: godot_world.props_delta
+    version: 1
+    name: World props delta (on_props_delta)
+    strict: false
+    fields:
+      method: { type: string, optional: true }
+  - id: godot_world.state_delta
+    version: 1
+    name: World state delta (on_state_delta)
+    strict: false
+    fields:
+      blocks: { type: array, optional: true }
+      count:  { type: int64, optional: true }
+  - id: godot_world.data_request
+    version: 1
+    name: World data request (_data_request)
+    strict: false
+    fields:
+      request_id:  { type: int64, queryable: true, optional: true }
+      type:        { type: string, queryable: true, optional: true }
+      instance_id: { type: string, optional: true }
+  - id: godot_world.data_response
+    version: 1
+    name: World data response (_data_response)
+    strict: false
+    fields:
+      request_id:  { type: int64, queryable: true, optional: true }
+      type:        { type: string, queryable: true, optional: true }
+      instance_id: { type: string, optional: true }
+  - id: godot_world.data_push
+    version: 1
+    name: World data push (data_push)
+    strict: false
+    fields:
+      type: { type: string, queryable: true, optional: true }
+  - id: godot_world.rpc
+    version: 1
+    name: World generic RPC (fallback)
+    strict: false
+    fields:
+      node:     { type: string, queryable: true }
+      method:   { type: string, queryable: true, optional: true }
+      args:     { type: array, optional: true }
+      raw_hex:  { type: string, optional: true }
+      type:     { type: string, optional: true }
 meta:
   author: opencode
   description: >-

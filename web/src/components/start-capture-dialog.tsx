@@ -2,25 +2,34 @@ import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { useStartCapture, useRegisteredPlugins } from "@/hooks/use-mcp";
+import { useStartCapture, useBeginCaptureRun, useRegisteredPlugins, useListInterfaces } from "@/hooks/use-mcp";
 import { toast } from "@/components/ui/toast";
-import { X, Check, Play } from "lucide-react";
+import { X, Check, Play, Network } from "lucide-react";
 
 interface StartCaptureDialogProps {
   open: boolean;
   onClose: () => void;
   onStarted?: (sessionId: string) => void;
+  /** 抓包启动并自动开启行为窗口后回调，携带 run_id 与联动的 session_id。 */
+  onRunLinked?: (runId: string, sessionId: string) => void;
 }
 
 /** 开始抓包对话框：指定端口与可选解码插件，启动一次抓包会话。 */
-export function StartCaptureDialog({ open, onClose, onStarted }: StartCaptureDialogProps) {
+export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: StartCaptureDialogProps) {
   const [port, setPort] = useState("8080");
   const [plugin, setPlugin] = useState("");
   const [started, setStarted] = useState(false);
   const start = useStartCapture();
+  // 抓包成功后自动开启行为窗口：begin_capture_run 会读取 MCP 侧 current.json
+  // （start_capture 已在服务端同步写入），从而复用同一 session_id，实现抓取↔窗口联动。
+  const begin = useBeginCaptureRun();
   // 已注册且在线才能用于抓包解码；离线插件无法建立解码流，故置灰禁用但保留可见，便于排查。
   const { data: pluginsData } = useRegisteredPlugins();
   const plugins = pluginsData?.plugins ?? [];
+  // list_interfaces：抓取网卡列表（仅供参考——当前一次 MCP 服务实例只绑一个 -iface，
+  // start_capture 不支持按会话切换网卡，故这里只读展示，帮助用户判断“为何没抓到环回流量”）。
+  const { data: ifacesData } = useListInterfaces();
+  const interfaces = ifacesData?.interfaces ?? [];
 
   useEffect(() => {
     if (open) setStarted(false);
@@ -33,8 +42,33 @@ export function StartCaptureDialog({ open, onClose, onStarted }: StartCaptureDia
       { port: p, plugin: plugin || undefined },
       {
         onSuccess: (data) => {
-          if (data?.session_id) onStarted?.(data.session_id);
+          const sessionId = data?.session_id ?? "";
+          if (sessionId) onStarted?.(sessionId);
           toast.success("抓包会话已启动", `端口 ${port}${plugin ? ` · 插件 ${plugin}` : ""}`);
+          // 自动开启行为窗口，与本次抓包会话联动（start_capture 已写入 current.json）。
+          const dbPath = data?.db_path ?? "";
+          const sessionDir = dbPath.replace(/[\\/][^\\/]+$/, "") || `session-${sessionId}`;
+          begin.mutate(
+            {
+              featureName: plugin ? `capture-${plugin}` : "capture",
+              projectPath: sessionDir,
+              pluginName: plugin || undefined,
+              port: p,
+              filter: `tcp port ${p}`,
+            },
+            {
+              onSuccess: (runData) => {
+                if (runData?.run_id) {
+                  onRunLinked?.(runData.run_id, runData.session_id ?? sessionId);
+                  toast.success("已开启行为窗口", `run ${runData.run_id}`);
+                }
+              },
+              onError: (err) => {
+                // 抓包已成功，行为窗口失败仅告警，不阻断抓包。
+                toast.info("行为窗口开启失败（抓包仍在进行）", err.message);
+              },
+            },
+          );
           setStarted(true);
           setTimeout(() => {
             setStarted(false);
@@ -105,6 +139,32 @@ export function StartCaptureDialog({ open, onClose, onStarted }: StartCaptureDia
           </p>
         </div>
       </div>
+      {/* 可用网卡（只读参考）：捕获网卡在 MCP 启动时由 -iface 固定，不可按会话切换。 */}
+      <div>
+        <label className="flex items-center gap-1.5 text-sm font-medium">
+          <Network className="h-3.5 w-3.5 text-muted-foreground" />
+          可用网卡（参考）
+        </label>
+        {interfaces.length === 0 ? (
+          <p className="mt-1 text-xs text-muted-foreground">暂无可列举的网卡。</p>
+        ) : (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {interfaces.map((iface) => (
+              <span
+                key={iface.name}
+                className="rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                title={iface.name}
+              >
+                {iface.name}
+              </span>
+            ))}
+          </div>
+        )}
+        <p className="mt-1 text-xs text-muted-foreground">
+          网卡在 MCP 启动时由 <code className="font-mono">-iface</code> 固定，本对话框不切换网卡。
+        </p>
+      </div>
+
       {start.isError && (
         <p className="mt-3 text-xs text-destructive">
           启动失败：{start.error?.message}

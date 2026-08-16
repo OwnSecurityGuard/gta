@@ -119,17 +119,32 @@ func Decode(req *pb.DecodeRequest) (events []*Event, err error) {
 			break
 		}
 		if !fs.handshakeDone {
-			n := indexHTTPHeader(raw)
-			if n < 0 {
-				break // wait for the rest of the upgrade handshake
+			if looksLikeHTTP(raw) {
+				n := indexHTTPHeader(raw)
+				if n < 0 {
+					break // wait for the rest of the upgrade handshake
+				}
+				events = append(events, handshakeEvent(fs, raw[:n]))
+				s.Consume(n)
+				fs.handshakeDone = true
+				continue
 			}
-			events = append(events, handshakeEvent(fs, raw[:n]))
-			s.Consume(n)
+			// No HTTP upgrade in the buffer: the capture began after the
+			// WebSocket handshake already completed (a live capture almost
+			// always starts here) or this is a raw ws stream. The connection
+			// is past the upgrade, so go straight to frame parsing.
 			fs.handshakeDone = true
-			continue
 		}
 		frames, consumed := parseWSFrames(raw)
 		if consumed == 0 {
+			// Either an incomplete trailing frame (normal — wait for more
+			// bytes) or garbage left over from a mid-connection capture that
+			// started inside a frame. Resync to the next binary-frame header
+			// so the decoder doesn't stall forever on the bad prefix.
+			if idx := wsResync(raw); idx > 0 {
+				s.Consume(idx)
+				continue
+			}
 			break
 		}
 		s.Consume(consumed)
@@ -174,8 +189,8 @@ func handshakeEvent(fs *flowState, hdr []byte) *Event {
 		payload["status"] = line
 	}
 	return &Event{
-		EventType: "godot-world.handshake",
-		SchemaID:  "godot-world.handshake.v1",
+		EventType: "godot_world.handshake",
+		SchemaID:  "godot_world.handshake.v1",
 		Payload:   payload,
 		Meta:      meta(dir, "handshake", false),
 	}
@@ -188,8 +203,8 @@ func processPacket(fs *flowState, pkt []byte) []*Event {
 		fs.firstPacket = false
 		fs.peerID = binary.LittleEndian.Uint32(pkt)
 		return []*Event{{
-			EventType: "godot-world.peer_id",
-			SchemaID:  "godot-world.peer_id.v1",
+			EventType: "godot_world.peer_id",
+			SchemaID:  "godot_world.peer_id.v1",
 			Payload:   map[string]any{"peer_id": int64(fs.peerID)},
 			Meta:      meta("server_to_client", "peer_id", false),
 		}}
@@ -208,23 +223,23 @@ func processPacket(fs *flowState, pkt []byte) []*Event {
 			return []*Event{authEvent(fs, p)}
 		}
 		return []*Event{{
-			EventType: "godot-world.sys",
-			SchemaID:  "godot-world.sys.v1",
+			EventType: "godot_world.sys",
+			SchemaID:  "godot_world.sys.v1",
 			Payload:   map[string]any{"sys_cmd": int64(p.sysCmd)},
 			Meta:      meta(dir, "sys", true),
 		}}
 	case cmdSimplifyPath:
 		fs.psc[p.pscID] = p.path
 		return []*Event{{
-			EventType: "godot-world.path_cache",
-			SchemaID:  "godot-world.path_cache.v1",
+			EventType: "godot_world.path_cache",
+			SchemaID:  "godot_world.path_cache.v1",
 			Payload:   map[string]any{"cmd": "simplify", "psc_id": int64(p.pscID), "path": p.path},
 			Meta:      meta(dir, "simplify_path", false),
 		}}
 	case cmdConfirmPath:
 		return []*Event{{
-			EventType: "godot-world.path_cache",
-			SchemaID:  "godot-world.path_cache.v1",
+			EventType: "godot_world.path_cache",
+			SchemaID:  "godot_world.path_cache.v1",
 			Payload:   map[string]any{"cmd": "confirm", "psc_id": int64(p.pscID)},
 			Meta:      meta(dir, "confirm_path", false),
 		}}
@@ -233,8 +248,8 @@ func processPacket(fs *flowState, pkt []byte) []*Event {
 		return rpcEvent(fs, p, node)
 	default:
 		return []*Event{{
-			EventType: "godot-world.raw",
-			SchemaID:  "godot-world.raw.v1",
+			EventType: "godot_world.raw",
+			SchemaID:  "godot_world.raw.v1",
 			Payload:   map[string]any{"cmd": p.cmdName, "raw_hex": cappedHex(p.rawBody)},
 			Meta:      meta(dir, p.cmdName, true),
 		}}
@@ -254,8 +269,8 @@ func authEvent(fs *flowState, p *smPacket) *Event {
 		payload["auth_token"] = decodeAuthToken(p.authPayload)
 	}
 	return &Event{
-		EventType: "godot-world.auth",
-		SchemaID:  "godot-world.auth.v1",
+		EventType: "godot_world.auth",
+		SchemaID:  "godot_world.auth.v1",
 		Payload:   payload,
 		Meta:      meta(dir, "auth", false),
 	}
@@ -288,9 +303,9 @@ func rpcEvent(fs *flowState, p *smPacket, node string) []*Event {
 	if node == "." {
 		switch p.nameID {
 		case 0:
-			return []*Event{dataRPC(fs, dir, "godot-world.data_request", "data_request", p)}
+			return []*Event{dataRPC(fs, dir, "godot_world.data_request", "data_request", p)}
 		case 1:
-			return []*Event{dataRPC(fs, dir, "godot-world.data_response", "data_response", p)}
+			return []*Event{dataRPC(fs, dir, "godot_world.data_response", "data_response", p)}
 		case 2:
 			return []*Event{dataPush(fs, dir, p)}
 		}
@@ -303,8 +318,8 @@ func rpcEvent(fs *flowState, p *smPacket, node string) []*Event {
 		case 0: // charge_new_instance(map_path, instance_id)
 			if len(p.args) >= 2 {
 				return []*Event{{
-					EventType: "godot-world.instance_charge",
-					SchemaID:  "godot-world.instance_charge.v1",
+					EventType: "godot_world.instance_charge",
+					SchemaID:  "godot_world.instance_charge.v1",
 					Payload:   map[string]any{"map_path": fmt.Sprintf("%v", p.args[0]), "instance_id": fmt.Sprintf("%v", p.args[1])},
 					Meta:      meta(dir, "charge_new_instance", true),
 				}}
@@ -321,7 +336,7 @@ func rpcEvent(fs *flowState, p *smPacket, node string) []*Event {
 	// InstanceClient / InstanceServer: ready_to_enter_instance / spawn_player / despawn_player.
 	if strings.Contains(node, "InstanceManager/") && p.nameID >= 0 && p.nameID <= 2 && len(p.byteOnly) == 0 {
 		names := []string{"despawn_player", "ready_to_enter_instance", "spawn_player"}
-		evType := "godot-world.instance_rpc"
+		evType := "godot_world.instance_rpc"
 		payload := map[string]any{"method": names[p.nameID]}
 		if id := instanceIDFromNode(node); id != "" {
 			payload["instance_id"] = id
@@ -369,8 +384,8 @@ func stateSyncRPC(fs *flowState, dir string, p *smPacket) []*Event {
 		if d, ok := reg.decodeBootstrap(payload); ok {
 			d["method"] = "on_bootstrap"
 			return []*Event{{
-				EventType: "godot-world.state_bootstrap",
-				SchemaID:  "godot-world.state_bootstrap.v1",
+				EventType: "godot_world.state_bootstrap",
+				SchemaID:  "godot_world.state_bootstrap.v1",
 				Payload:   d,
 				Meta:      meta(dir, "on_bootstrap", true),
 			}}
@@ -378,8 +393,8 @@ func stateSyncRPC(fs *flowState, dir string, p *smPacket) []*Event {
 	case 1: // on_client_delta (c2s)
 		if blocks, ok := reg.decodeDelta(payload); ok {
 			return []*Event{{
-				EventType: "godot-world.client_delta",
-				SchemaID:  "godot-world.client_delta.v1",
+				EventType: "godot_world.client_delta",
+				SchemaID:  "godot_world.client_delta.v1",
 				Payload:   map[string]any{"blocks": blocks, "count": len(blocks)},
 				Meta:      meta(dir, "on_client_delta", false),
 			}}
@@ -388,8 +403,8 @@ func stateSyncRPC(fs *flowState, dir string, p *smPacket) []*Event {
 		if d, ok := reg.decodeContainerBlock(payload); ok {
 			d["method"] = "on_props_bootstrap"
 			return []*Event{{
-				EventType: "godot-world.props_bootstrap",
-				SchemaID:  "godot-world.props_bootstrap.v1",
+				EventType: "godot_world.props_bootstrap",
+				SchemaID:  "godot_world.props_bootstrap.v1",
 				Payload:   d,
 				Meta:      meta(dir, "on_props_bootstrap", true),
 			}}
@@ -398,8 +413,8 @@ func stateSyncRPC(fs *flowState, dir string, p *smPacket) []*Event {
 		if d, ok := reg.decodeContainerBlock(payload); ok {
 			d["method"] = "on_props_delta"
 			return []*Event{{
-				EventType: "godot-world.props_delta",
-				SchemaID:  "godot-world.props_delta.v1",
+				EventType: "godot_world.props_delta",
+				SchemaID:  "godot_world.props_delta.v1",
 				Payload:   d,
 				Meta:      meta(dir, "on_props_delta", true),
 			}}
@@ -407,8 +422,8 @@ func stateSyncRPC(fs *flowState, dir string, p *smPacket) []*Event {
 	case 4: // on_state_delta (s2c)
 		if blocks, ok := reg.decodeDelta(payload); ok {
 			return []*Event{{
-				EventType: "godot-world.state_delta",
-				SchemaID:  "godot-world.state_delta.v1",
+				EventType: "godot_world.state_delta",
+				SchemaID:  "godot_world.state_delta.v1",
 				Payload:   map[string]any{"blocks": blocks, "count": len(blocks)},
 				Meta:      meta(dir, "on_state_delta", true),
 			}}
@@ -440,7 +455,7 @@ func dataRPC(fs *flowState, dir, evType, name string, p *smPacket) *Event {
 	if t, ok := payload["type"].(string); ok && t != "" {
 		msgName = t
 	}
-	isPush := evType == "godot-world.data_push"
+	isPush := evType == "godot_world.data_push"
 	return &Event{
 		EventType:      evType,
 		SchemaID:       evType + ".v1",
@@ -466,8 +481,8 @@ func dataPush(fs *flowState, dir string, p *smPacket) *Event {
 		msgName = t
 	}
 	return &Event{
-		EventType: "godot-world.data_push",
-		SchemaID:  "godot-world.data_push.v1",
+		EventType: "godot_world.data_push",
+		SchemaID:  "godot_world.data_push.v1",
 		Payload:   payload,
 		Meta:      meta(dir, msgName, true),
 	}
@@ -489,8 +504,8 @@ func genericRPC(fs *flowState, dir, node string, p *smPacket) *Event {
 		msgName = t
 	}
 	return &Event{
-		EventType: "godot-world.rpc",
-		SchemaID:  "godot-world.rpc.v1",
+		EventType: "godot_world.rpc",
+		SchemaID:  "godot_world.rpc.v1",
 		Payload:   payload,
 		Meta:      meta(dir, msgName, false),
 	}
@@ -516,4 +531,43 @@ func cappedHex(b []byte) string {
 		b = b[:8192]
 	}
 	return hex.EncodeToString(b)
+}
+
+// looksLikeHTTP reports whether the buffered bytes begin with an HTTP request
+// or response line — i.e. a WebSocket upgrade. Mid-connection captures start
+// with raw websocket frames (not HTTP), so they must skip the handshake gate.
+func looksLikeHTTP(raw []byte) bool {
+	if len(raw) < 4 {
+		return false
+	}
+	n := 16
+	if len(raw) < n {
+		n = len(raw)
+	}
+	s := string(raw[:n])
+	return strings.HasPrefix(s, "GET ") ||
+		strings.HasPrefix(s, "POST ") ||
+		strings.HasPrefix(s, "PUT ") ||
+		strings.HasPrefix(s, "OPTIONS ") ||
+		strings.HasPrefix(s, "HTTP/")
+}
+
+// wsResync returns the number of leading bytes to discard so the reassembly
+// buffer re-aligns on a binary WebSocket frame header. It returns 0 when the
+// buffer already starts on a valid-looking frame (an incomplete trailing frame
+// — wait for more bytes) or contains no plausible frame start.
+func wsResync(raw []byte) int {
+	if len(raw) < 2 {
+		return 0
+	}
+	// Already at a valid-looking frame header? Do not resync.
+	if raw[0]&0x0F == 2 && raw[1]&0x7F < 126 {
+		return 0
+	}
+	for i := 1; i < len(raw)-1; i++ {
+		if raw[i]&0x0F == 2 && raw[i+1]&0x7F < 126 {
+			return i
+		}
+	}
+	return 0
 }

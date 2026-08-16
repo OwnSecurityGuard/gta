@@ -257,8 +257,8 @@ func decodeRequestMsg(m *httpMsg) *Event {
 	payload["path"] = m.path
 
 	return &Event{
-		EventType: "godot-gateway.request",
-		SchemaID:  "godot-gateway.request.v1",
+		EventType: "godot_gateway.request",
+		SchemaID:  "godot_gateway.request.v1",
 		Payload:   payload,
 		Meta: map[string]any{
 			"direction": "client_to_server",
@@ -323,8 +323,8 @@ func buildResponseEvent(endpoint string, inferred bool, fields map[string]any, s
 	fields["status_code"] = statusCode
 
 	return &Event{
-		EventType: "godot-gateway.response",
-		SchemaID:  "godot-gateway.response.v1",
+		EventType: "godot_gateway.response",
+		SchemaID:  "godot_gateway.response.v1",
 		Payload:   fields,
 		Meta: map[string]any{
 			"direction": "server_to_client",

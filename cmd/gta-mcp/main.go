@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -1318,6 +1320,36 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 	}
 	slog.Info("list_decoded_data: queried events from db", "session_id", sessionID, "db_path", dbPath, "raw_event_count", len(eventRows))
 
+	// 批量查询原始包长度：收集所有 RawPacketID，一次 SELECT id,LENGTH(payload) 构建 map。
+	rawLenMap := make(map[string]int, len(eventRows))
+	if dbReader, ok := reader.(interface{ DB() *sql.DB }); ok {
+		var ids []string
+		for _, ev := range eventRows {
+			if ev.Context.RawPacketID != "" {
+				ids = append(ids, ev.Context.RawPacketID)
+			}
+		}
+		if len(ids) > 0 {
+			placeholder := strings.Repeat(",?", len(ids)-1)
+			rows, qErr := dbReader.DB().QueryContext(ctx,
+				"SELECT id, COALESCE(LENGTH(payload),0) FROM raw_packets WHERE id IN (?"+placeholder+")",
+				toAnySlice(ids)...,
+			)
+			if qErr != nil {
+				slog.Debug("batch raw_len lookup failed (non-fatal)", "error", qErr)
+			} else {
+				for rows.Next() {
+					var id string
+					var ln int
+					if err := rows.Scan(&id, &ln); err == nil {
+						rawLenMap[id] = ln
+					}
+				}
+				rows.Close()
+			}
+		}
+	}
+
 	matched := make([]map[string]any, 0)
 	for _, ev := range eventRows {
 		// 从 Event 构建 eventMap
@@ -1326,12 +1358,17 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 			dataContent = map[string]any{}
 		}
 
+		rawLen := 0
+		if ev.Context.RawPacketID != "" {
+			rawLen = rawLenMap[ev.Context.RawPacketID]
+		}
+
 		eventMap := map[string]any{
 			"id":         string(ev.Identity.ID),
 			"timestamp":  ev.Identity.Timestamp.Format(time.RFC3339),
 			"session_id": ev.Identity.SessionID,
 			"protocol":   string(ev.Identity.Type),
-			"raw_len":    0, // Event 不再保留 raw_len
+			"raw_len":    rawLen,
 			"data":       dataContent,
 		}
 
@@ -2278,17 +2315,56 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 		return errorResult(err), nil
 	}
 
-	// 返回所有会话（包括已停止的离线会话）
-	var out []map[string]any
+	// 用 pipeline 的 live sessions（gRPC）补全 running 会话的实时状态，
+	// 避免 gta-mcp 与 gta-pipeline 的 workDir 漂移、或 metadata.json 缺失时，
+	// running 会话被降级逻辑误标为 stopped（端口/插件/网卡也随之丢失）。
+	liveByID := map[string]map[string]any{}
+	if m.pipelineClient != nil {
+		if resp, lerr := m.pipelineClient.ListCaptureSessions(ctx, &pb.ListCaptureSessionsRequest{}); lerr == nil {
+			for _, s := range resp.GetSessions() {
+				liveByID[s.GetSessionId()] = map[string]any{
+					"state":  s.GetState(),
+					"port":   s.GetPort(),
+					"plugin": s.GetPlugin(),
+					"iface":  s.GetInterface(),
+				}
+			}
+		} else {
+			slog.Warn("list_all_sessions: live sessions unavailable, falling back to local metadata", "error", lerr)
+		}
+	}
+
+	// 返回所有会话（包括已停止的离线会话），running 的用 live 信息覆盖
+	out := []map[string]any{}
+	seen := map[string]bool{}
 	for _, sess := range sessions {
+		status := sess.Status
+		port := sess.Port
+		plugin := sess.Plugin
+		iface := sess.Interface
+		if live, ok := liveByID[sess.SessionID]; ok {
+			if state, _ := live["state"].(string); state != "" {
+				status = state
+			}
+			if p, _ := live["port"].(int32); p != 0 {
+				port = int(p)
+			}
+			if p, _ := live["plugin"].(string); p != "" {
+				plugin = p
+			}
+			if iv, _ := live["iface"].(string); iv != "" {
+				iface = iv
+			}
+		}
+		seen[sess.SessionID] = true
 		out = append(out, map[string]any{
 			"session_id":    sess.SessionID,
 			"started_at":    sess.StartedAt,
 			"stopped_at":    sess.StoppedAt,
-			"status":        sess.Status,
-			"port":          sess.Port,
-			"plugin":        sess.Plugin,
-			"interface":     sess.Interface,
+			"status":        status,
+			"port":          port,
+			"plugin":        plugin,
+			"interface":     iface,
 			"pcap_file":     sess.PCAPFile,
 			"raw_packets":   sess.RawPackets,
 			"events":        sess.Events,
@@ -2299,7 +2375,26 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 		})
 	}
 
-	slog.Info("list_all_sessions completed", "count", len(out), "total", len(sessions))
+	// 补上仅存在于 pipeline live、但 sessionMgr 未枚举到的会话（workDir 漂移兜底）
+	for id, live := range liveByID {
+		if seen[id] {
+			continue
+		}
+		status, _ := live["state"].(string)
+		port, _ := live["port"].(int32)
+		plugin, _ := live["plugin"].(string)
+		iface, _ := live["iface"].(string)
+		out = append(out, map[string]any{
+			"session_id": id,
+			"status":     status,
+			"port":       int(port),
+			"plugin":     plugin,
+			"interface":  iface,
+			"db_path":    m.sessionMgr.dbPath(id),
+		})
+	}
+
+	slog.Info("list_all_sessions completed", "count", len(out), "local", len(sessions), "live", len(liveByID))
 	return successResult(map[string]any{"count": len(out), "sessions": out}), nil
 }
 
@@ -2350,6 +2445,15 @@ func successResult(v any) *mcp.CallToolResult {
 func errorResult(err error) *mcp.CallToolResult {
 	b, _ := json.Marshal(map[string]any{"ok": false, "error": err.Error()})
 	return mcp.NewToolResultText(string(b))
+}
+
+// toAnySlice 将 []string 转为 []any，用于 SQL IN 查询的变参展开。
+func toAnySlice(ss []string) []any {
+	r := make([]any, len(ss))
+	for i := range ss {
+		r[i] = ss[i]
+	}
+	return r
 }
 
 // subscribeEvents 注册一个 SSE 订阅者，返回事件通道与退订函数。

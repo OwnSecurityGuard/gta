@@ -4,6 +4,11 @@ import { FilterBar } from "@/components/filter-bar";
 import { EventTable } from "@/components/event-table";
 import { RawPacketTable } from "@/components/raw-packet-table";
 import { PluginPanel } from "@/components/plugin-panel";
+import { AnalyticsPanel } from "@/components/analytics-panel";
+import { RelationshipPanel } from "@/components/relationship-panel";
+import { RunsPanel } from "@/components/runs-panel";
+import { SchemaExplorer } from "@/components/schema-explorer";
+import { TableBrowser } from "@/components/table-browser";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { StartCaptureDialog } from "@/components/start-capture-dialog";
 import { Button } from "@/components/ui/button";
@@ -12,7 +17,7 @@ import { RAW_DEBUG_ENABLED } from "@/lib/env";
 import { usePluginEventStream, useStopCapture, useSessions } from "@/hooks/use-mcp";
 import { toast } from "@/components/ui/toast";
 
-type ViewTab = "decoded" | "plugins" | "raw";
+type ViewTab = "decoded" | "analytics" | "relationship" | "runs" | "data" | "plugins" | "raw";
 
 /** 品牌标识：广播/信号图标，呼应"协议流量分析"。 */
 function BrandMark({ className }: { className?: string }) {
@@ -36,12 +41,19 @@ function BrandMark({ className }: { className?: string }) {
 
 const TABS: { id: ViewTab; label: string }[] = [
   { id: "decoded", label: "协议数据" },
+  { id: "analytics", label: "分析" },
+  { id: "relationship", label: "关系" },
+  { id: "runs", label: "行为" },
+  { id: "data", label: "数据探查" },
   { id: "plugins", label: "插件" },
   ...(RAW_DEBUG_ENABLED ? [{ id: "raw" as ViewTab, label: "原始包" }] : []),
 ];
 
 export default function App() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  // 与当前抓包会话联动的行为窗口（start_capture 成功后自动 begin，便于在「行为」Tab 直接查看）。
+  const [linkedRunId, setLinkedRunId] = useState<string | null>(null);
+  const [linkedRunSessionId, setLinkedRunSessionId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [activeTab, setActiveTab] = useState<ViewTab>("decoded");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -146,6 +158,14 @@ export default function App() {
         <SessionSidebar
           selectedSessionId={selectedSessionId}
           onSelectSession={handleSelectSession}
+          onDeleted={(id) => {
+            if (id === selectedSessionId) setSelectedSessionId(null);
+            // 被删会话若正联动某行为窗口，一并清除联动状态
+            if (id && id === linkedRunSessionId) {
+              setLinkedRunId(null);
+              setLinkedRunSessionId(null);
+            }
+          }}
         />
       </aside>
 
@@ -266,6 +286,21 @@ export default function App() {
               <EventTable sessionId={selectedSessionId} filter={filter} />
             </div>
           )}
+          {activeTab === "analytics" && <AnalyticsPanel sessionId={selectedSessionId} />}
+          {activeTab === "relationship" && <RelationshipPanel sessionId={selectedSessionId} />}
+          {activeTab === "runs" && (
+            <RunsPanel linkedRunId={linkedRunId} linkedSessionId={linkedRunSessionId} />
+          )}
+          {activeTab === "data" && (
+            <div className="flex h-full flex-col">
+              <div className="min-h-0 flex-1 border-b border-border">
+                <SchemaExplorer sessionId={selectedSessionId} />
+              </div>
+              <div className="min-h-0 flex-1">
+                <TableBrowser sessionId={selectedSessionId} />
+              </div>
+            </div>
+          )}
           {activeTab === "plugins" && <PluginPanel />}
           {activeTab === "raw" && (
             <div className="h-full overflow-auto p-4 gta-scroll">
@@ -288,6 +323,10 @@ export default function App() {
           setSelectedSessionId(sessionId);
           setFilter("");
           setActiveTab("decoded");
+        }}
+        onRunLinked={(runId, sessionId) => {
+          setLinkedRunId(runId);
+          setLinkedRunSessionId(sessionId);
         }}
       />
     </div>

@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { useSessions, useSetSessionPlugin, useListPlugins } from "@/hooks/use-mcp";
+import {
+  useSessions,
+  useSetSessionPlugin,
+  useListPlugins,
+  useSessionStatus,
+  useDeleteSession,
+} from "@/hooks/use-mcp";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -8,12 +14,25 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Dialog } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
-import { Activity, FileText, Wifi, RefreshCw, X, Inbox, AlertTriangle, RotateCw } from "lucide-react";
+import {
+  Activity,
+  FileText,
+  Wifi,
+  RefreshCw,
+  X,
+  Inbox,
+  AlertTriangle,
+  RotateCw,
+  Trash2,
+} from "lucide-react";
 import type { SessionInfo } from "@/types/session";
+import type { SessionStatusResult } from "@/types/session-extra";
 
 interface SessionSidebarProps {
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
+  /** 会话被删除后回调（用于清空选中态，避免后续查询打到已删除的会话） */
+  onDeleted?: (sessionId: string) => void;
 }
 
 /** 格式化数字，加千分位 */
@@ -83,14 +102,28 @@ function SessionItem({
   isSelected,
   onClick,
   onSwitch,
+  onDeleted,
+  liveStatus,
 }: {
   session: SessionInfo;
   isSelected: boolean;
   onClick: () => void;
   onSwitch?: (session: SessionInfo) => void;
+  onDeleted?: (sessionId: string) => void;
+  /** 仅对“当前选中会话”注入 get_session_status 实时态；其余为 undefined */
+  liveStatus?: SessionStatusResult | null;
 }) {
   const isRunning = session.status === "running";
   const hasStopped = !isRunning && !!session.stopped_at;
+
+  // 删除会话（破坏性）：二次确认后才真正调用。
+  const delSession = useDeleteSession();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // 选中会话优先展示实时态计数（packets_in / event_count / decode_errors）。
+  const liveEvents = liveStatus?.event_count ?? session.events;
+  const liveRaw = liveStatus?.raw_count ?? liveStatus?.packets_in ?? session.raw_packets;
+  const liveErrors = liveStatus?.decode_errors ?? session.decode_errors;
 
   // 来源：live 抓包用网卡名，文件回放用文件名
   const isFileReplay = !!session.pcap_file;
@@ -173,20 +206,21 @@ function SessionItem({
         </div>
       )}
 
-      {/* 底部统计 */}
+      {/* 底部统计（选中会话优先用实时态） */}
       <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground tabular-nums">
-        <span>{formatNumber(session.events)} events</span>
-        <span>{formatNumber(session.raw_packets)} packets</span>
-        {session.decode_errors > 0 && (
+        <span>{formatNumber(liveEvents)} events</span>
+        <span>{formatNumber(liveRaw)} packets</span>
+        {liveErrors > 0 && (
           <span className="text-destructive">
-            {formatNumber(session.decode_errors)} errors
+            {formatNumber(liveErrors)} errors
           </span>
         )}
+        {liveStatus && <span className="text-[11px] text-info">· 实时</span>}
       </div>
 
-      {/* 运行中：切换解码插件按钮（热更核心入口） */}
-      {isRunning && onSwitch && (
-        <div className="mt-2 flex justify-end">
+      {/* 操作行：运行中可切换插件；任何会话可删除（需二次确认） */}
+      <div className="mt-2 flex items-center justify-end gap-2">
+        {isRunning && onSwitch && (
           <Button
             size="sm"
             variant="outline"
@@ -200,7 +234,65 @@ function SessionItem({
             <RefreshCw className="h-3 w-3 mr-1" />
             切换插件
           </Button>
-        </div>
+        )}
+        {onDeleted && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-xs text-destructive hover:text-destructive"
+            title="删除会话"
+            aria-label="删除会话"
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmOpen(true);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        )}
+      </div>
+
+      {/* 删除确认对话框 */}
+      {confirmOpen && (
+        <Dialog
+          open
+          onClose={() => setConfirmOpen(false)}
+          icon={<Trash2 className="h-5 w-5" />}
+          title="删除会话"
+          description="该操作会删除会话及其全部数据（原始包、事件、状态变更与投影），且不可恢复。"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+                <X className="h-4 w-4" />
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={delSession.isPending}
+                onClick={() =>
+                  delSession.mutate(
+                    { sessionId: session.session_id },
+                    {
+                      onSuccess: () => {
+                        toast.success("会话已删除", session.session_id);
+                        setConfirmOpen(false);
+                        onDeleted?.(session.session_id);
+                      },
+                      onError: (err) => toast.error("删除失败", err.message),
+                    },
+                  )
+                }
+              >
+                {delSession.isPending ? "删除中…" : "确认删除"}
+              </Button>
+            </>
+          }
+        >
+          <div className="rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-muted-foreground break-all">
+            {session.session_id}
+          </div>
+        </Dialog>
       )}
     </div>
   );
@@ -209,8 +301,11 @@ function SessionItem({
 export function SessionSidebar({
   selectedSessionId,
   onSelectSession,
+  onDeleted,
 }: SessionSidebarProps) {
   const { data, isLoading, isError, error, refetch } = useSessions();
+  // 仅对当前选中会话拉取 get_session_status（5s 轮询），使其统计与状态点保持“实时”。
+  const liveStatus = useSessionStatus(selectedSessionId);
   const [switchTarget, setSwitchTarget] = useState<SessionInfo | null>(null);
 
   const sessions = data?.sessions ?? [];
@@ -278,6 +373,10 @@ export function SessionSidebar({
               isSelected={session.session_id === selectedSessionId}
               onClick={() => onSelectSession(session.session_id)}
               onSwitch={setSwitchTarget}
+              onDeleted={onDeleted}
+              liveStatus={
+                session.session_id === selectedSessionId ? (liveStatus.data ?? null) : null
+              }
             />
           ))}
         </div>

@@ -86,7 +86,7 @@ func (s *SQLiteStore) QueryEvents(ctx context.Context, sessionID string, limit, 
 		       causation_id, correlation_id, origin_id, context, payload
 		FROM events
 		WHERE session_id = ?
-		ORDER BY timestamp ASC
+		ORDER BY timestamp DESC
 	`
 	// limit<=0 视为"无限制"（与 applyLimitOffset 语义一致），
 	// 避免调用方传 limit=0 时生成 LIMIT 0 导致返回 0 行。
@@ -140,7 +140,7 @@ func (s *SQLiteStore) QueryEventsByType(ctx context.Context, sessionID, eventTyp
 		       causation_id, correlation_id, origin_id, context, payload
 		FROM events
 		WHERE session_id = ? AND type = ?
-		ORDER BY timestamp ASC
+		ORDER BY timestamp DESC
 	`
 	// limit<=0 视为"无限制"（与 applyLimitOffset 语义一致）。
 	query, args := applyLimitOffset(query, []any{sessionID, eventType}, limit, offset)
@@ -174,7 +174,7 @@ func (s *SQLiteStore) QueryEventsByCorrelation(ctx context.Context, correlationI
 		       causation_id, correlation_id, origin_id, context, payload
 		FROM events
 		WHERE correlation_id = ?
-		ORDER BY timestamp ASC
+		ORDER BY timestamp DESC
 	`
 	// limit<=0 视为"无限制"（与 applyLimitOffset 语义一致）。
 	query, args := applyLimitOffset(query, []any{correlationID}, limit, offset)

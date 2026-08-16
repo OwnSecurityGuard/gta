@@ -6,6 +6,11 @@ import {
   useDecodeRawPackets,
   useSessions,
   useListPlugins,
+  useCreatePlugin,
+  useBuildPlugin,
+  usePluginStatus,
+  useExplainPlugin,
+  usePluginManifest,
 } from "@/hooks/use-mcp";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,10 +18,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Dialog } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
-import { Power, Wifi, WifiOff, Activity, FlaskConical, Lock, Puzzle, AlertTriangle, RotateCw, X } from "lucide-react";
+import { Power, Wifi, WifiOff, Activity, FlaskConical, Lock, Puzzle, AlertTriangle, RotateCw, X, Hammer, FileCode2, ScrollText, Wrench } from "lucide-react";
 import type { RegisteredPlugin } from "@/types/registered-plugin";
 import type { SessionInfo } from "@/types/session";
 import type { TestPluginResult, TestEventLite } from "@/types/plugin-test";
+import type { BuildPluginResult, ExplainPluginResult } from "@/types/plugin-dev";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
 
 // 稳定的空数组引用：避免在 data 未加载时每次渲染生成新的 [] 引用，
@@ -486,6 +492,9 @@ export function PluginPanel() {
         </div>
       )}
 
+      {/* 插件开发平面（Developer Plane）：脚手架 / 编译 / 状态 / 归因 / manifest。 */}
+      <PluginDevSection dirPluginList={dirPluginList} />
+
       {/* 强制下线确认对话框 */}
       {confirmTarget && (
         <Dialog
@@ -528,6 +537,269 @@ export function PluginPanel() {
             {confirmTarget.instance_id}
           </div>
         </Dialog>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 插件开发平面（Developer Plane）UI：
+ * - 脚手架 create_plugin / 编译 build_plugin（结构化诊断）/ 状态 status_plugin /
+ *   归因 explain_plugin / manifest get_plugin_manifest。
+ * 与“已注册插件”不同，这里操作的是磁盘上的插件工程（开发态），不要求插件当前在线。
+ */
+function PluginDevSection({ dirPluginList }: { dirPluginList: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [devPlugin, setDevPlugin] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+
+  const [cName, setCName] = useState("");
+  const [cProtocol, setCProtocol] = useState("");
+  const [cHints, setCHints] = useState("");
+  const [cOutDir, setCOutDir] = useState("");
+
+  const create = useCreatePlugin();
+  const build = useBuildPlugin();
+  const status = usePluginStatus(devPlugin || null);
+  const manifest = usePluginManifest(devPlugin || null);
+  const explain = useExplainPlugin();
+
+  const [buildResult, setBuildResult] = useState<BuildPluginResult | null>(null);
+  const [explainResult, setExplainResult] = useState<ExplainPluginResult | null>(null);
+
+  useEffect(() => {
+    if (!devPlugin && dirPluginList.length > 0) setDevPlugin(dirPluginList[0]!);
+  }, [dirPluginList, devPlugin]);
+
+  function handleCreate() {
+    if (!cName || !cProtocol) return;
+    const hints = cHints
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    create.mutate(
+      { name: cName, protocol: cProtocol, hints, outputDir: cOutDir || undefined },
+      {
+        onSuccess: (res) => {
+          toast.success("插件脚手架已生成", `${cName} → ${res?.output_dir ?? ""}`);
+          setShowCreate(false);
+          setCName("");
+          setCProtocol("");
+          setCHints("");
+          setCOutDir("");
+        },
+        onError: (err) => toast.error("脚手架失败", err.message),
+      },
+    );
+  }
+
+  function handleBuild() {
+    if (!devPlugin) return;
+    setBuildResult(null);
+    build.mutate(
+      { name: devPlugin },
+      {
+        onSuccess: (res) => setBuildResult(res ?? null),
+        onError: (err) => toast.error("构建失败", err.message),
+      },
+    );
+  }
+
+  function handleExplain() {
+    if (!devPlugin) return;
+    setExplainResult(null);
+    explain.mutate(
+      { name: devPlugin },
+      {
+        onSuccess: (res) => setExplainResult(res ?? null),
+        onError: (err) => toast.error("归因失败", err.message),
+      },
+    );
+  }
+
+  const buildOk = (buildResult?.errors ?? []).length === 0;
+  const selInput =
+    "h-8 rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30";
+
+  return (
+    <div className="border-t">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-4 py-3 text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <Hammer className="h-3.5 w-3.5" />
+          插件开发平面
+          <Badge variant="outline" className="text-amber-600 border-amber-300">
+            Developer Plane
+          </Badge>
+        </span>
+        <span className="text-xs text-muted-foreground">{open ? "收起" : "展开"}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-3">
+          {/* 目标插件选择（来自插件目录） */}
+          <label className="text-xs text-muted-foreground flex flex-col gap-1">
+            目录内插件
+            <select
+              className={selInput + " w-full"}
+              value={devPlugin}
+              onChange={(e) => {
+                setDevPlugin(e.target.value);
+                setBuildResult(null);
+                setExplainResult(null);
+              }}
+            >
+              {dirPluginList.length === 0 ? (
+                <option value="">无插件工程</option>
+              ) : (
+                dirPluginList.map((pl) => <option key={pl} value={pl}>{pl}</option>)
+              )}
+            </select>
+          </label>
+
+          {/* 操作按钮行 */}
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => setShowCreate((v) => !v)}>
+              <FileCode2 className="h-3.5 w-3.5" />
+              创建插件
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleBuild} disabled={!devPlugin || build.isPending}>
+              <Hammer className="h-3.5 w-3.5" />
+              {build.isPending ? "构建中…" : "构建"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => status.refetch()} disabled={!devPlugin}>
+              <Activity className="h-3.5 w-3.5" />
+              状态
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleExplain} disabled={!devPlugin || explain.isPending}>
+              <Wrench className="h-3.5 w-3.5" />
+              归因
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => manifest.refetch()} disabled={!devPlugin}>
+              <ScrollText className="h-3.5 w-3.5" />
+              Manifest
+            </Button>
+          </div>
+
+          {/* 创建插件表单 */}
+          {showCreate && (
+            <div className="space-y-2 rounded-md border border-border p-3">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs text-muted-foreground flex flex-col gap-1">
+                  名称（kebab-case）
+                  <input className={selInput} value={cName} onChange={(e) => setCName(e.target.value)} placeholder="my-game-decoder" />
+                </label>
+                <label className="text-xs text-muted-foreground flex flex-col gap-1">
+                  协议
+                  <input className={selInput} value={cProtocol} onChange={(e) => setCProtocol(e.target.value)} placeholder="my_game" />
+                </label>
+                <label className="text-xs text-muted-foreground flex flex-col gap-1">
+                  匹配提示（逗号分隔，可选）
+                  <input className={selInput} value={cHints} onChange={(e) => setCHints(e.target.value)} placeholder="tcp,port:7000" />
+                </label>
+                <label className="text-xs text-muted-foreground flex flex-col gap-1">
+                  输出目录（可选）
+                  <input className={selInput} value={cOutDir} onChange={(e) => setCOutDir(e.target.value)} placeholder="默认 <plugins_dir>/<name>" />
+                </label>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setShowCreate(false)}>取消</Button>
+                <Button size="sm" onClick={handleCreate} disabled={!cName || !cProtocol || create.isPending}>
+                  {create.isPending ? "生成中…" : "生成脚手架"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* 构建结果 */}
+          {buildResult && (
+            <div className="space-y-1.5 rounded-md border border-border p-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className={buildOk ? "text-success" : "text-destructive"}>
+                  {buildOk ? "✓ 构建成功" : `✗ 构建失败（${buildResult.errors.length} 处错误）`}
+                </span>
+                <span className="font-mono text-muted-foreground">{buildResult.name}</span>
+              </div>
+              {buildResult.output && (
+                <pre className="max-h-40 overflow-auto gta-scroll rounded bg-muted/50 p-2 font-mono text-[11px]">
+                  {buildResult.output}
+                </pre>
+              )}
+              {!buildOk && (
+                <ul className="space-y-1">
+                  {buildResult.errors.map((e, i) => (
+                    <li key={i} className="font-mono text-destructive/90">
+                      {e.file}:{e.line}:{e.col} — {e.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* 状态（双态视图） */}
+          {status.data && (
+            <div className="space-y-1 rounded-md border border-border p-3 text-xs">
+              <p className="font-medium text-muted-foreground">双态视图 · {status.data.name}</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                <span>制品态：<b>{status.data.artifact.state}</b>{status.data.artifact.binary_stale ? "（二进制过期）" : ""}</span>
+                <span>运行时态：<b>{status.data.runtime.state}</b>{status.data.runtime.online ? " · 在线" : " · 离线"}</span>
+                <span>开发进程：{status.data.dev_process.launched ? `已启动 pid=${status.data.dev_process.pid ?? "?"}` : "未启动"}</span>
+                <span>
+                  上次尝试：{status.data.last_attempt.action ?? "—"}
+                  {typeof status.data.last_attempt.ok === "boolean" ? (status.data.last_attempt.ok ? " ✓" : " ✗") : ""}
+                </span>
+              </div>
+              {status.data.next_action?.tool && (
+                <p className="text-muted-foreground">
+                  建议下一步：<code className="font-mono">{status.data.next_action.tool}</code>
+                  {status.data.next_action.why ? ` — ${status.data.next_action.why}` : ""}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* 归因结果 */}
+          {explainResult && (
+            <div className="space-y-1.5 rounded-md border border-border p-3 text-xs">
+              <p className="font-medium text-muted-foreground">归因 · {explainResult.name}</p>
+              {explainResult.summary && <p className="text-foreground">{explainResult.summary}</p>}
+              {explainResult.findings.length === 0 ? (
+                <p className="text-muted-foreground">无归因发现。</p>
+              ) : (
+                explainResult.findings.map((f, i) => (
+                  <div key={i} className="rounded bg-muted/50 p-2">
+                    <div className="font-medium">{f.category}{f.rule_id ? ` · ${f.rule_id}` : ""}</div>
+                    <div className="mt-0.5 text-muted-foreground">原因：{f.why}</div>
+                    <div className="mt-0.5 text-success">修复：{f.fix}</div>
+                    {f.error && (
+                      <div className="mt-0.5 font-mono text-destructive/90">
+                        {f.error.file}:{f.error.line}:{f.error.col} — {f.error.message}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Manifest */}
+          {manifest.data?.manifest && (
+            <div className="rounded-md border border-border p-3">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">plugin.yaml · {manifest.data.name}</p>
+              <pre className="max-h-48 overflow-auto gta-scroll rounded bg-muted/50 p-2 font-mono text-[11px]">
+                {manifest.data.manifest}
+              </pre>
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground/80">
+            开发平面只操作磁盘上的插件工程，不要求插件当前在线；构建/归因结果可直接用于定位并修复解码器代码。
+          </p>
+        </div>
       )}
     </div>
   );

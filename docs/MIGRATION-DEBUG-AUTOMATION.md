@@ -72,13 +72,13 @@ State 层是"保留项"，与 Evidence/Rule 无关，因此不受 Phase 0 删除
 |----|----|----|
 | schema | ✅ | ✅ 保留 |
 | state | ✅ | ✅ 保留（baseline 投影） |
-| evidence | ✅ | ❌ 删除（host 侧已删，SDK 侧待删） |
-| rule | ✅ | ❌ 删除（host 侧已删，SDK 侧待删） |
+| evidence | ✅ | ❌ 删除（host/SDK 双侧已删） |
+| rule | ✅ | ❌ 删除（host/SDK 双侧已删） |
 
-**现状**：host 侧（gta 主仓）已完成 evidence/rule 的删除与工具面清理。
-**待办（Task #5，SDK 侧）**：在独立仓库 `gta-plugin-sdk` 中删除 `evidence/` + `rule/` 包，
-`contract.yaml` 收缩到 spec v（schema+state），`checker.go` 移除 `checkEvidence`/`checkRule`，
-并适配 godot 系列插件。SDK 与 gta 主仓零耦合，改动不影响主仓编译（已验证主仓 `go build -tags pcap ./...` 通过）。
+**已完成（Task #5，2026-08-22）**：独立仓库 `gta-plugin-sdk` 已删除 `evidence/` + `rule/` 包，
+`contract.yaml` 收缩到 `spec_version: 4`（schema+state），checker 移除 `checkEvidence`/`checkRule`，
+`event.Relation` → `event.TraceContext`。godot-gateway / godot-world 插件已适配并编译通过；
+SDK 已打 tag `v0.4.0` 并推送；宿主 `go.mod` 补 `replace` 指向本地 SDK。宿主 `go build -tags pcap ./...` 通过。
 
 ## 6. Phase 1 — Session 元数据与生命周期（本次完成）
 
@@ -138,7 +138,7 @@ Phase 3  Replay —— 自动回放 Session / Scenario
 Phase 4  MCP Agent —— AI 辅助调试闭环
 ```
 
-Contract 收缩（schema+state，SDK 侧 Task #5）作为 Phase 0 的收尾，可与 Phase 2 并行推进。
+Contract 收缩（schema+state，SDK 侧 Task #5）✅ 已完成（2026-08-22，tag v0.4.0）。Phase 0 全部收尾。
 
 ## 9. 验证状态
 
@@ -149,8 +149,6 @@ Contract 收缩（schema+state，SDK 侧 Task #5）作为 Phase 0 的收尾，�
 
 ## 10. 已知风险 / 后续
 
-- **SDK 侧四层→schema+state**（Task #5）尚未执行；godot 插件仍声明 evidence/rule 层，注册时 SDK checker
-  仍校验它们。主仓已不消费，故不影响运行，但需在 SDK 侧完成删除以保持概念一致。
 - **运行会话增量统计**：当前 counts 在 `finalizeTask` 落库；运行中会话在 `list_all_sessions` 下 counts 为 0
   直到停止。如需实时，可在 `GetStatus` 暴露 `task.Snapshot()`（已具备）。
 - `events` 表 `scenario_id` / `replay_id` 当前恒为空，待 Phase 2/3 填充。

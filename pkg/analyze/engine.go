@@ -33,7 +33,7 @@ func (e *Engine) Process(ctx context.Context, ev *event.Event) ([]event.Metric, 
 		"event":    ev,
 		"data":     data,
 		"identity": ev.Identity,
-		"relation": ev.Relation,
+		"trace": ev.Trace,
 		"context":  ev.Context,
 		"payload":  ev.Payload,
 	}

@@ -15,6 +15,15 @@ type eventScanner interface {
 	Scan(dest ...any) error
 }
 
+// eventSelectSuffix 返回 events 查询的 scenario/replay 列片段。
+// 旧库无此列时用 NULL 占位，保证 Scan 列数一致。
+func (s *SQLiteStore) eventSelectSuffix() string {
+	if s.traceCols {
+		return ", scenario_id, replay_id"
+	}
+	return ", NULL AS scenario_id, NULL AS replay_id"
+}
+
 // scanEvent 从一行查询结果构建 Event。
 func scanEvent(sc eventScanner) (*event.Event, error) {
 	var (
@@ -29,11 +38,14 @@ func scanEvent(sc eventScanner) (*event.Event, error) {
 		originID      sql.NullString
 		contextBytes  []byte
 		payloadBytes  []byte
+		scenarioID    sql.NullString
+		replayID      sql.NullString
 	)
 
 	if err := sc.Scan(
 		&id, &sessionID, &eventType, &schemaID, &source, &timestamp,
 		&causationID, &correlationID, &originID, &contextBytes, &payloadBytes,
+		&scenarioID, &replayID,
 	); err != nil {
 		return nil, fmt.Errorf("scan event: %w", err)
 	}
@@ -58,7 +70,7 @@ func scanEvent(sc eventScanner) (*event.Event, error) {
 			Source:    event.SourceID(source),
 			Timestamp: time.Unix(0, timestamp),
 		},
-		Relation: event.Relation{},
+		Trace: event.TraceContext{},
 		Context:  ctx,
 		Payload: event.Payload{
 			SchemaID: schemaID,
@@ -67,13 +79,19 @@ func scanEvent(sc eventScanner) (*event.Event, error) {
 	}
 
 	if causationID.Valid {
-		e.Relation.CausationID = event.EventID(causationID.String)
+		e.Trace.CausationID = event.EventID(causationID.String)
 	}
 	if correlationID.Valid {
-		e.Relation.CorrelationID = correlationID.String
+		e.Trace.CorrelationID = correlationID.String
 	}
 	if originID.Valid {
-		e.Relation.OriginID = event.EventID(originID.String)
+		e.Trace.OriginID = event.EventID(originID.String)
+	}
+	if scenarioID.Valid {
+		e.Identity.ScenarioID = scenarioID.String
+	}
+	if replayID.Valid {
+		e.Identity.ReplayID = replayID.String
 	}
 
 	return e, nil
@@ -93,7 +111,7 @@ func (s *SQLiteStore) QueryEventsDesc(ctx context.Context, sessionID string, lim
 func (s *SQLiteStore) queryEventsOrdered(ctx context.Context, sessionID string, limit, offset int, order string) ([]*event.Event, error) {
 	query := `
 		SELECT id, session_id, type, schema_id, source, timestamp,
-		       causation_id, correlation_id, origin_id, context, payload
+		       causation_id, correlation_id, origin_id, context, payload` + s.eventSelectSuffix() + `
 		FROM events
 		WHERE session_id = ?
 		ORDER BY timestamp ` + order + `
@@ -128,7 +146,7 @@ func (s *SQLiteStore) queryEventsOrdered(ctx context.Context, sessionID string, 
 func (s *SQLiteStore) GetEventByID(ctx context.Context, id string) (*event.Event, error) {
 	query := `
 		SELECT id, session_id, type, schema_id, source, timestamp,
-		       causation_id, correlation_id, origin_id, context, payload
+		       causation_id, correlation_id, origin_id, context, payload` + s.eventSelectSuffix() + `
 		FROM events
 		WHERE id = ?
 	`
@@ -147,7 +165,7 @@ func (s *SQLiteStore) GetEventByID(ctx context.Context, id string) (*event.Event
 func (s *SQLiteStore) QueryEventsByType(ctx context.Context, sessionID, eventType string, limit, offset int) ([]*event.Event, error) {
 	query := `
 		SELECT id, session_id, type, schema_id, source, timestamp,
-		       causation_id, correlation_id, origin_id, context, payload
+		       causation_id, correlation_id, origin_id, context, payload` + s.eventSelectSuffix() + `
 		FROM events
 		WHERE session_id = ? AND type = ?
 		ORDER BY timestamp DESC
@@ -181,7 +199,7 @@ func (s *SQLiteStore) QueryEventsByType(ctx context.Context, sessionID, eventTyp
 func (s *SQLiteStore) QueryEventsByCorrelation(ctx context.Context, correlationID string, limit, offset int) ([]*event.Event, error) {
 	query := `
 		SELECT id, session_id, type, schema_id, source, timestamp,
-		       causation_id, correlation_id, origin_id, context, payload
+		       causation_id, correlation_id, origin_id, context, payload` + s.eventSelectSuffix() + `
 		FROM events
 		WHERE correlation_id = ?
 		ORDER BY timestamp DESC

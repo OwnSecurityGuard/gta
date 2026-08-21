@@ -24,7 +24,7 @@ type capabilityDoc struct {
 
 func buildCapabilityCatalog() capabilityDoc {
 	return capabilityDoc{
-		Server: "game-traffic-analysis",
+		Server: "game-debug-automation",
 		Groups: []toolGroup{
 			{
 				Name:        "capture",
@@ -37,19 +37,11 @@ func buildCapabilityCatalog() capabilityDoc {
 			},
 			{
 				Name:        "query",
-				Description: "解码事件 / 状态 / 聚合 / 模式查询",
+				Description: "解码事件 / 状态 / 聚合 / 执行链查询",
 				Tools: []string{
 					"list_decoded_data", "list_state_changes",
 					"aggregate_query", "get_capture_schema",
 					"trace_protocol_flow", "query_capture_table",
-				},
-			},
-			{
-				Name:        "evidence",
-				Description: "语义证据图分析",
-				Tools: []string{
-					"query_evidence_graph", "trace_event_chain",
-					"analyze_protocol_patterns", "suggest_link_rules",
 				},
 			},
 			{
@@ -91,7 +83,7 @@ func buildCapabilityCatalog() capabilityDoc {
 		},
 		TypicalFlow: []string{
 			"接入新协议: get_plugin_dev_guide -> create_plugin -> build_plugin -> start_capture(plugin=...) -> activate_plugin -> verify_plugin -> get_capture_schema -> list_decoded_data",
-			"分析已有会话: list_all_sessions -> list_decoded_data / aggregate_query -> query_evidence_graph -> trace_event_chain",
+			"分析已有会话: list_all_sessions -> list_decoded_data / aggregate_query -> trace_protocol_flow",
 			"定位解码为空: status_plugin -> get_registry_addr -> sample_bytes_plugin -> explain_plugin",
 		},
 		Notes: []string{

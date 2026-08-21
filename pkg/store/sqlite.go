@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"gta/pkg/event"
 	"gta/pkg/schema"
@@ -19,6 +18,9 @@ type SQLiteStore struct {
 	db        *sql.DB
 	schemaReg *schema.Registry
 	readOnly  bool
+	// traceCols 表示 events 表是否含 scenario_id/replay_id 列
+	//（旧库无此列时读取侧用 NULL 占位，保持 Scan 列数一致）。
+	traceCols bool
 }
 
 // DB 返回底层的 *sql.DB，供外部（如 MCP handler）执行查询。
@@ -72,6 +74,7 @@ func (s *SQLiteStore) init() error {
 		if _, err := s.db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
 			return err
 		}
+		s.probeTraceCols()
 		return nil
 	}
 	schemaText := `
@@ -104,7 +107,9 @@ CREATE TABLE IF NOT EXISTS events (
     origin_id TEXT,
     context BLOB NOT NULL,
     payload BLOB NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    scenario_id TEXT,
+    replay_id TEXT
 );
 CREATE TABLE IF NOT EXISTS state_changes (
     id TEXT PRIMARY KEY,
@@ -148,53 +153,9 @@ CREATE TABLE IF NOT EXISTS event_index (
 	_, _ = s.db.Exec("ALTER TABLE state_changes ADD COLUMN before_resolved BOOLEAN NOT NULL DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE state_changes ADD COLUMN after_resolved BOOLEAN NOT NULL DEFAULT 0")
 
-	// 证据图表：以 session 为粒度写入，session_id 已由 capture.sqlite 隐式确定。
-	// 为支持 analysis_run 复现原则，analysis_run 字段预留但首阶段不建约束。
-	evidenceGraphDDL := `
-CREATE TABLE IF NOT EXISTS evidence_nodes (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    flow_id TEXT,
-    analysis_run TEXT,
-    timestamp INTEGER NOT NULL,
-    labels TEXT,
-    properties TEXT,
-    semantic TEXT
-);
-CREATE TABLE IF NOT EXISTS evidence_edges (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    source TEXT NOT NULL,
-    target TEXT NOT NULL,
-    type TEXT NOT NULL,
-    confidence REAL NOT NULL DEFAULT 1.0,
-    reason TEXT,
-    analysis_run TEXT,
-    properties TEXT,
-    strength TEXT,
-    method TEXT,
-    rule_id TEXT,
-    evidence_ids TEXT
-);`
-	if _, err := s.db.Exec(evidenceGraphDDL); err != nil {
-		return err
-	}
-
-	// Phase 3 迁移：为已有证据图表补齐 v1 字段列。
-	// 新表由上面的 CREATE TABLE 直接包含；此处仅对旧表幂等补齐，
-	// 列已存在时 SQLite 报 "duplicate column"，忽略即可。
-	for _, stmt := range []string{
-		"ALTER TABLE evidence_nodes ADD COLUMN semantic TEXT",
-		"ALTER TABLE evidence_edges ADD COLUMN strength TEXT",
-		"ALTER TABLE evidence_edges ADD COLUMN method TEXT",
-		"ALTER TABLE evidence_edges ADD COLUMN rule_id TEXT",
-		"ALTER TABLE evidence_edges ADD COLUMN evidence_ids TEXT",
-	} {
-		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
-			return fmt.Errorf("migrate evidence graph schema: %w", err)
-		}
-	}
+	// 迁移：为已存在的 events 表添加 scenario_id / replay_id 列（Scenario/Replay 前向兼容）
+	_, _ = s.db.Exec("ALTER TABLE events ADD COLUMN scenario_id TEXT")
+	_, _ = s.db.Exec("ALTER TABLE events ADD COLUMN replay_id TEXT")
 
 	// 索引：支持高效查询
 	indexes := []string{
@@ -212,12 +173,6 @@ CREATE TABLE IF NOT EXISTS evidence_edges (
 		"CREATE INDEX IF NOT EXISTS idx_event_index_session_time ON event_index(session_id, timestamp)",
 		"CREATE INDEX IF NOT EXISTS idx_event_index_flow ON event_index(session_id, flow_id, timestamp)",
 		"CREATE INDEX IF NOT EXISTS idx_event_index_correlation ON event_index(correlation_id)",
-		// evidence_graph 索引
-		"CREATE INDEX IF NOT EXISTS idx_evidence_nodes_session_kind ON evidence_nodes(session_id, kind)",
-		"CREATE INDEX IF NOT EXISTS idx_evidence_nodes_flow ON evidence_nodes(session_id, flow_id)",
-		"CREATE INDEX IF NOT EXISTS idx_evidence_edges_session ON evidence_edges(session_id)",
-		"CREATE INDEX IF NOT EXISTS idx_evidence_edges_source ON evidence_edges(source)",
-		"CREATE INDEX IF NOT EXISTS idx_evidence_edges_target ON evidence_edges(target)",
 	}
 	for _, idx := range indexes {
 		if _, err := s.db.Exec(idx); err != nil {
@@ -231,7 +186,30 @@ CREATE TABLE IF NOT EXISTS evidence_edges (
 	if _, err := s.db.Exec("PRAGMA synchronous=NORMAL;"); err != nil {
 		return err
 	}
+	s.probeTraceCols()
 	return nil
+}
+
+// probeTraceCols 探测 events 表是否含 scenario_id/replay_id 列。
+// 旧库无此列时读取侧用 NULL 占位，保证查询列数一致。
+func (s *SQLiteStore) probeTraceCols() {
+	rows, err := s.db.Query("PRAGMA table_info(events)")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return
+		}
+		if name == "scenario_id" {
+			s.traceCols = true
+			return
+		}
+	}
 }
 
 // ClearDecodedData 清空 events、state_changes 和 event_index 表（保留 raw_packets）。

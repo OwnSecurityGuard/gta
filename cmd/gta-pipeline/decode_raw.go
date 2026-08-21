@@ -7,10 +7,10 @@ import (
 	"net/netip"
 	"time"
 
-	"gta/pkg/analyze/semantic"
 	"gta/pkg/decode"
 	"gta/pkg/event"
 	"gta/pkg/internalipc/capturecontrol"
+	"gta/pkg/state"
 	"gta/pkg/store"
 )
 
@@ -167,12 +167,7 @@ func (s *pipelineService) DecodeRawPackets(ctx context.Context, req capturecontr
 	var pending []*event.Event
 	var enrichedSCs []store.EnrichedStateChange
 	var sinceFlush int
-	semanticCfg := semantic.DefaultConfig()
-	semanticCfg.TransactionClustering = &semantic.TransactionClusterConfig{
-		NewTransactionOnRequest: true,
-		MergeGap:               200 * time.Millisecond,
-	}
-	semanticEngine := semantic.NewEngine(semanticCfg, nil)
+	baseline := state.NewBaselineManager(nil)
 	flush := func() error {
 		if len(pending) == 0 {
 			return nil
@@ -212,22 +207,12 @@ func (s *pipelineService) DecodeRawPackets(ctx context.Context, req capturecontr
 				continue
 			}
 			pending = append(pending, ev)
-			scChanges, err := semanticEngine.Process(ev)
+			scChanges, err := baseline.Apply(ev, req.SessionID)
 			if err != nil {
-				logger.Warn("semantic analyze event", "event_id", ev.Identity.ID, "error", err)
+				logger.Warn("state projection", "event_id", ev.Identity.ID, "error", err)
 				continue
 			}
-			for _, esc := range scChanges {
-				enrichedSCs = append(enrichedSCs, store.EnrichedStateChange{
-					StateChange:    esc.StateChange,
-					EventID:        esc.EventID,
-					FlowID:         esc.FlowID,
-					Timestamp:      esc.Timestamp,
-					BeforeResolved: esc.BeforeResolved,
-					AfterResolved:  esc.AfterResolved,
-					EntityVersion:  esc.EntityVersion,
-				})
-			}
+			enrichedSCs = append(enrichedSCs, scChanges...)
 		}
 		decoded += int64(len(r.Events))
 		sinceFlush++

@@ -45,7 +45,7 @@ func TestDebug_TimeFormat(t *testing.T) {
 				Source:    "test",
 				Timestamp: now,
 			},
-			Relation: event.Relation{},
+			Trace: event.TraceContext{},
 			Context: event.EventContext{
 				FlowID:    "123",
 				Direction: "client_to_server",

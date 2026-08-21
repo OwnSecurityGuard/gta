@@ -205,7 +205,7 @@ func UnmarshalContextMsgpack(data []byte) (EventContext, error) {
 }
 
 // Event 是事件模型，遵循 Event Sourcing 原则：
-// Event = Identity + Relation + Context + Payload
+// Event = Identity + Trace + Context + Payload
 //
 // 核心原则：
 // 1. 不可变性（Immutable）：创建后不可修改
@@ -215,8 +215,8 @@ type Event struct {
 	// Identity 描述事件的身份信息
 	Identity Identity
 
-	// Relation 描述事件的因果关系
-	Relation Relation
+	// Trace 描述事件的执行链路上下文（前驱/关联/来源）
+	Trace TraceContext
 
 	// Context 描述事件的网络上下文
 	Context EventContext
@@ -230,7 +230,7 @@ type Event struct {
 func NewEvent(sessionID string, eventType EventType, schemaID string, source SourceID, payload Value, ctx EventContext) *Event {
 	return &Event{
 		Identity: NewIdentity(sessionID, eventType, schemaID, source),
-		Relation: Relation{},
+		Trace:    TraceContext{},
 		Context:  ctx,
 		Payload: Payload{
 			SchemaID: schemaID,
@@ -243,7 +243,7 @@ func NewEvent(sessionID string, eventType EventType, schemaID string, source Sou
 func NewEventWithTime(sessionID string, eventType EventType, schemaID string, source SourceID, payload Value, ts time.Time, ctx EventContext) *Event {
 	return &Event{
 		Identity: NewIdentityWithTime(sessionID, eventType, schemaID, source, ts),
-		Relation: Relation{},
+		Trace:    TraceContext{},
 		Context:  ctx,
 		Payload: Payload{
 			SchemaID: schemaID,
@@ -252,11 +252,11 @@ func NewEventWithTime(sessionID string, eventType EventType, schemaID string, so
 	}
 }
 
-// NewEventWithRelation 创建带有因果关系的 Event
-func NewEventWithRelation(sessionID string, eventType EventType, schemaID string, source SourceID, payload Value, relation Relation, ctx EventContext) *Event {
+// NewEventWithTrace 创建带有执行链路上下文的 Event
+func NewEventWithTrace(sessionID string, eventType EventType, schemaID string, source SourceID, payload Value, trace TraceContext, ctx EventContext) *Event {
 	return &Event{
 		Identity: NewIdentity(sessionID, eventType, schemaID, source),
-		Relation: relation,
+		Trace:    trace,
 		Context:  ctx,
 		Payload: Payload{
 			SchemaID: schemaID,
@@ -298,29 +298,29 @@ func (e *Event) Get(key string) (Value, bool) {
 	return e.Payload.Get(key)
 }
 
-// WithRelation 设置因果关系，返回新的 Event（不可变性）
-func (e *Event) WithRelation(relation Relation) *Event {
+// WithTrace 设置执行链路上下文，返回新的 Event（不可变性）
+func (e *Event) WithTrace(trace TraceContext) *Event {
 	return &Event{
 		Identity: e.Identity,
-		Relation: relation,
+		Trace:    trace,
 		Context:  e.Context,
 		Payload:  e.Payload,
 	}
 }
 
-// WithCausation 设置直接原因事件 ID，返回新的 Event
+// WithCausation 设置直接前驱事件 ID，返回新的 Event
 func (e *Event) WithCausation(causationID EventID) *Event {
-	return e.WithRelation(e.Relation.WithCausation(causationID))
+	return e.WithTrace(e.Trace.WithCausation(causationID))
 }
 
 // WithCorrelation 设置关联的业务流程 ID，返回新的 Event
 func (e *Event) WithCorrelation(correlationID string) *Event {
-	return e.WithRelation(e.Relation.WithCorrelation(correlationID))
+	return e.WithTrace(e.Trace.WithCorrelation(correlationID))
 }
 
 // WithOrigin 设置原始来源事件 ID，返回新的 Event
 func (e *Event) WithOrigin(originID EventID) *Event {
-	return e.WithRelation(e.Relation.WithOrigin(originID))
+	return e.WithTrace(e.Trace.WithOrigin(originID))
 }
 
 // ExtractStateChanges 从 Payload 的 _state_changes 字段提取状态变更。

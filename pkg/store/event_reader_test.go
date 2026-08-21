@@ -61,7 +61,7 @@ func TestSQLiteStore_QueryEventsV2(t *testing.T) {
 				Source:    "test",
 				Timestamp: now,
 			},
-			Relation: event.Relation{},
+			Trace: event.TraceContext{},
 			Payload: event.Payload{
 				SchemaID: "tcp.v1",
 				Value:    payload1,
@@ -76,7 +76,7 @@ func TestSQLiteStore_QueryEventsV2(t *testing.T) {
 				Source:    "test",
 				Timestamp: now.Add(time.Millisecond),
 			},
-			Relation: event.Relation{},
+			Trace: event.TraceContext{},
 			Payload: event.Payload{
 				SchemaID: "tcp.v1",
 				Value:    payload2,
@@ -91,7 +91,7 @@ func TestSQLiteStore_QueryEventsV2(t *testing.T) {
 				Source:    "test",
 				Timestamp: now.Add(2 * time.Millisecond),
 			},
-			Relation: event.Relation{},
+			Trace: event.TraceContext{},
 			Payload: event.Payload{
 				SchemaID: "udp.v1",
 				Value:    payload3,

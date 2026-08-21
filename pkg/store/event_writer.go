@@ -26,8 +26,9 @@ func (s *SQLiteStore) AppendEvents(ctx context.Context, events []*event.Event) e
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO events (
 			id, session_id, type, schema_id, source, timestamp,
-			causation_id, correlation_id, origin_id, context, payload, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			causation_id, correlation_id, origin_id, context, payload, created_at,
+			scenario_id, replay_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare stmt: %w", err)
@@ -52,16 +53,23 @@ func (s *SQLiteStore) AppendEvents(ctx context.Context, events []*event.Event) e
 		// 转换时间戳为 Unix 纳秒
 		timestamp := e.Identity.Timestamp.UnixNano()
 
-		// 处理可选的 Relation 字段
+		// 处理可选的 Trace 字段
 		var causationID, correlationID, originID sql.NullString
-		if e.Relation.CausationID != "" {
-			causationID = sql.NullString{String: string(e.Relation.CausationID), Valid: true}
+		if e.Trace.CausationID != "" {
+			causationID = sql.NullString{String: string(e.Trace.CausationID), Valid: true}
 		}
-		if e.Relation.CorrelationID != "" {
-			correlationID = sql.NullString{String: e.Relation.CorrelationID, Valid: true}
+		if e.Trace.CorrelationID != "" {
+			correlationID = sql.NullString{String: e.Trace.CorrelationID, Valid: true}
 		}
-		if e.Relation.OriginID != "" {
-			originID = sql.NullString{String: string(e.Relation.OriginID), Valid: true}
+		if e.Trace.OriginID != "" {
+			originID = sql.NullString{String: string(e.Trace.OriginID), Valid: true}
+		}
+		var scenarioID, replayID sql.NullString
+		if e.Identity.ScenarioID != "" {
+			scenarioID = sql.NullString{String: e.Identity.ScenarioID, Valid: true}
+		}
+		if e.Identity.ReplayID != "" {
+			replayID = sql.NullString{String: e.Identity.ReplayID, Valid: true}
 		}
 
 		_, err = stmt.ExecContext(ctx,
@@ -77,6 +85,8 @@ func (s *SQLiteStore) AppendEvents(ctx context.Context, events []*event.Event) e
 			contextBytes,
 			payloadBytes,
 			now,
+			scenarioID,
+			replayID,
 		)
 		if err != nil {
 			return fmt.Errorf("insert event[%d]: %w", i, err)
@@ -120,8 +130,8 @@ func (s *SQLiteStore) appendEventIndex(ctx context.Context, tx *sql.Tx, events [
 		if e.Context.Direction != "" {
 			direction = sql.NullString{String: e.Context.Direction, Valid: true}
 		}
-		if e.Relation.CorrelationID != "" {
-			correlationID = sql.NullString{String: e.Relation.CorrelationID, Valid: true}
+		if e.Trace.CorrelationID != "" {
+			correlationID = sql.NullString{String: e.Trace.CorrelationID, Valid: true}
 		}
 
 		_, err = stmt.ExecContext(ctx,

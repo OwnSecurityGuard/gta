@@ -281,7 +281,7 @@ func decodeIOsFromResult(r rawDecodeResult) []quality.DecodeIO {
 			EventType:  string(ev.Identity.Type),
 			SchemaID:   ev.Payload.SchemaID,
 			PayloadLen: 1, // 事件存在即代表响应带非空 payload
-			Correlated: ev.Relation.CorrelationID != "",
+			Correlated: ev.Trace.CorrelationID != "",
 		})
 	}
 	// 终结响应：承载原始字节供熵估计（不重复计入未知率）。

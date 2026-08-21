@@ -41,6 +41,15 @@ type Identity struct {
 
 	// Timestamp 是事件发生的时间
 	Timestamp time.Time
+
+	// ScenarioID 标记事件归属的测试场景（Scenario 模块，Phase 2 落地）。
+	// 普通抓包事件为空；由 Scenario 生成或标记的事件填写。
+	ScenarioID string
+
+	// ReplayID 标记事件由哪次回放产生（Replay 模块，Phase 3 落地）。
+	// 普通抓包事件为空；回放产生的所有事件填同一 ReplayID，
+	// 供 compare_sessions(真实 vs 回放) 使用。
+	ReplayID string
 }
 
 // 错误定义

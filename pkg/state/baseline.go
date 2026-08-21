@@ -1,14 +1,39 @@
-package semantic
+// Package state 实现插件 State 层的运行时投影：
+// 从事件 payload 的 _state_changes 声明中提取 StateChange，并维护实体基线
+// （before/after 富化），供 state_changes 投影表写入。
+//
+// 这是 Contract state 层的宿主侧运行时，与语义分析/证据图无关。
+package state
 
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"gta/pkg/event"
+	"gta/pkg/store"
 )
 
+// EntityKey 唯一确定一个实体基线的隔离上下文。
+// 同一实体在不同会话/流/账号间互不干扰。
+type EntityKey struct {
+	SessionID   string
+	FlowID      string
+	SubjectType string
+	SubjectID   string
+}
+
+// EntityBaseline 是某个实体在某一时刻的完整状态快照。
+type EntityBaseline struct {
+	Key        EntityKey
+	Version    int64
+	State      map[string]event.Value
+	FirstSeen  time.Time
+	LastSeen   time.Time
+	HasHistory bool
+}
+
 // BaselineStore 维护按上下文隔离的实体基线。
-// 实现必须保证：同一 EntityKey 在不同会话/流/账号间互不干扰。
 type BaselineStore interface {
 	// Get 查询实体基线；不存在时返回 (nil, false)。
 	Get(key EntityKey) (*EntityBaseline, bool)
@@ -53,7 +78,7 @@ type BaselineManager struct {
 	mu    sync.Mutex
 }
 
-// NewBaselineManager 创建基线管理器。
+// NewBaselineManager 创建基线管理器。store 为 nil 时使用内存实现。
 func NewBaselineManager(store BaselineStore) *BaselineManager {
 	if store == nil {
 		store = NewMemoryBaselineStore()
@@ -63,7 +88,7 @@ func NewBaselineManager(store BaselineStore) *BaselineManager {
 
 // Apply 将事件中的 StateChange 与当前基线对比，生成 EnrichedStateChange 并更新基线。
 // 无基线时 BeforeResolved 为 false，不会伪造旧值。
-func (bm *BaselineManager) Apply(ev *event.Event, sessionID string) ([]EnrichedStateChange, error) {
+func (bm *BaselineManager) Apply(ev *event.Event, sessionID string) ([]store.EnrichedStateChange, error) {
 	if ev == nil {
 		return nil, nil
 	}
@@ -81,7 +106,7 @@ func (bm *BaselineManager) Apply(ev *event.Event, sessionID string) ([]EnrichedS
 		flowID = extractFlowIDFromEvent(ev)
 	}
 
-	var result []EnrichedStateChange
+	var result []store.EnrichedStateChange
 	now := ev.Identity.Timestamp
 
 	for _, sc := range changes {
@@ -108,7 +133,7 @@ func (bm *BaselineManager) Apply(ev *event.Event, sessionID string) ([]EnrichedS
 			}
 		}
 
-		enriched := EnrichedStateChange{
+		enriched := store.EnrichedStateChange{
 			StateChange:    sc,
 			EventID:        ev.Identity.ID,
 			FlowID:         flowID,

@@ -101,7 +101,7 @@ func (s *SQLiteStore) MigrateLegacyEvents(ctx context.Context) (int, error) {
 				SchemaID:  protocol + ".v1",
 				Source:    event.SourceID(protocol),
 			},
-			Relation: event.Relation{},
+			Trace: event.TraceContext{},
 			Payload: event.Payload{
 				SchemaID: protocol + ".v1",
 				Value:    payloadValue,

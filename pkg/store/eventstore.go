@@ -53,17 +53,12 @@ type ProjectionWriter interface {
 	WriteMetrics(ctx context.Context, metrics []event.Metric) error
 	WriteStateChanges(ctx context.Context, sessionID string, events []*event.Event) error
 	WriteEnrichedStateChanges(ctx context.Context, sessionID string, changes []EnrichedStateChange) error
-	WriteEvidenceGraph(ctx context.Context, sessionID string, analysisRun string, nodes []EvidenceNodeRow, edges []EvidenceEdgeRow) error
 }
 
 // ProjectionReader 由 gta-mcp 使用，查询派生数据。
 type ProjectionReader interface {
 	QueryMetrics(ctx context.Context, q MetricQuery) ([]MetricRow, error)
 	QueryStateChanges(ctx context.Context, q StateChangeQuery) ([]StateChangeRow, error)
-	QueryEvidenceGraph(ctx context.Context, q EvidenceGraphQuery) (*EvidenceGraphResult, error)
-	QueryEvidenceEdges(ctx context.Context, q EvidenceEdgeQuery) ([]EvidenceEdgeRow, error)
-	QueryEvidenceNodesByIDs(ctx context.Context, sessionID string, ids []string) ([]EvidenceNodeRow, error)
-	QueryEventNodeID(ctx context.Context, sessionID string, sessionEventID string) (string, error)
 }
 
 // ===== 第 3 层：控制元数据 =====
@@ -185,67 +180,6 @@ type ColumnSchema struct {
 	Type string
 }
 
-// EvidenceNodeRow 是 evidence_nodes 表的一行。
-type EvidenceNodeRow struct {
-	ID          string `json:"id"`
-	SessionID   string `json:"session_id"`
-	Kind        string `json:"kind"`
-	FlowID      string `json:"flow_id,omitempty"`
-	AnalysisRun string `json:"analysis_run,omitempty"`
-	Timestamp   int64  `json:"timestamp"`            // unix nano
-	Labels      string `json:"labels,omitempty"`     // JSON
-	Properties  string `json:"properties,omitempty"` // JSON
-	// Semantic 是事件节点的语义投影（Phase 2 SemanticProjector 输出），以 JSON 存储。
-	Semantic string `json:"semantic,omitempty"` // JSON *SemanticEvent
-}
-
-// EvidenceEdgeRow 是 evidence_edges 表的一行。
-type EvidenceEdgeRow struct {
-	ID          string  `json:"id"`
-	SessionID   string  `json:"session_id"`
-	Source      string  `json:"source"`
-	Target      string  `json:"target"`
-	Type        string  `json:"type"`
-	Confidence  float64 `json:"confidence"`
-	Reason      string  `json:"reason,omitempty"`
-	AnalysisRun string  `json:"analysis_run,omitempty"`
-	Properties  string  `json:"properties,omitempty"` // JSON
-	// v1 结构化字段（Phase 3 新增）：与 Confidence 分离，保证 Evidence 可解释、可溯源。
-	Strength    string `json:"strength,omitempty"`     // EvidenceStrength (observed/derived/inferred)
-	Method      string `json:"method,omitempty"`       // EvidenceMethod (plugin/correlation/name_pattern/...)
-	RuleID      string `json:"rule_id,omitempty"`      // 关联的规则 ID（如 naming pattern）
-	EvidenceIDs string `json:"evidence_ids,omitempty"` // JSON []string，支撑该关系的底层证据
-}
-
-// EvidenceGraphQuery 查询证据图。
-type EvidenceGraphQuery struct {
-	SessionID     string
-	NodeKind      string
-	FlowID        string
-	EdgeType      string
-	MinConfidence float64
-	RootNodeID    string // 从该节点开始扩展邻接子图
-	MaxDepth      int    // 邻接扩展最大深度（0=不限制）
-	Limit         int
-	Offset        int
-}
-
-// EvidenceGraphResult 是证据图的查询结果。
-type EvidenceGraphResult struct {
-	Nodes []EvidenceNodeRow `json:"nodes"`
-	Edges []EvidenceEdgeRow `json:"edges"`
-}
-
-// EvidenceEdgeQuery 按方向查询证据图边，用于节点链式追踪。
-type EvidenceEdgeQuery struct {
-	SessionID string
-	Source    string // 按 source 过滤（可选，与 Target 至少填一个）
-	Target    string // 按 target 过滤（可选）
-	EdgeType  string
-	Limit     int
-	Offset    int
-}
-
 // ===== 控制元数据类型 =====
 
 // SessionMeta 是会话生命周期元数据（control metadata，非事件数据）。
@@ -268,8 +202,8 @@ type SessionMeta struct {
 	Extra        map[string]any `json:"extra,omitempty"`
 
 	// ManifestSnapshot 是会话创建时的插件 manifest 快照（plugin.yaml 原文）。
-	// 用于 MCP 层查询插件声明的 Schema/State/Evidence/Rule 四层契约声明，
-	// 使 Agent 无需连接插件即可了解会话的语义契约能力。
+	// 用于 MCP 层查询插件声明的 Schema/State 契约声明，
+	// 使 Agent 无需连接插件即可了解会话的契约能力。
 	// 空字符串表示会话创建时未获取到 manifest（如插件未注册）。
 	ManifestSnapshot string `json:"manifest_snapshot,omitempty"`
 }

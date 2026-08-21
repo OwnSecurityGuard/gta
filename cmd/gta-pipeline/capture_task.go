@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -10,11 +9,9 @@ import (
 	"time"
 
 	"github.com/google/gopacket/pcap"
-	"github.com/google/uuid"
 
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
-	"gta/pkg/analyze/semantic"
 	"gta/pkg/capture"
 	"gta/pkg/capture/pcapfile"
 	"gta/pkg/capture/pcaplive"
@@ -24,6 +21,7 @@ import (
 	"gta/pkg/internalipc/capturecontrol"
 	"gta/pkg/plugin"
 	"gta/pkg/schema"
+	"gta/pkg/state"
 	"gta/pkg/store"
 )
 
@@ -134,17 +132,17 @@ func (t *captureTask) run() {
 	// engine 需提前声明（flush 闭包引用），稍后在 dispatcher 创建后赋值。
 	// 早退路径（无 tcp 插件/dispatcher 错误）下 engine 为 nil，flush 需 nil guard。
 	var (
-		source         capture.Source
-		engine         *analyze.Engine
-		semanticEngine *semantic.Engine
-		raws           []event.Packet
-		events         []*event.Event
-		enrichedSCs    []store.EnrichedStateChange
-		metrics        []event.Metric
-		rawCount       int64
-		eventCount     int64
-		metricCount    int64
-		decodeErrors   int64
+		source       capture.Source
+		engine       *analyze.Engine
+		baseline     *state.BaselineManager
+		raws         []event.Packet
+		events       []*event.Event
+		enrichedSCs  []store.EnrichedStateChange
+		metrics      []event.Metric
+		rawCount     int64
+		eventCount   int64
+		metricCount  int64
+		decodeErrors int64
 	)
 
 	// flush 是闭包，捕获 source 和局部计数器，每次调用后更新 t.statsSnap。
@@ -218,15 +216,6 @@ func (t *captureTask) run() {
 		fctx, fcancel := context.WithTimeout(context.Background(), 10*time.Second)
 		flush(fctx, true)
 		fcancel()
-
-		// 持久化证据图：语义引擎只能在内存构建，session 结束时一次性写入
-		if semanticEngine != nil {
-			gctx, gcancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := t.writeEvidenceGraph(gctx, semanticEngine.Graph()); err != nil {
-				t.logger.Error("write evidence graph", "error", err)
-			}
-			gcancel()
-		}
 
 		t.state.Store(int32(capture.StateClosed))
 
@@ -306,12 +295,7 @@ func (t *captureTask) run() {
 		}
 	}
 	engine = analyze.NewEngine(t.rules, t.logger)
-	semanticCfg := semantic.DefaultConfig()
-	semanticCfg.TransactionClustering = &semantic.TransactionClusterConfig{
-		NewTransactionOnRequest: true,
-		MergeGap:                200 * time.Millisecond,
-	}
-	semanticEngine = semantic.NewEngine(semanticCfg, nil)
+	baseline = state.NewBaselineManager(nil)
 
 	sources, err := openCaptureSources(t.ctx, t.iface, t.port, t.pcapFile, t.liveCfg)
 	if err != nil {
@@ -388,22 +372,12 @@ func (t *captureTask) run() {
 				t.logger.Debug("decoded packet v2", "event_id", ev.Identity.ID, "event_type", ev.Identity.Type, "session", ev.Identity.SessionID)
 				events = append(events, ev)
 
-				// 语义分析：基线解析 + 证据图关系生成
-				scChanges, err := semanticEngine.Process(ev)
+				// State 层投影：从 _state_changes 提取并做 before/after 基线富化
+				scChanges, err := baseline.Apply(ev, t.sessionID)
 				if err != nil {
-					t.logger.Error("semantic analyze event", "event_id", ev.Identity.ID, "error", err)
+					t.logger.Error("state projection", "event_id", ev.Identity.ID, "error", err)
 				} else {
-					for _, esc := range scChanges {
-						enrichedSCs = append(enrichedSCs, store.EnrichedStateChange{
-							StateChange:    esc.StateChange,
-							EventID:        esc.EventID,
-							FlowID:         esc.FlowID,
-							Timestamp:      esc.Timestamp,
-							BeforeResolved: esc.BeforeResolved,
-							AfterResolved:  esc.AfterResolved,
-							EntityVersion:  esc.EntityVersion,
-						})
-					}
+					enrichedSCs = append(enrichedSCs, scChanges...)
 				}
 
 				ms, err := engine.Process(t.ctx, ev)
@@ -565,58 +539,6 @@ func closeCaptureSources(sources []capture.Source) {
 	for _, src := range sources {
 		_ = src.Close()
 	}
-}
-
-// writeEvidenceGraph 将语义引擎累积的证据图转换为 store 行并持久化。
-func (t *captureTask) writeEvidenceGraph(ctx context.Context, g *semantic.EvidenceGraph) error {
-	if g == nil {
-		return nil
-	}
-
-	var nodes []store.EvidenceNodeRow
-	var edges []store.EvidenceEdgeRow
-
-	for _, n := range g.Nodes {
-		labelsJSON, _ := json.Marshal(n.Labels)
-		propsJSON, _ := json.Marshal(n.Properties)
-		var semanticJSON string
-		if n.Semantic != nil {
-			if b, err := json.Marshal(n.Semantic); err == nil {
-				semanticJSON = string(b)
-			}
-		}
-		nodes = append(nodes, store.EvidenceNodeRow{
-			ID:         n.ID,
-			SessionID:  n.SessionID,
-			Kind:       string(n.Kind),
-			FlowID:     n.FlowID,
-			Timestamp:  n.Timestamp.UnixNano(),
-			Labels:     string(labelsJSON),
-			Properties: string(propsJSON),
-			Semantic:   semanticJSON,
-		})
-	}
-
-	for _, e := range g.Edges {
-		propsJSON, _ := json.Marshal(e.Properties)
-		evidenceIDsJSON, _ := json.Marshal(e.EvidenceIDs)
-		edges = append(edges, store.EvidenceEdgeRow{
-			ID:          uuid.NewString(),
-			SessionID:   t.sessionID,
-			Source:      e.Source,
-			Target:      e.Target,
-			Type:        string(e.Type),
-			Confidence:  e.Confidence,
-			Reason:      e.Reason,
-			Properties:  string(propsJSON),
-			Strength:    string(e.Strength),
-			Method:      string(e.Method),
-			RuleID:      e.RuleID,
-			EvidenceIDs: string(evidenceIDsJSON),
-		})
-	}
-
-	return t.sqliteStore.WriteEvidenceGraph(ctx, t.sessionID, t.sessionID, nodes, edges)
 }
 
 // mergePacketSources 把多个 capture source 的 packet channel 合并成一个。

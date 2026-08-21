@@ -114,7 +114,7 @@ func TestDispatcherV2Protocol(t *testing.T) {
 	if ev.Identity.Type != "http.request" {
 		t.Errorf("expected event type 'http.request', got '%s'", ev.Identity.Type)
 	}
-	if ev.Relation.CorrelationID != "correlation-456" {
-		t.Errorf("expected correlation_id 'correlation-456', got '%s'", ev.Relation.CorrelationID)
+	if ev.Trace.CorrelationID != "correlation-456" {
+		t.Errorf("expected correlation_id 'correlation-456', got '%s'", ev.Trace.CorrelationID)
 	}
 }

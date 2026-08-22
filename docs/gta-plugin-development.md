@@ -164,14 +164,14 @@ meta:
   description: HTTP protocol decoder
 ```
 
-### 3.1 语义契约声明（Semantic Contract v1，四层）
+### 3.1 语义契约声明（Semantic Contract v1，两层）
 
-> 宿主在**插件注册时**会跑六层声明校验（runtime/schema/state/evidence/rule），error 级违规直接拒绝注册；
+> 宿主在**插件注册时**会跑两层声明校验（schema/state），error 级违规直接拒绝注册；
 > `verify_plugin` 还会逐事件校验 payload 与声明 schema 的符合度。声明写错不会再静默通过。
 > 完整规范见 SDK `docs/plugin-semantic-contract-v1.md`。
 
 manifest 在基础字段之外可声明语义契约。`contract:` 块声明契约版本，`capabilities:` 打开对应层，
-随后 `schemas` / `states` / `evidence` / `rules` 四段声明插件能产出什么：
+随后 `schemas` / `states` 两段声明插件能产出什么：
 
 ```yaml
 api_version: gta.decoder/v2
@@ -187,8 +187,6 @@ capabilities:
   decode: true
   schema: true
   state: true        # 打开后 states 声明必填、_state_changes 参与校验
-  evidence: false
-  rules: false
 
 schemas:
   - id: game.player.v1
@@ -212,13 +210,10 @@ states:
 |----|--------|------|-----------|
 | Schema | `schemas[]` | payload 字段类型/语义/查询位；`get_capture_schema` 与事件校验的真源 | 事件 `schema_id` + payload |
 | State | `states[]` | 实体状态投影白名单（subject/path） | payload 保留键 `_state_changes` |
-| Evidence | `evidence[]` | 可产出的证据语义与强度区间 | payload 保留键 `_evidence` |
-| Rule | `rules[]` | 插件领域规则（id 非 `gta.` 前缀），供归因引用 | manifest 声明本身 |
 
 - `schema_id` 必须在 `schemas` 中声明，否则 verify 报 `gta.schema.undeclared`。
 - `event_type` / `schema_id` 不得使用保留前缀 `gta.`。
 - 声明了 `state: true` 时，`_state_changes` 的 `subject_type` / `path` 必须落在 `states[]` 白名单内。
-- 声明了 `evidence: true` 时，插件只能产出 `observation` / `derivation`（`assessment` 由宿主产出）。
 - 旧式 `indexable_fields` 仍可解析，会升格为对应字段的 `queryable + alias`（向后兼容）。
 
 ---

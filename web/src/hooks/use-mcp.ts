@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { mcpClient } from "@/lib/mcp-client";
 import type { ListSessionsResult } from "@/types/session";
 import type { ListDecodedDataResult, CaptureSchemaResult } from "@/types/event";
+import type { SessionTimelineResult } from "@/types/timeline";
 import type { ListRawPacketsResult } from "@/types/raw-packet";
 import type { ListPluginsResult, DecodeRawPacketsResult } from "@/types/decode";
 import type {
@@ -13,12 +14,7 @@ import type {
   StopCaptureResult,
 } from "@/types/registered-plugin";
 import type { TestPluginResult, TestPluginVars } from "@/types/plugin-test";
-import type { AggregateQueryResult, AnalyzePatternsResult } from "@/types/analytics";
-import type {
-  EvidenceGraphResult,
-  TraceEventChainResult,
-  SuggestLinkRulesResult,
-} from "@/types/evidence";
+import type { AggregateQueryResult } from "@/types/analytics";
 import type {
   SessionStatusResult,
   ListInterfacesResult,
@@ -277,92 +273,25 @@ export function useAggregateQuery(expression: string, sessionId: string | null) 
   });
 }
 
-/** analyze_protocol_patterns：协议模式分析（流/消息类型/相关性/状态变更/证据图/方向）。 */
-export function useAnalyzePatterns(sessionId: string | null) {
-  return useQuery({
-    queryKey: ["patterns", sessionId],
-    queryFn: () =>
-      mcpClient.callTool<AnalyzePatternsResult>("analyze_protocol_patterns", {
-        session_id: sessionId ?? undefined,
-      }),
-    enabled: !!sessionId,
-    staleTime: 30_000,
-  });
-}
+// ===== 会话时间线（执行链 / 请求-响应因果树）=====
 
-// ===== 关系（证据图 / 因果链 / 链路规则）=====
-
-/** query_evidence_graph：查询语义证据图（节点 + 边）。 */
-export function useEvidenceGraph(
+/** get_session_timeline：构建整 session 的 request/response 因果树（TraceContext 执行链）。 */
+export function useSessionTimeline(
   sessionId: string | null,
-  options: {
-    nodeKind?: string;
-    edgeType?: string;
-    flowId?: string;
-    minConfidence?: number;
-    rootNodeId?: string;
-    maxDepth?: number;
-    limit?: number;
-    offset?: number;
-  },
+  options: { limit?: number; offset?: number },
 ) {
-  const { nodeKind, edgeType, flowId, minConfidence, rootNodeId, maxDepth, limit, offset } = options;
+  const { limit, offset } = options;
   return useQuery({
-    queryKey: ["evidenceGraph", sessionId, options],
+    queryKey: ["sessionTimeline", sessionId, options],
     queryFn: () =>
-      mcpClient.callTool<EvidenceGraphResult>("query_evidence_graph", {
+      mcpClient.callTool<SessionTimelineResult>("get_session_timeline", {
         session_id: sessionId ?? undefined,
-        node_kind: nodeKind || undefined,
-        edge_type: edgeType || undefined,
-        flow_id: flowId || undefined,
-        min_confidence: minConfidence,
-        root_node_id: rootNodeId || undefined,
-        max_depth: maxDepth,
-        limit: limit ?? 200,
+        limit: limit ?? 500,
         offset: offset ?? 0,
       }),
     enabled: !!sessionId,
     staleTime: 15_000,
-  });
-}
-
-/** trace_event_chain：追踪某事件/节点的完整上下游证据链。 */
-export function useTraceEventChain(
-  sessionId: string | null,
-  options: { eventId?: string; nodeId?: string; maxDepth?: number; minConfidence?: number },
-) {
-  const { eventId, nodeId, maxDepth, minConfidence } = options;
-  return useQuery({
-    queryKey: ["traceChain", sessionId, options],
-    queryFn: () =>
-      mcpClient.callTool<TraceEventChainResult>("trace_event_chain", {
-        session_id: sessionId ?? undefined,
-        event_id: eventId || undefined,
-        node_id: nodeId || undefined,
-        max_depth: maxDepth ?? 5,
-        min_confidence: minConfidence ?? 0.5,
-      }),
-    enabled: !!sessionId && (!!eventId || !!nodeId),
-    staleTime: 15_000,
-  });
-}
-
-/** suggest_link_rules：基于证据图自动生成链路规则建议。 */
-export function useSuggestLinkRules(
-  sessionId: string | null,
-  minConfidence = 0.6,
-  minOccurrences = 3,
-) {
-  return useQuery({
-    queryKey: ["linkRules", sessionId, minConfidence, minOccurrences],
-    queryFn: () =>
-      mcpClient.callTool<SuggestLinkRulesResult>("suggest_link_rules", {
-        session_id: sessionId ?? undefined,
-        min_confidence: minConfidence,
-        min_occurrences: minOccurrences,
-      }),
-    enabled: !!sessionId,
-    staleTime: 30_000,
+    refetchInterval: sessionId ? 5000 : false,
   });
 }
 
@@ -515,7 +444,7 @@ export function useRunStatus(runId: string | null) {
   });
 }
 
-/** trace_protocol_flow：构建一次行为的时序证据链。 */
+/** trace_protocol_flow：构建一次行为的时序执行链路。 */
 export function useTraceProtocolFlow() {
   return useMutation({
     mutationFn: (vars: { runId: string; flowId: string; featureName: string }) =>

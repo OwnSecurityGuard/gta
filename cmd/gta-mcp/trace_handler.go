@@ -9,7 +9,7 @@ import (
 	mcp "github.com/mark3labs/mcp-go/mcp"
 )
 
-// handleTraceProtocolFlow 构建一次操作的时序证据链。
+// handleTraceProtocolFlow 构建一次操作的时序执行链路。
 func (m *mcpCapture) handleTraceProtocolFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if m.runRegistry == nil {
 		return errorResult(fmt.Errorf("run registry not initialized")), nil

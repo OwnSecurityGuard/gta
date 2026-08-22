@@ -49,7 +49,7 @@ type SessionTimeline struct {
 
 // handleGetSessionTimeline 构建一次抓包会话的完整时序树（request/response 拓扑）。
 //
-// 与 trace_protocol_flow（基于 run + flow 的细粒度证据链）不同，本工具面向整 session，
+// 与 trace_protocol_flow（基于 run + flow 的细粒度执行链路）不同，本工具面向整 session，
 // 直接从 events 表按 TraceContext 组装因果树，是"抓一次游戏：看到完整流程"的 MVP 视图。
 func (m *mcpCapture) handleGetSessionTimeline(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	sessionID := req.GetString("session_id", "")

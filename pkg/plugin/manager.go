@@ -155,7 +155,7 @@ func (s *RegistryServer) Register(ctx context.Context, req *pb.RegisterRequest) 
 	if err := CheckManifestVersion(m); err != nil {
 		return nil, fmt.Errorf("version check: %w", err)
 	}
-	// 3.5 语义契约声明期校验（Semantic Contract v1 六层：runtime/schema/state/evidence/rule）。
+	// 3.5 语义契约声明期校验（Semantic Contract v1 两层：schema/state）。
 	//     error 级违规拒绝注册；warn 级放行但记日志，让插件作者能在 plugin.verify 看到全量报告。
 	if report := sdkcontract.NewPluginChecker().Check(m); report != nil {
 		if report.HasErrors() {

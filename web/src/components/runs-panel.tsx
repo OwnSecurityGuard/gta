@@ -129,7 +129,7 @@ export function RunsPanel({
       <EmptyState
         icon={<Flag className="h-5 w-5" />}
         title="行为窗口（Runs）"
-        hint="标记一次用户操作窗口，随后用 begin/end/status/trace_protocol_flow 关联抓包数据、构建时序证据链。注意：本工具只记录窗口本身，不会自动开始抓包；但通过「开始抓包」启动会话时，系统会自动开启一个联动窗口（reuse_existing 模式复用同一 session），无需手动 begin。"
+        hint="标记一次用户操作窗口，随后用 begin/end/status/trace_protocol_flow 关联抓包数据、构建时序链路。注意：本工具只记录窗口本身，不会自动开始抓包；但通过「开始抓包」启动会话时，系统会自动开启一个联动窗口（reuse_existing 模式复用同一 session），无需手动 begin。"
       />
 
       {/* 联动提示：由「开始抓包」自动开启的窗口 */}
@@ -139,7 +139,7 @@ export function RunsPanel({
           <span>
             已与抓包会话 <span className="font-mono">{linkedSessionId}</span> 联动
             {linkedRunId && <> · 窗口 <span className="font-mono">{linkedRunId}</span></>}
-            。下方「窗口状态」「构建时序证据链」已自动载入。
+            。下方「窗口状态」「构建时序链路」已自动载入。
           </span>
         </div>
       )}
@@ -238,7 +238,7 @@ export function RunsPanel({
         <section>
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
             <GitBranch className="h-4 w-4 text-primary" />
-            构建时序证据链
+            构建时序链路
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">

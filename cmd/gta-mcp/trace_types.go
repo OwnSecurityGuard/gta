@@ -27,7 +27,7 @@ type RequestResponsePair struct {
 	PairRule string // "msg_name_suffix" | "direction_temporal" | "unpaired"
 }
 
-// TraceStep 是证据链的一步。
+// TraceStep 是执行链路的一步。
 type TraceStep struct {
 	StepID        string           `json:"step_id"`
 	RequestMsgID  int64            `json:"request_msg_id"`

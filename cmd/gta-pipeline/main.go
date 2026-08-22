@@ -22,6 +22,7 @@ import (
 	pb "gta/pkg/internalipc/proto"
 	"gta/pkg/logging"
 	"gta/pkg/plugin"
+	protocolconfig "gta/pkg/protocol/config"
 	"gta/pkg/store"
 
 	"google.golang.org/grpc"
@@ -30,6 +31,7 @@ import (
 func main() {
 	workDir := flag.String("workdir", ".", "working directory")
 	rulesPath := flag.String("rules", "", "rules.yaml path")
+	protocolPath := flag.String("protocol", "", "protocol.yaml path (Protocol Behavior Resolver)")
 	controlPath := flag.String("control", "", "control.sqlite path (default: <workdir>/control.sqlite)")
 	// 默认走 TCP 端口（:9091 注册, :9888 控制），兼容 Windows / 跨机器。
 	controlAddr := flag.String("control-addr", ":9888", "CaptureControl gRPC 监听地址（默认 :9888）")
@@ -85,6 +87,16 @@ func main() {
 		}
 	}
 
+	// Protocol Behavior Resolver：可选。未配置 --protocol 时默认为空，事件不做语义富化。
+	var protocolCfg *protocolconfig.File
+	if *protocolPath != "" {
+		protocolCfg, err = protocolconfig.Load(*protocolPath)
+		if err != nil {
+			slog.Error("load protocol config", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	// RegistryServer：被动接受插件注册，插件进程由外部编排（systemd/脚本）独立启动。
 	registry := plugin.NewRegistryServer(10)
 	defer registry.Close()
@@ -110,7 +122,7 @@ func main() {
 		}
 	}()
 
-	engine := newPipelineService(absWorkDir, controlStore, registry, rules, *registryAddr)
+	engine := newPipelineService(absWorkDir, controlStore, registry, rules, protocolCfg, *registryAddr)
 
 	// CaptureControl gRPC server：供 gta-mcp / gta-trace 调用。
 	// 默认 :8088（TCP），可通过 -control-addr 覆盖。

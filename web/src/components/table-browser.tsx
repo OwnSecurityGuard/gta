@@ -11,8 +11,6 @@ const TABLES = [
   "state_changes",
   "aggregated_metrics",
   "event_index",
-  "evidence_nodes",
-  "evidence_edges",
   "plugin_debug_access",
 ];
 

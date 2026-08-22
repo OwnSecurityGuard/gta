@@ -5,7 +5,7 @@ import { EventTable } from "@/components/event-table";
 import { RawPacketTable } from "@/components/raw-packet-table";
 import { PluginPanel } from "@/components/plugin-panel";
 import { AnalyticsPanel } from "@/components/analytics-panel";
-import { RelationshipPanel } from "@/components/relationship-panel";
+import { TimelinePanel } from "@/components/timeline-panel";
 import { RunsPanel } from "@/components/runs-panel";
 import { SchemaExplorer } from "@/components/schema-explorer";
 import { TableBrowser } from "@/components/table-browser";
@@ -17,9 +17,9 @@ import { RAW_DEBUG_ENABLED } from "@/lib/env";
 import { usePluginEventStream, useStopCapture, useSessions } from "@/hooks/use-mcp";
 import { toast } from "@/components/ui/toast";
 
-type ViewTab = "decoded" | "analytics" | "relationship" | "runs" | "data" | "plugins" | "raw";
+type ViewTab = "decoded" | "analytics" | "timeline" | "runs" | "data" | "plugins" | "raw";
 
-/** 品牌标识：广播/信号图标，呼应"协议流量分析"。 */
+/** 品牌标识：广播/信号图标，呼应"游戏调试自动化"。 */
 function BrandMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 36 36" className={className} role="img" aria-label="GTA 标识">
@@ -42,7 +42,7 @@ function BrandMark({ className }: { className?: string }) {
 const TABS: { id: ViewTab; label: string }[] = [
   { id: "decoded", label: "协议数据" },
   { id: "analytics", label: "分析" },
-  { id: "relationship", label: "关系" },
+  { id: "timeline", label: "时间线" },
   { id: "runs", label: "行为" },
   { id: "data", label: "数据探查" },
   { id: "plugins", label: "插件" },
@@ -150,7 +150,7 @@ export default function App() {
           <div className="min-w-0">
             <p className="text-sm font-semibold leading-tight gta-gradient-text">GTA</p>
             <p className="truncate text-[11px] leading-tight text-muted-foreground">
-              协议流量分析
+              Game Debug Automation
             </p>
           </div>
         </div>
@@ -287,7 +287,7 @@ export default function App() {
             </div>
           )}
           {activeTab === "analytics" && <AnalyticsPanel sessionId={selectedSessionId} />}
-          {activeTab === "relationship" && <RelationshipPanel sessionId={selectedSessionId} />}
+          {activeTab === "timeline" && <TimelinePanel sessionId={selectedSessionId} />}
           {activeTab === "runs" && (
             <RunsPanel linkedRunId={linkedRunId} linkedSessionId={linkedRunSessionId} />
           )}

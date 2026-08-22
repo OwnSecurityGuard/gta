@@ -18,6 +18,7 @@ import (
 	"gta/pkg/logging"
 	"gta/pkg/plugin"
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
+	protocolconfig "gta/pkg/protocol/config"
 	"gta/pkg/store"
 )
 
@@ -27,6 +28,7 @@ type pipelineService struct {
 	controlStore *store.ControlStore
 	registry     *plugin.RegistryServer
 	rules        []*analyze.CompiledRule
+	protocolCfg  *protocolconfig.File // 可选：Protocol Behavior Resolver 配置
 	workDir      string
 	logger       *slog.Logger // 进程级 logger，带 component=pipeline_service
 
@@ -39,12 +41,13 @@ type pipelineService struct {
 }
 
 // newPipelineService 构造 pipelineService，不启动任何会话。
-func newPipelineService(workDir string, controlStore *store.ControlStore, registry *plugin.RegistryServer, rules []*analyze.CompiledRule, registryAddr string) *pipelineService {
+func newPipelineService(workDir string, controlStore *store.ControlStore, registry *plugin.RegistryServer, rules []*analyze.CompiledRule, protocolCfg *protocolconfig.File, registryAddr string) *pipelineService {
 	return &pipelineService{
 		workDir:      workDir,
 		controlStore: controlStore,
 		registry:     registry,
 		rules:        rules,
+		protocolCfg:  protocolCfg,
 		logger:       logging.With("component", "pipeline_service"),
 		registryAddr: registryAddr,
 		tasks:        make(map[string]*captureTask),
@@ -113,7 +116,7 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 
 	startTime := time.Now()
 
-	// 获取插件 manifest 快照，用于 MCP 层查询四层契约声明（Schema/State/Evidence/Rule）。
+	// 获取插件 manifest 快照，用于 MCP 层查询两层契约声明（Schema/State）。
 	var manifestSnapshot string
 	if manifestBytes, err := s.registry.GetPluginManifest(req.Plugin); err == nil && len(manifestBytes) > 0 {
 		manifestSnapshot = string(manifestBytes)
@@ -152,6 +155,7 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 		reresolve:   make(chan struct{}, 1),
 		registry:    s.registry,
 		rules:       s.rules,
+		protocolCfg: s.protocolCfg,
 		logger:      s.logger.With("session_id", sessionID),
 		ctx:         sessionCtx,
 		cancel:      cancel,

@@ -103,7 +103,7 @@ func (s *pipelineService) Verify(ctx context.Context, req capturecontrol.VerifyR
 	}
 
 	if manifest != nil {
-		// 声明期六层校验（runtime/schema/state/evidence/rule）一并并入报告。
+		// 声明期两层校验（runtime/schema/state）一并并入报告。
 		sem.addReport(sdkcontract.NewPluginChecker().Check(manifest))
 	}
 
@@ -353,7 +353,7 @@ func (c *semCollector) addReport(r *sdkcontract.Report) {
 	}
 }
 
-// checkEvent 把单条解码事件转为 SDK Draft 并跑 event/schema/state/evidence 层校验。
+// checkEvent 把单条解码事件转为 SDK Draft 并跑 event/schema/state 层校验。
 // gta event.Value 与 SDK event.Value 的 MsgPack wire 格式一致，经序列化互转即可。
 func (c *semCollector) checkEvent(m *sdk.Manifest, ev *event.Event) {
 	if ev == nil {

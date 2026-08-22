@@ -1,0 +1,56 @@
+# protocol.yaml — Protocol Behavior Resolver 配置
+#
+# 设计原则：只解决两个问题——
+#   1. 这条消息是什么（identity / role / delivery）
+#   2. 它和其他消息的通信关系（correlation / error）
+#
+# 字段提取一律使用 gjson 表达式（expr），不引入复杂规则语言。
+# 避免把本文件变成"万能 JSON 规则文件"。
+
+message:
+  id:
+    expr: "header.cmd"
+
+  definitions:
+    - value: 1001
+      name: LoginRequest
+      role: request
+
+    - value: 1002
+      name: LoginResponse
+      role: response
+
+    - value: 2001
+      name: PlayerNotify
+      role: push
+
+# Request/Response 关联：请求与响应各用独立 expr，因为两者路径往往不同。
+correlation:
+  rules:
+    - name: rpc_seq
+      request:
+        expr: "body.seq"
+      response:
+        expr: "body.seq"
+
+# push 识别：命中任一规则即视为 push（无需 message 定义也能补充识别）。
+push:
+  rules:
+    - name: notify_by_cmd
+      when:
+        expr: "header.cmd"
+        equals:
+          - 2001
+
+    - name: seq_zero
+      when:
+        expr: "body.seq"
+        equals: 0
+
+# error：code.expr 提取错误码，命中 success.values 视为成功。
+error:
+  code:
+    expr: "body.error_code"
+  success:
+    values:
+      - 0

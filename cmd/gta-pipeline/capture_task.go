@@ -20,6 +20,9 @@ import (
 	"gta/pkg/internalipc"
 	"gta/pkg/internalipc/capturecontrol"
 	"gta/pkg/plugin"
+	protocolconfig "gta/pkg/protocol/config"
+	protocolcorrelation "gta/pkg/protocol/correlation"
+	protocolresolver "gta/pkg/protocol/resolver"
 	"gta/pkg/schema"
 	"gta/pkg/state"
 	"gta/pkg/store"
@@ -48,6 +51,11 @@ type captureTask struct {
 	registry *plugin.RegistryServer
 	rules    []*analyze.CompiledRule
 	logger   *slog.Logger // 带 session_id 等上下文字段的 logger
+
+	// Protocol Behavior Resolver（可选）：protocolCfg 非空时在 Start 时构建。
+	protocolCfg     *protocolconfig.File
+	protocolResolver *protocolresolver.ProtocolResolver
+	corrStore        *protocolcorrelation.Store
 
 	// 生命周期（atomic，无锁）
 	state atomic.Int32 // capture.State 的 int32 值
@@ -87,6 +95,16 @@ type taskStats struct {
 func (t *captureTask) Start() error {
 	if !t.state.CompareAndSwap(int32(capture.StateCreated), int32(capture.StateRunning)) {
 		return internalipc.ErrAlreadyStarted
+	}
+	if t.protocolCfg != nil {
+		r, err := protocolresolver.New(t.protocolCfg)
+		if err != nil {
+			t.state.Store(int32(capture.StateClosed))
+			return fmt.Errorf("build protocol resolver: %w", err)
+		}
+		t.protocolResolver = r
+		t.corrStore = protocolcorrelation.New(0)
+		t.logger.Info("protocol resolver enabled")
 	}
 	go t.run()
 	return nil
@@ -370,6 +388,8 @@ func (t *captureTask) run() {
 					continue
 				}
 				t.logger.Debug("decoded packet v2", "event_id", ev.Identity.ID, "event_type", ev.Identity.Type, "session", ev.Identity.SessionID)
+				// Protocol Behavior Resolver：把 JSON 解释为通信语义（identity/role/correlation/delivery/error）。
+				t.enrichProtocol(ev)
 				events = append(events, ev)
 
 				// State 层投影：从 _state_changes 提取并做 before/after 基线富化

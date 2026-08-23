@@ -266,9 +266,9 @@ export function ProxyConfigDialog({ open, onClose }: ProxyConfigDialogProps) {
               }}
             >
               <option value="">仅抓原始包（不解码）</option>
-              {pluginOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
+              {pluginOptions.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
                 </option>
               ))}
             </select>

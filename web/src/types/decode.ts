@@ -1,7 +1,15 @@
-/** list_plugins 返回的完整响应 */
+/** list_plugins 返回的单个插件条目 */
+export interface PluginInfo {
+  name: string;
+  binary: string;
+  dir: string;
+}
+
+/** list_plugins 返回的完整响应（plugins 为插件对象数组，非字符串数组） */
 export interface ListPluginsResult {
   ok: boolean;
-  plugins: string[];
+  plugins: PluginInfo[];
+  count?: number;
   warning?: string;
 }
 

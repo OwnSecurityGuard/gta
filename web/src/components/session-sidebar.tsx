@@ -457,8 +457,8 @@ function SwitchPluginDialog({
               <option value="">无可用插件</option>
             ) : (
               plugins.map((pl) => (
-                <option key={pl} value={pl}>
-                  {pl}
+                <option key={pl.name} value={pl.name}>
+                  {pl.name}
                 </option>
               ))
             )}

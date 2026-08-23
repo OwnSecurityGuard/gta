@@ -23,13 +23,14 @@ import type { RegisteredPlugin } from "@/types/registered-plugin";
 import type { SessionInfo } from "@/types/session";
 import type { TestPluginResult, TestEventLite } from "@/types/plugin-test";
 import type { BuildPluginResult, ExplainPluginResult } from "@/types/plugin-dev";
+import type { PluginInfo } from "@/types/decode";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
 
 // 稳定的空数组引用：避免在 data 未加载时每次渲染生成新的 [] 引用，
 // 否则以它为依赖的 useEffect 会无限重渲染（Maximum update depth exceeded）。
 const EMPTY_PLUGINS: RegisteredPlugin[] = [];
 const EMPTY_SESSIONS: SessionInfo[] = [];
-const EMPTY_STRINGS: string[] = [];
+const EMPTY_PLUGIN_INFOS: PluginInfo[] = [];
 
 /** 格式化为 HH:mm:ss（last_heartbeat 为 unix 秒） */
 function fmtClock(unix: number): string {
@@ -104,13 +105,13 @@ export function PluginPanel() {
   const [decodeSession, setDecodeSession] = useState("");
   const [decodePlugin, setDecodePlugin] = useState("");
   const sessions = sessionsData?.sessions ?? EMPTY_SESSIONS;
-  const dirPluginList = dirPlugins?.plugins ?? EMPTY_STRINGS;
+  const dirPluginList = dirPlugins?.plugins ?? EMPTY_PLUGIN_INFOS;
 
   useEffect(() => {
     if (!decodeSession && sessions.length > 0) setDecodeSession(sessions[0]!.session_id);
   }, [sessions, decodeSession]);
   useEffect(() => {
-    if (!decodePlugin && dirPluginList.length > 0) setDecodePlugin(dirPluginList[0]!);
+    if (!decodePlugin && dirPluginList.length > 0) setDecodePlugin(dirPluginList[0]!.name);
   }, [dirPluginList, decodePlugin]);
 
   // ===== 测试插件 状态（常驻，不依赖 raw-debug）=====
@@ -466,7 +467,7 @@ export function PluginPanel() {
               {dirPluginList.length === 0 ? (
                 <option value="">无插件</option>
               ) : (
-                dirPluginList.map((pl) => <option key={pl} value={pl}>{pl}</option>)
+                dirPluginList.map((pl) => <option key={pl.name} value={pl.name}>{pl.name}</option>)
               )}
             </select>
             <Button
@@ -548,7 +549,7 @@ export function PluginPanel() {
  *   归因 explain_plugin / manifest get_plugin_manifest。
  * 与“已注册插件”不同，这里操作的是磁盘上的插件工程（开发态），不要求插件当前在线。
  */
-function PluginDevSection({ dirPluginList }: { dirPluginList: string[] }) {
+function PluginDevSection({ dirPluginList }: { dirPluginList: PluginInfo[] }) {
   const [open, setOpen] = useState(false);
   const [devPlugin, setDevPlugin] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -568,7 +569,7 @@ function PluginDevSection({ dirPluginList }: { dirPluginList: string[] }) {
   const [explainResult, setExplainResult] = useState<ExplainPluginResult | null>(null);
 
   useEffect(() => {
-    if (!devPlugin && dirPluginList.length > 0) setDevPlugin(dirPluginList[0]!);
+    if (!devPlugin && dirPluginList.length > 0) setDevPlugin(dirPluginList[0]!.name);
   }, [dirPluginList, devPlugin]);
 
   function handleCreate() {
@@ -655,7 +656,7 @@ function PluginDevSection({ dirPluginList }: { dirPluginList: string[] }) {
               {dirPluginList.length === 0 ? (
                 <option value="">无插件工程</option>
               ) : (
-                dirPluginList.map((pl) => <option key={pl} value={pl}>{pl}</option>)
+                dirPluginList.map((pl) => <option key={pl.name} value={pl.name}>{pl.name}</option>)
               )}
             </select>
           </label>

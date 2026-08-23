@@ -168,7 +168,7 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
   // 插件列表加载后默认选第一个
   useEffect(() => {
     if (!selectedPlugin && plugins.length > 0) {
-      setSelectedPlugin(plugins[0]!);
+      setSelectedPlugin(plugins[0]!.name);
     }
   }, [plugins, selectedPlugin]);
 
@@ -280,7 +280,7 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
               <option value="">无可用插件</option>
             ) : (
               plugins.map((p) => (
-                <option key={p} value={p}>{p}</option>
+                <option key={p.name} value={p.name}>{p.name}</option>
               ))
             )}
           </select>

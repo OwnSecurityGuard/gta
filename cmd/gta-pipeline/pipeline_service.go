@@ -13,6 +13,7 @@ import (
 
 	"gta/pkg/analyze"
 	"gta/pkg/capture"
+	"gta/pkg/config"
 	"gta/pkg/internalipc"
 	"gta/pkg/internalipc/capturecontrol"
 	"gta/pkg/logging"
@@ -38,6 +39,17 @@ type pipelineService struct {
 
 	mu    sync.RWMutex
 	tasks map[string]*captureTask
+
+	// 代理抓包服务器常驻管理（proxyMu 保护）：
+	// proxyCfg 当前生效配置、proxyPath proxy.json 路径、proxySessionID 常驻代理会话 id、
+	// spawnAgent 是否自动拉起 agent、agentBin agent 二进制路径、agentProc 当前 agent 子进程。
+	proxyMu        sync.Mutex
+	proxyCfg       config.ProxyServerConfig
+	proxyPath      string
+	proxySessionID string
+	spawnAgent     bool
+	agentBin       string
+	agentProc      *agentProcess
 }
 
 // newPipelineService 构造 pipelineService，不启动任何会话。
@@ -87,6 +99,7 @@ func (s *pipelineService) removeTask(sessionID string) (*captureTask, bool) {
 func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.StartSessionRequest) (capturecontrol.StartSessionResult, error) {
 	var iface, pcapFile, sourceName string
 	var liveCfg *capturecontrol.LiveConfig
+	var mobileCfg *capturecontrol.MobileConfig
 	switch {
 	case req.File != nil && req.File.Path != "":
 		pcapFile = req.File.Path
@@ -98,6 +111,9 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 		iface = req.Live.Device
 		sourceName = "pcap-live"
 		liveCfg = req.Live
+	case req.Mobile != nil:
+		sourceName = "mobile"
+		mobileCfg = req.Mobile
 	default:
 		return capturecontrol.StartSessionResult{}, internalipc.ErrSourceEmpty
 	}
@@ -151,6 +167,7 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 		pcapFile:    pcapFile,
 		sourceName:  sourceName,
 		liveCfg:     liveCfg,
+		mobileCfg:   mobileCfg,
 		start:       startTime,
 		reresolve:   make(chan struct{}, 1),
 		registry:    s.registry,

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"gta/pkg/capture"
 	"gta/pkg/event"
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/schema"
@@ -132,6 +133,10 @@ func (d *Dispatcher) decodeV2Locked(ctx context.Context, pkt event.Packet) ([]*e
 	}
 	flowID := fmt.Sprintf("%d", FlowIDFromEndpoints(pkt.Src.String(), pkt.Dst.String(), pkt.Protocol))
 	direction := inferDirection(pkt.Src.Port(), pkt.Dst.Port(), d.serverPort)
+	// 代理抓包上下文：移动代理在 Packet.Metadata 携带 conn_id 与 source，
+	// 透传到每个解码事件的 EventContext，供 Connections 页面与 Capture Context 使用。
+	connID, _ := pkt.Metadata["conn_id"].(string)
+	source, _ := pkt.Metadata[capture.MetaSource].(string)
 
 	req := &pb.DecodeRequest{
 		SessionId:    d.sessionID,
@@ -168,7 +173,7 @@ func (d *Dispatcher) decodeV2Locked(ctx context.Context, pkt event.Packet) ([]*e
 		if resp.Done {
 			p := d.pending[inputID]
 			delete(d.pending, inputID)
-			return d.convertResultsToEvents(req, p.results), nil
+			return d.convertResultsToEvents(req, p.results, connID, source), nil
 		}
 
 		d.pending[inputID].results = append(d.pending[inputID].results, resp)
@@ -176,7 +181,7 @@ func (d *Dispatcher) decodeV2Locked(ctx context.Context, pkt event.Packet) ([]*e
 }
 
 // convertResultsToEvents 将解码结果批量转换为 Event，处理 schema 校验和因果关系。
-func (d *Dispatcher) convertResultsToEvents(req *pb.DecodeRequest, results []*pb.DecodeResponseV2) []*event.Event {
+func (d *Dispatcher) convertResultsToEvents(req *pb.DecodeRequest, results []*pb.DecodeResponseV2, connID, source string) []*event.Event {
 	var events []*event.Event
 	for i, r := range results {
 		if r.Error != "" {
@@ -203,6 +208,8 @@ func (d *Dispatcher) convertResultsToEvents(req *pb.DecodeRequest, results []*pb
 			RawPacketID:    req.PacketId,
 			MessageOrdinal: i,
 			Direction:      req.Direction,
+			ConnID:         connID,
+			Source:         source,
 		}
 		if dirOverride, ok := extractDirectionOverride(payloadValue); ok {
 			ctx.Direction = dirOverride

@@ -108,8 +108,8 @@ func (s *SQLiteStore) AppendEvents(ctx context.Context, events []*event.Event) e
 // appendEventIndex 写入 event_index 投影索引表。
 func (s *SQLiteStore) appendEventIndex(ctx context.Context, tx *sql.Tx, events []*event.Event) error {
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO event_index (event_id, session_id, type, timestamp, flow_id, direction, correlation_id, projection_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO event_index (event_id, session_id, type, timestamp, flow_id, direction, conn_id, correlation_id, projection_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -123,12 +123,15 @@ func (s *SQLiteStore) appendEventIndex(ctx context.Context, tx *sql.Tx, events [
 			return err
 		}
 
-		var flowID, direction, correlationID sql.NullString
+		var flowID, direction, connID, correlationID sql.NullString
 		if e.Context.FlowID != "" {
 			flowID = sql.NullString{String: e.Context.FlowID, Valid: true}
 		}
 		if e.Context.Direction != "" {
 			direction = sql.NullString{String: e.Context.Direction, Valid: true}
+		}
+		if e.Context.ConnID != "" {
+			connID = sql.NullString{String: e.Context.ConnID, Valid: true}
 		}
 		if e.Trace.CorrelationID != "" {
 			correlationID = sql.NullString{String: e.Trace.CorrelationID, Valid: true}
@@ -141,6 +144,7 @@ func (s *SQLiteStore) appendEventIndex(ctx context.Context, tx *sql.Tx, events [
 			e.Identity.Timestamp.UnixNano(),
 			flowID,
 			direction,
+			connID,
 			correlationID,
 			string(projJSON),
 		)

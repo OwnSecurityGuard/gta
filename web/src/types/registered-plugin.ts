@@ -40,6 +40,9 @@ export interface StartCaptureResult {
   plugin: string;
   db_path: string;
   interface: string;
+  /** nic | proxy */
+  source: string;
+  listen_addr: string;
 }
 
 /** stop_capture 响应 */

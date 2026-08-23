@@ -14,7 +14,7 @@ interface StartCaptureDialogProps {
   onRunLinked?: (runId: string, sessionId: string) => void;
 }
 
-/** 开始抓包对话框：指定端口与可选解码插件，启动一次抓包会话。 */
+/** 开始抓包对话框：网卡抓包（移动代理抓包为常驻服务，见「代理服务器配置」页）。 */
 export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: StartCaptureDialogProps) {
   const [port, setPort] = useState("8080");
   const [plugin, setPlugin] = useState("");
@@ -39,7 +39,11 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
     const p = parseInt(port, 10);
     if (!p || p <= 0) return;
     start.mutate(
-      { port: p, plugin: plugin || undefined },
+      {
+        port: p,
+        plugin: plugin || undefined,
+        source: "nic",
+      },
       {
         onSuccess: (data) => {
           const sessionId = data?.session_id ?? "";
@@ -84,7 +88,8 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
       open={open}
       onClose={onClose}
       icon={<Play className="h-5 w-5" />}
-      title="开始抓包"
+      title="开始网卡抓包"
+      description="移动代理抓包为常驻服务，请在「代理服务器配置」中查看连接二维码；此处仅用于本机网卡抓包。"
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
@@ -118,6 +123,32 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
             className="mt-1.5 font-mono"
           />
         </div>
+        {/* 可用网卡（只读参考）：捕获网卡在 MCP 启动时由 -iface 固定，不可按会话切换。 */}
+        <div>
+          <label className="flex items-center gap-1.5 text-sm font-medium">
+            <Network className="h-3.5 w-3.5 text-muted-foreground" />
+            可用网卡（参考）
+          </label>
+          {interfaces.length === 0 ? (
+            <p className="mt-1 text-xs text-muted-foreground">暂无可列举的网卡。</p>
+          ) : (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {interfaces.map((iface) => (
+                <span
+                  key={iface.name}
+                  className="rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                  title={iface.name}
+                >
+                  {iface.name}
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="mt-1 text-xs text-muted-foreground">
+            网卡在 MCP 启动时由 <code className="font-mono">-iface</code> 固定，本对话框不切换网卡。
+          </p>
+        </div>
+
         <div>
           <label className="text-sm font-medium">解码插件（可选）</label>
           <select
@@ -138,31 +169,6 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
               : "留空则只抓包存储原始包；指定插件可在抓包同时解码协议事件（仅在线插件可选）。"}
           </p>
         </div>
-      </div>
-      {/* 可用网卡（只读参考）：捕获网卡在 MCP 启动时由 -iface 固定，不可按会话切换。 */}
-      <div>
-        <label className="flex items-center gap-1.5 text-sm font-medium">
-          <Network className="h-3.5 w-3.5 text-muted-foreground" />
-          可用网卡（参考）
-        </label>
-        {interfaces.length === 0 ? (
-          <p className="mt-1 text-xs text-muted-foreground">暂无可列举的网卡。</p>
-        ) : (
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {interfaces.map((iface) => (
-              <span
-                key={iface.name}
-                className="rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
-                title={iface.name}
-              >
-                {iface.name}
-              </span>
-            ))}
-          </div>
-        )}
-        <p className="mt-1 text-xs text-muted-foreground">
-          网卡在 MCP 启动时由 <code className="font-mono">-iface</code> 固定，本对话框不切换网卡。
-        </p>
       </div>
 
       {start.isError && (

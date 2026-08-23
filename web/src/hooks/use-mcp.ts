@@ -34,6 +34,8 @@ import type {
   TraceProtocolFlowResult,
 } from "@/types/behavior";
 import type { QueryCaptureTableResult } from "@/types/table-browser";
+import type { ListConnectionsResult, GetConnectionDetailResult, ListConnectionStreamsResult, ListConnectionFramesResult } from "@/types/connection";
+import type { GetProxyConfigResult, UpdateProxyConfigResult, ProxyConfigUpdateVars } from "@/types/proxy";
 
 /** 查询 session 列表 */
 export function useSessions() {
@@ -204,15 +206,30 @@ export function useDeregisterPlugin() {
   });
 }
 
-/** 启动一次抓包会话（可指定解码插件） */
+/** 启动一次抓包会话（可指定来源与解码插件）。 */
 export function useStartCapture() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { port: number; plugin?: string; pcapFile?: string }) =>
+    mutationFn: (vars: {
+      port: number;
+      plugin?: string;
+      pcapFile?: string;
+      /** nic | proxy */
+      source?: string;
+      listenAddr?: string;
+      frameStyle?: string;
+      prefixLen?: number;
+      littleEndian?: boolean;
+    }) =>
       mcpClient.callTool<StartCaptureResult>("start_capture", {
         port: vars.port,
         plugin: vars.plugin ?? "",
         pcap_file: vars.pcapFile,
+        source: vars.source ?? "nic",
+        listen_addr: vars.source === "proxy" ? (vars.listenAddr ?? "127.0.0.1:9090") : undefined,
+        frame_style: vars.source === "proxy" ? (vars.frameStyle ?? "raw") : undefined,
+        prefix_len: vars.source === "proxy" ? (vars.prefixLen ?? 4) : undefined,
+        little_endian: vars.source === "proxy" ? String(!!vars.littleEndian) : undefined,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
@@ -482,4 +499,115 @@ export function useQueryCaptureTable(
 function slogError(msg: string) {
   // eslint-disable-next-line no-console
   console.warn("[plugin-events]", msg);
+}
+
+// ===== 代理抓包连接（Connections 页面）=====
+
+/** list_connections：按 conn_id 聚合返回代理抓包连接列表（最新在前）。 */
+export function useConnections(
+  sessionId: string | null,
+  options: { limit?: number; offset?: number },
+) {
+  return useQuery({
+    queryKey: ["connections", sessionId, options],
+    queryFn: () =>
+      mcpClient.callTool<ListConnectionsResult>("list_connections", {
+        session_id: sessionId ?? undefined,
+        limit: options.limit ?? 100,
+        offset: options.offset ?? 0,
+      }),
+    enabled: !!sessionId,
+    placeholderData: keepPreviousData,
+    refetchInterval: sessionId ? 2000 : false, // 抓包实时写入，轮询保持列表更新
+  });
+}
+
+/** get_connection_detail：查询单个连接的详情（头部 + 统计）。 */
+export function useConnectionDetail(sessionId: string | null, connId: string | null) {
+  return useQuery({
+    queryKey: ["connectionDetail", sessionId, connId],
+    queryFn: () =>
+      mcpClient.callTool<GetConnectionDetailResult>("get_connection_detail", {
+        session_id: sessionId ?? undefined,
+        conn_id: connId!,
+      }),
+    enabled: !!sessionId && !!connId,
+    refetchInterval: sessionId && connId ? 2000 : false,
+  });
+}
+
+/** list_connection_streams：查询连接内的流（Stream View）。 */
+export function useConnectionStreams(
+  sessionId: string | null,
+  connId: string | null,
+  options: { limit?: number; offset?: number },
+) {
+  return useQuery({
+    queryKey: ["connectionStreams", sessionId, connId, options],
+    queryFn: () =>
+      mcpClient.callTool<ListConnectionStreamsResult>("list_connection_streams", {
+        session_id: sessionId ?? undefined,
+        conn_id: connId!,
+        limit: options.limit ?? 200,
+        offset: options.offset ?? 0,
+      }),
+    enabled: !!sessionId && !!connId,
+    placeholderData: keepPreviousData,
+    refetchInterval: sessionId && connId ? 2000 : false,
+  });
+}
+
+/** list_connection_frames：查询连接内的原始帧（Frames / Raw）。 */
+export function useConnectionFrames(
+  sessionId: string | null,
+  connId: string | null,
+  options: { limit?: number; offset?: number },
+) {
+  return useQuery({
+    queryKey: ["connectionFrames", sessionId, connId, options],
+    queryFn: () =>
+      mcpClient.callTool<ListConnectionFramesResult>("list_connection_frames", {
+        session_id: sessionId ?? undefined,
+        conn_id: connId!,
+        limit: options.limit ?? 100,
+        offset: options.offset ?? 0,
+      }),
+    enabled: !!sessionId && !!connId,
+    placeholderData: keepPreviousData,
+    refetchInterval: sessionId && connId ? 2000 : false,
+  });
+}
+
+// ===== 代理抓包服务器配置（常驻，无需手动开始抓包）=====
+
+/** get_proxy_server_config：查询当前代理抓包服务器配置 + 运行时状态 + LAN IP/连接地址。 */
+export function useProxyServerConfig() {
+  return useQuery({
+    queryKey: ["proxyServerConfig"],
+    queryFn: () => mcpClient.callTool<GetProxyConfigResult>("get_proxy_server_config"),
+    refetchInterval: 5000, // agent/会话状态实时变化，轮询保持状态新鲜
+  });
+}
+
+/** update_proxy_server_config：应用新的代理服务器配置（持久化 + 热重启 agent + 重启常驻会话）。 */
+export function useUpdateProxyServerConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: ProxyConfigUpdateVars) =>
+      mcpClient.callTool<UpdateProxyConfigResult>("update_proxy_server_config", {
+        listen_addr: vars.listenAddr ?? "",
+        server_addr: vars.serverAddr ?? "",
+        frame_style: vars.frameStyle ?? "",
+        prefix_len: vars.prefixLen ?? 0,
+        little_endian: vars.littleEndian !== undefined ? String(vars.littleEndian) : "false",
+        plugin: vars.plugin ?? "",
+        // undefined 序列化后省略（表示不修改）；空数组保留（表示清空筛选）。
+        include_hosts: vars.includeHosts,
+        include_ports: vars.includePorts,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["proxyServerConfig"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
 }

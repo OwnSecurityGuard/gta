@@ -1,4 +1,4 @@
-.PHONY: proto test build build-mcp build-pipeline build-plugin-dev build-examples run-mcp run-pipeline run-plugin-dev
+.PHONY: proto test build build-mcp build-pipeline build-plugin-dev build-agent build-examples run-mcp run-pipeline run-plugin-dev
 
 TAGS := pcap
 
@@ -14,6 +14,9 @@ proto:
 	protoc --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		pkg/plugindev/proto/plugindev.proto
+	protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		pkg/capture/mobile/proto/mobile.proto
 
 test:
 	go test -tags $(TAGS) ./...
@@ -29,7 +32,11 @@ build-pipeline:
 build-plugin-dev:
 	go build -tags $(TAGS) -o bin/gta-plugin-dev.exe ./cmd/gta-plugin-dev
 
-build: build-mcp build-pipeline build-plugin-dev
+# 移动端流量入口（sing-box 侧 → GTA）：TCP 中继 + gRPC 推送连接级数据。
+build-agent:
+	go build -tags $(TAGS) -o bin/gta-singbox-agent.exe ./cmd/gta-singbox-agent
+
+build: build-mcp build-pipeline build-plugin-dev build-agent
 
 build-examples:
 	go build -tags $(TAGS) -o bin/http-server.exe ./examples/http/server

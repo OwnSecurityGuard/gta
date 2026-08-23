@@ -103,6 +103,13 @@ func (s *StatTracker) AddIn(bytes int) {
 	s.stats.BytesIn += uint64(bytes)
 }
 
+// AddErrors 累计运行期错误数（如移动代理推送中丢弃的异常数据）。
+func (s *StatTracker) AddErrors(n uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stats.Errors += n
+}
+
 // SetDrops 设置内核/驱动层丢包数（来自 pcap.Handle.Stats()）。
 // 用 Set 而非 Add：pcap 统计是累计值，每次读取覆盖前值即可。
 func (s *StatTracker) SetDrops(drops uint64) {

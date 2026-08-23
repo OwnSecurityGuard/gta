@@ -18,6 +18,7 @@ import {
   Activity,
   FileText,
   Wifi,
+  Cable,
   RefreshCw,
   X,
   Inbox,
@@ -125,11 +126,14 @@ function SessionItem({
   const liveRaw = liveStatus?.raw_count ?? liveStatus?.packets_in ?? session.raw_packets;
   const liveErrors = liveStatus?.decode_errors ?? session.decode_errors;
 
-  // 来源：live 抓包用网卡名，文件回放用文件名
+  // 来源：代理抓包用 "Mobile Proxy + 监听地址"，live 抓包用网卡名，文件回放用文件名
   const isFileReplay = !!session.pcap_file;
-  const sourceLabel = isFileReplay
-    ? basename(session.pcap_file)
-    : session.interface || "(auto)";
+  const isProxy = session.source === "proxy";
+  const sourceLabel = isProxy
+    ? `Mobile Proxy${session.listen_addr ? ` · ${session.listen_addr}` : ""}`
+    : isFileReplay
+      ? basename(session.pcap_file)
+      : session.interface || "(auto)";
 
   // 结束时间：同日省略日期
   const stoppedDisplay = hasStopped
@@ -178,6 +182,8 @@ function SessionItem({
       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
         {isFileReplay ? (
           <FileText className="h-3 w-3 shrink-0" />
+        ) : isProxy ? (
+          <Cable className="h-3 w-3 shrink-0" />
         ) : (
           <Wifi className="h-3 w-3 shrink-0" />
         )}

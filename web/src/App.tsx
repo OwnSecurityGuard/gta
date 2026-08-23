@@ -3,6 +3,7 @@ import { SessionSidebar } from "@/components/session-sidebar";
 import { FilterBar } from "@/components/filter-bar";
 import { EventTable } from "@/components/event-table";
 import { RawPacketTable } from "@/components/raw-packet-table";
+import { ConnectionsPage } from "@/components/connections-page";
 import { PluginPanel } from "@/components/plugin-panel";
 import { AnalyticsPanel } from "@/components/analytics-panel";
 import { TimelinePanel } from "@/components/timeline-panel";
@@ -11,13 +12,14 @@ import { SchemaExplorer } from "@/components/schema-explorer";
 import { TableBrowser } from "@/components/table-browser";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { StartCaptureDialog } from "@/components/start-capture-dialog";
+import { ProxyConfigDialog } from "@/components/proxy-config-dialog";
 import { Button } from "@/components/ui/button";
-import { Sun, Moon, Settings, Play, Square } from "lucide-react";
+import { Sun, Moon, Settings, Play, Square, Cable } from "lucide-react";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
 import { usePluginEventStream, useStopCapture, useSessions } from "@/hooks/use-mcp";
 import { toast } from "@/components/ui/toast";
 
-type ViewTab = "decoded" | "analytics" | "timeline" | "runs" | "data" | "plugins" | "raw";
+type ViewTab = "decoded" | "analytics" | "timeline" | "runs" | "data" | "plugins" | "raw" | "connections";
 
 /** 品牌标识：广播/信号图标，呼应"游戏调试自动化"。 */
 function BrandMark({ className }: { className?: string }) {
@@ -41,6 +43,7 @@ function BrandMark({ className }: { className?: string }) {
 
 const TABS: { id: ViewTab; label: string }[] = [
   { id: "decoded", label: "协议数据" },
+  { id: "connections", label: "连接" },
   { id: "analytics", label: "分析" },
   { id: "timeline", label: "时间线" },
   { id: "runs", label: "行为" },
@@ -58,6 +61,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>("decoded");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
+  const [proxyConfigOpen, setProxyConfigOpen] = useState(false);
   const [isDark, setIsDark] = useState(() => {
     const stored = localStorage.getItem("gta-theme");
     if (stored) return stored === "dark";
@@ -223,12 +227,23 @@ export default function App() {
               variant="default"
               size="sm"
               className="h-8"
+              onClick={() => setProxyConfigOpen(true)}
+              title="代理服务器配置（常驻代理抓包，生成手机连接二维码）"
+              aria-label="代理服务器配置"
+            >
+              <Cable className="h-4 w-4" />
+              代理配置
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
               onClick={() => setStartOpen(true)}
-              title="开始抓包"
-              aria-label="开始抓包"
+              title="开始网卡抓包"
+              aria-label="开始网卡抓包"
             >
               <Play className="h-4 w-4" />
-              开始抓包
+              网卡抓包
             </Button>
             {isSelectedRunning && (
               <Button
@@ -286,6 +301,11 @@ export default function App() {
               <EventTable sessionId={selectedSessionId} filter={filter} />
             </div>
           )}
+          {activeTab === "connections" && (
+            <div className="h-full overflow-auto p-4 gta-scroll">
+              <ConnectionsPage sessionId={selectedSessionId} />
+            </div>
+          )}
           {activeTab === "analytics" && <AnalyticsPanel sessionId={selectedSessionId} />}
           {activeTab === "timeline" && <TimelinePanel sessionId={selectedSessionId} />}
           {activeTab === "runs" && (
@@ -315,7 +335,9 @@ export default function App() {
 
       {/* 设置弹窗 */}
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      {/* 开始抓包弹窗 */}
+      {/* 代理服务器配置弹窗 */}
+      <ProxyConfigDialog open={proxyConfigOpen} onClose={() => setProxyConfigOpen(false)} />
+      {/* 开始网卡抓包弹窗 */}
       <StartCaptureDialog
         open={startOpen}
         onClose={() => setStartOpen(false)}

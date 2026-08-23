@@ -85,7 +85,9 @@ CREATE TABLE IF NOT EXISTS raw_packets (
     dst TEXT,
     protocol TEXT,
     payload BLOB,
-    link_type INT
+    link_type INT,
+    conn_id TEXT,
+    metadata TEXT
 );
 CREATE TABLE IF NOT EXISTS aggregated_metrics (
     name TEXT,
@@ -135,6 +137,7 @@ CREATE TABLE IF NOT EXISTS event_index (
     timestamp INTEGER NOT NULL,
     flow_id TEXT,
     direction TEXT,
+    conn_id TEXT,
     correlation_id TEXT,
     projection_json TEXT NOT NULL
 );`
@@ -144,6 +147,11 @@ CREATE TABLE IF NOT EXISTS event_index (
 	// 迁移：为已存在的 raw_packets 表添加 link_type 列
 	// 如果列已存在，ALTER TABLE 会失败，忽略错误
 	_, _ = s.db.Exec("ALTER TABLE raw_packets ADD COLUMN link_type INT")
+	// 迁移：为已存在的 raw_packets 表添加 conn_id / metadata 列（代理抓包连接元数据）
+	_, _ = s.db.Exec("ALTER TABLE raw_packets ADD COLUMN conn_id TEXT")
+	_, _ = s.db.Exec("ALTER TABLE raw_packets ADD COLUMN metadata TEXT")
+	// 迁移：为已存在的 event_index 表添加 conn_id 列（连接聚合索引）
+	_, _ = s.db.Exec("ALTER TABLE event_index ADD COLUMN conn_id TEXT")
 
 	// 迁移：为已存在的 events 表添加 context 列
 	// X'80' 是空 msgpack map 的二进制表示（空 EventContext）
@@ -172,7 +180,10 @@ CREATE TABLE IF NOT EXISTS event_index (
 		// event_index 索引
 		"CREATE INDEX IF NOT EXISTS idx_event_index_session_time ON event_index(session_id, timestamp)",
 		"CREATE INDEX IF NOT EXISTS idx_event_index_flow ON event_index(session_id, flow_id, timestamp)",
+		"CREATE INDEX IF NOT EXISTS idx_event_index_conn ON event_index(session_id, conn_id, timestamp)",
 		"CREATE INDEX IF NOT EXISTS idx_event_index_correlation ON event_index(correlation_id)",
+		// raw_packets 连接索引（代理抓包按 conn_id 聚合）
+		"CREATE INDEX IF NOT EXISTS idx_raw_packets_conn ON raw_packets(conn_id, timestamp)",
 	}
 	for _, idx := range indexes {
 		if _, err := s.db.Exec(idx); err != nil {
@@ -234,13 +245,14 @@ func (s *SQLiteStore) ClearDecodedData(ctx context.Context) error {
 }
 
 // AppendRawPackets 追加原始数据包到 raw_packets 表（实现 EventWriter）。
+// 代理抓包场景（conn_id / metadata）在此持久化，供 Connections 页面按连接聚合。
 func (s *SQLiteStore) AppendRawPackets(ctx context.Context, packets []event.Packet) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	stmt, err := tx.PrepareContext(ctx, "INSERT OR REPLACE INTO raw_packets(id,timestamp,src,dst,protocol,payload,link_type) VALUES(?,?,?,?,?,?,?)")
+	stmt, err := tx.PrepareContext(ctx, "INSERT OR REPLACE INTO raw_packets(id,timestamp,src,dst,protocol,payload,link_type,conn_id,metadata) VALUES(?,?,?,?,?,?,?,?,?)")
 	if err != nil {
 		return err
 	}
@@ -251,7 +263,19 @@ func (s *SQLiteStore) AppendRawPackets(ctx context.Context, packets []event.Pack
 		if id == "" {
 			id = uuid.NewString()
 		}
-		if _, err := stmt.ExecContext(ctx, id, p.Timestamp, p.Src.String(), p.Dst.String(), p.Protocol, p.Raw, int32(p.LinkType)); err != nil {
+		// conn_id：移动代理在 Packet.Metadata 携带，回填到 raw_packets 供连接聚合。
+		var connID sql.NullString
+		if c, ok := p.Metadata["conn_id"].(string); ok && c != "" {
+			connID = sql.NullString{String: c, Valid: true}
+		}
+		// metadata：整包元数据以 JSON 落库（client_addr/server_addr/source/device/app 等）。
+		var metaJSON sql.NullString
+		if len(p.Metadata) > 0 {
+			if b, err := json.Marshal(p.Metadata); err == nil {
+				metaJSON = sql.NullString{String: string(b), Valid: true}
+			}
+		}
+		if _, err := stmt.ExecContext(ctx, id, p.Timestamp, p.Src.String(), p.Dst.String(), p.Protocol, p.Raw, int32(p.LinkType), connID, metaJSON); err != nil {
 			return err
 		}
 	}

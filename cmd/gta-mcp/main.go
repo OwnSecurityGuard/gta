@@ -26,6 +26,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"gta/pkg/config"
+	"gta/pkg/event"
 	"gta/pkg/internalipc"
 	pb "gta/pkg/internalipc/proto"
 	"gta/pkg/logging"
@@ -48,6 +49,9 @@ type sessionMetadata struct {
 	Plugin       string                 `json:"plugin"`
 	Interface    string                 `json:"interface"`
 	PCAPFile     string                 `json:"pcap_file,omitempty"`
+	Source       string                 `json:"source,omitempty"` // nic | proxy
+	ListenAddr   string                 `json:"listen_addr,omitempty"`
+	FrameStyle   string                 `json:"frame_style,omitempty"`
 	RawPackets   int64                  `json:"raw_packets,omitempty"`
 	Events       int64                  `json:"events,omitempty"`
 	Metrics      int64                  `json:"metrics,omitempty"`
@@ -107,6 +111,10 @@ type mcpCapture struct {
 	// enableRawDebug 控制原始包工具是否注册到 MCP surface。
 	// 原始包能力仅限插件调试场景，默认不暴露。
 	enableRawDebug bool
+
+	// httpAddr 是本进程 HTTP 服务监听地址（如 ":8781"），
+	// 用于构造手机 sing-box 客户端可导入的远程 profile 二维码 URI。
+	httpAddr string
 
 	// 事件总线：插件注册/注销/上下线事件经 WatchPlugins 流汇聚后广播给 SSE 订阅者。
 	eventMu   sync.Mutex
@@ -308,7 +316,7 @@ func (sm *sessionManager) deleteSession(sessionID string) error {
 	return os.RemoveAll(sessionDir)
 }
 
-func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr string, mcpServer *server.MCPServer, enableRawDebug bool) (*mcpCapture, error) {
+func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mcpServer *server.MCPServer, enableRawDebug bool) (*mcpCapture, error) {
 	runRegistry, err := NewRunRegistry(workDir)
 	if err != nil {
 		slog.Warn("init run registry failed", "error", err)
@@ -358,6 +366,7 @@ func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr string, mcpServer *s
 			return store.NewSQLiteStore(path, nil)
 		},
 		enableRawDebug: enableRawDebug,
+		httpAddr:       httpAddr,
 		eventSubs:      map[chan pluginEventJSON]struct{}{},
 	}
 	// 订阅 gta-pipeline 的插件事件流并广播给 SSE 客户端（断线自动重连）。
@@ -399,28 +408,56 @@ func dialPluginDev(pluginsDir, addr string) (plugindevclient.PluginDev, *grpc.Cl
 }
 
 func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	port, err := req.RequireInt("port")
-	if err != nil {
-		return errorResult(err), nil
-	}
+	port, _ := req.RequireInt("port") // proxy 源下端口可选
 	pluginName := req.GetString("plugin", "")
 	pcapFile := req.GetString("pcap_file", "")
 	if pcapFile != "" && !filepath.IsAbs(pcapFile) {
 		pcapFile, _ = filepath.Abs(pcapFile)
 	}
-	slog.Info("start_capture requested", "port", port, "plugin", pluginName, "pcap_file", pcapFile)
+
+	// 抓包来源：nic（网卡，默认）| proxy（移动代理 gta-singbox-agent 推送）
+	source := req.GetString("source", "nic")
+	switch source {
+	case "", "nic", "proxy", "mobile":
+	default:
+		return errorResult(fmt.Errorf("unsupported source %q (allowed: nic|proxy)", source)), nil
+	}
+	if source == "mobile" {
+		source = "proxy" // 归一化别名
+	}
+	listenAddr := req.GetString("listen_addr", "")
+	frameStyle := req.GetString("frame_style", "")
+	prefixLen, _ := req.RequireInt("prefix_len")
+	littleEndian := strings.EqualFold(req.GetString("little_endian", "false"), "true")
+	slog.Info("start_capture requested", "port", port, "plugin", pluginName, "pcap_file", pcapFile, "source", source, "listen_addr", listenAddr, "frame_style", frameStyle)
 
 	// 构造 gRPC request
 	grpcReq := &pb.StartCaptureRequest{
 		Plugin: pluginName,
 		Port:   int32(port),
 	}
-	if pcapFile != "" {
+	switch {
+	case source == "proxy":
+		if strings.TrimSpace(listenAddr) == "" {
+			listenAddr = "127.0.0.1:9090"
+		}
+		grpcReq.Source = &pb.StartCaptureRequest_Mobile{
+			Mobile: &pb.MobileSourceConfig{
+				ListenAddr:   listenAddr,
+				FrameStyle:   frameStyle,
+				PrefixLen:    int32(prefixLen),
+				LittleEndian: littleEndian,
+			},
+		}
+	case pcapFile != "":
 		grpcReq.Source = &pb.StartCaptureRequest_File{
 			File: &pb.PcapFileConfig{Path: pcapFile},
 		}
-	} else {
+	default:
 		// Live capture：使用配置的网卡，若 Device 为空则由 pipeline 自动探测所有网卡
+		if port <= 0 {
+			return errorResult(fmt.Errorf("port is required for source=nic")), nil
+		}
 		grpcReq.Source = &pb.StartCaptureRequest_Live{
 			Live: &pb.PcapLiveConfig{Device: m.iface},
 		}
@@ -435,28 +472,33 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 	// 写 metadata.json 使 getDBPath 即使 gta-mcp 与 gta-pipeline 的 workDir 不一致，
 	// 也能通过 pipeline 返回的绝对 db_path 定位到正确的会话库。
 	meta := sessionMetadata{
-		SessionID: resp.GetSessionId(),
-		StartedAt: time.Now().Format(time.RFC3339),
-		Status:    "running",
-		Port:      port,
-		Plugin:    pluginName,
-		Interface: m.iface,
-		PCAPFile:  pcapFile,
-		DBPath:    resp.GetDbPath(),
+		SessionID:   resp.GetSessionId(),
+		StartedAt:   time.Now().Format(time.RFC3339),
+		Status:      "running",
+		Port:        port,
+		Plugin:      pluginName,
+		Interface:   m.iface,
+		PCAPFile:    pcapFile,
+		Source:      source,
+		ListenAddr:  listenAddr,
+		FrameStyle:  frameStyle,
+		DBPath:      resp.GetDbPath(),
 	}
 	if err := m.sessionMgr.writeSessionMetadata(resp.GetSessionId(), meta); err != nil {
 		slog.Warn("write session metadata failed", "session_id", resp.GetSessionId(), "error", err)
 	}
 	m.sessionMgr.writeCurrent(meta)
 
-	slog.Info("start_capture succeeded", "session_id", resp.GetSessionId(), "port", port, "plugin", pluginName, "db_path", resp.GetDbPath())
+	slog.Info("start_capture succeeded", "session_id", resp.GetSessionId(), "port", port, "plugin", pluginName, "source", source, "db_path", resp.GetDbPath())
 	return successResult(map[string]any{
-		"status":     "started",
-		"session_id": resp.GetSessionId(),
-		"port":       port,
-		"plugin":     pluginName,
-		"db_path":    resp.GetDbPath(),
-		"interface":  m.iface,
+		"status":      "started",
+		"session_id":  resp.GetSessionId(),
+		"port":        port,
+		"plugin":      pluginName,
+		"source":      source,
+		"db_path":     resp.GetDbPath(),
+		"interface":   m.iface,
+		"listen_addr": listenAddr,
 	}), nil
 }
 
@@ -1294,6 +1336,10 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 	}
 	slog.Info("list_decoded_data: queried events from db", "session_id", sessionID, "db_path", dbPath, "raw_event_count", len(eventRows))
 
+	// 捕获上下文索引：基于全量事件计算连接序号/流序号（与分页、筛选无关）。
+	// 仅代理抓包（conn_id 非空）的事件会获得 capture 字段，供前端展示 Capture Context。
+	captureIdx := buildCaptureContext(eventRows)
+
 	// 批量查询原始包长度：收集所有 RawPacketID，一次 SELECT id,LENGTH(payload) 构建 map。
 	rawLenMap := make(map[string]int, len(eventRows))
 	if dbReader, ok := reader.(interface{ DB() *sql.DB }); ok {
@@ -1345,6 +1391,9 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 			"raw_len":    rawLen,
 			"data":       dataContent,
 		}
+		if cc, ok := captureIdx[string(ev.Identity.ID)]; ok {
+			eventMap["capture"] = cc
+		}
 
 		if program != nil {
 			out, err := expr.Run(program, eventMap)
@@ -1377,6 +1426,264 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 		"total_matched": totalMatched,
 		"count":         len(events),
 		"events":        events,
+	}), nil
+}
+
+// captureContextJSON 是单个事件的捕获上下文（Capture Context），
+// 前端据此展示 "Captured By / Connection / Stream / Source"（代理抓包特有）。
+type captureContextJSON struct {
+	CapturedBy string `json:"captured_by"`
+	ConnID     string `json:"conn_id"`
+	ConnSeq    int    `json:"conn_seq"`   // 连接序号（1-based，按连接最新事件时间倒序）
+	StreamID   string `json:"stream_id"`  // 流分组键（correlation_id 或事件 ID）
+	StreamSeq  int    `json:"stream_seq"` // 连接内流序号（1-based，按流首事件时间正序）
+	Source     string `json:"source"`
+}
+
+// captureDisplayName 把抓包来源映射为展示名（如 mobile → Mobile Proxy）。
+func captureDisplayName(source string) string {
+	switch source {
+	case "mobile":
+		return "Mobile Proxy"
+	case "":
+		return "Proxy"
+	default:
+		return source
+	}
+}
+
+// buildCaptureContext 基于全量事件计算每个事件的连接/流序号。
+//
+// 连接序号：按连接最新事件时间倒序（与 Connections 页面一致），最新连接为 1。
+// 流序号：连接内按流首事件时间正序（Stream View 语义），每流从 1 递增。
+// 流分组键：correlation_id 非空的事件同组；未关联事件各自成流。
+// 仅 conn_id 非空（代理抓包）的事件会被编入索引。
+func buildCaptureContext(events []*event.Event) map[string]captureContextJSON {
+	out := make(map[string]captureContextJSON, len(events))
+	connSeqByID := make(map[string]int)
+	streamSeqByConn := make(map[string]int)
+	connEvents := make(map[string][]*event.Event)
+
+	for _, ev := range events {
+		connID := ev.Context.ConnID
+		if connID == "" {
+			continue
+		}
+		if _, ok := connSeqByID[connID]; !ok {
+			connSeqByID[connID] = len(connSeqByID) + 1
+			streamSeqByConn[connID] = 0
+		}
+		connEvents[connID] = append(connEvents[connID], ev)
+	}
+
+	for connID, evs := range connEvents {
+		// evs 来自 QueryEventsDesc（时间倒序），反转为正序以符合流首事件时间正序。
+		asc := make([]*event.Event, len(evs))
+		for i, ev := range evs {
+			asc[len(evs)-1-i] = ev
+		}
+		seenStream := make(map[string]bool)
+		for _, ev := range asc {
+			key := ev.Trace.CorrelationID
+			if key == "" {
+				key = string(ev.Identity.ID)
+			}
+			if !seenStream[key] {
+				seenStream[key] = true
+				streamSeqByConn[connID]++
+			}
+			out[string(ev.Identity.ID)] = captureContextJSON{
+				CapturedBy: captureDisplayName(ev.Context.Source),
+				ConnID:     connID,
+				ConnSeq:    connSeqByID[connID],
+				StreamID:   key,
+				StreamSeq:  streamSeqByConn[connID],
+				Source:     ev.Context.Source,
+			}
+		}
+	}
+	return out
+}
+
+// connectionReader 连接聚合查询能力（由 *store.SQLiteStore 实现）。
+// 与 captureReader 分离：Connections 页面是代理抓包专有能力，非通用事件查询。
+type connectionReader interface {
+	QueryConnections(ctx context.Context, sessionID string, limit, offset int) ([]store.ConnectionSummary, error)
+	QueryConnectionDetail(ctx context.Context, sessionID, connID string) (*store.ConnectionDetail, error)
+	QueryConnectionStreams(ctx context.Context, sessionID, connID string, limit, offset int) ([]store.ConnectionStream, error)
+	QueryConnectionFrames(ctx context.Context, connID string, limit, offset int) ([]store.ConnectionFrame, error)
+}
+
+// asConnectionReader 把 captureReader 断言为 connectionReader；后端不支持时返回错误。
+func asConnectionReader(r captureReader) (connectionReader, error) {
+	cr, ok := r.(connectionReader)
+	if !ok {
+		return nil, fmt.Errorf("store backend does not support connection queries")
+	}
+	return cr, nil
+}
+
+// handleListConnections 返回代理抓包的连接列表（按 conn_id 聚合，最新在前）。
+func (m *mcpCapture) handleListConnections(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+
+	dbPath, err := m.getDBPath(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("list_connections requested", "session_id", sessionID, "limit", limit, "offset", offset, "db_path", dbPath)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	reader, err := m.openReader(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	cr, err := asConnectionReader(reader)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	conns, err := cr.QueryConnections(ctx, sessionID, limit, offset)
+	if err != nil {
+		return errorResult(fmt.Errorf("query connections: %w", err)), nil
+	}
+
+	slog.Info("list_connections completed", "session_id", sessionID, "count", len(conns))
+	return successResult(map[string]any{
+		"count":       len(conns),
+		"connections": conns,
+	}), nil
+}
+
+// handleGetConnectionDetail 返回单个连接的详情（头部信息 + 统计）。
+func (m *mcpCapture) handleGetConnectionDetail(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	connID := req.GetString("conn_id", "")
+
+	dbPath, err := m.getDBPath(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("get_connection_detail requested", "session_id", sessionID, "conn_id", connID, "db_path", dbPath)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+	if connID == "" {
+		return errorResult(fmt.Errorf("conn_id is required")), nil
+	}
+
+	reader, err := m.openReader(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	cr, err := asConnectionReader(reader)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	detail, err := cr.QueryConnectionDetail(ctx, sessionID, connID)
+	if err != nil {
+		return errorResult(fmt.Errorf("query connection detail: %w", err)), nil
+	}
+	if detail == nil {
+		return errorResult(fmt.Errorf("connection not found: %s", connID)), nil
+	}
+
+	slog.Info("get_connection_detail completed", "session_id", sessionID, "conn_id", connID)
+	return successResult(map[string]any{
+		"connection": detail,
+	}), nil
+}
+
+// handleListConnectionStreams 返回连接内按关联键分组的流（Stream View）。
+func (m *mcpCapture) handleListConnectionStreams(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	connID := req.GetString("conn_id", "")
+	limit := req.GetInt("limit", 200)
+	offset := req.GetInt("offset", 0)
+
+	dbPath, err := m.getDBPath(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("list_connection_streams requested", "session_id", sessionID, "conn_id", connID, "db_path", dbPath)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+	if connID == "" {
+		return errorResult(fmt.Errorf("conn_id is required")), nil
+	}
+
+	reader, err := m.openReader(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	cr, err := asConnectionReader(reader)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	streams, err := cr.QueryConnectionStreams(ctx, sessionID, connID, limit, offset)
+	if err != nil {
+		return errorResult(fmt.Errorf("query connection streams: %w", err)), nil
+	}
+
+	slog.Info("list_connection_streams completed", "session_id", sessionID, "conn_id", connID, "count", len(streams))
+	return successResult(map[string]any{
+		"count":   len(streams),
+		"streams": streams,
+	}), nil
+}
+
+// handleListConnectionFrames 返回连接内的原始帧（Frames / Raw 子页）。
+func (m *mcpCapture) handleListConnectionFrames(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	connID := req.GetString("conn_id", "")
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+
+	dbPath, err := m.getDBPath(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("list_connection_frames requested", "session_id", sessionID, "conn_id", connID, "db_path", dbPath)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+	if connID == "" {
+		return errorResult(fmt.Errorf("conn_id is required")), nil
+	}
+
+	reader, err := m.openReader(sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	cr, err := asConnectionReader(reader)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	frames, err := cr.QueryConnectionFrames(ctx, connID, limit, offset)
+	if err != nil {
+		return errorResult(fmt.Errorf("query connection frames: %w", err)), nil
+	}
+
+	slog.Info("list_connection_frames completed", "session_id", sessionID, "conn_id", connID, "count", len(frames))
+	return successResult(map[string]any{
+		"count":  len(frames),
+		"frames": frames,
 	}), nil
 }
 
@@ -1788,6 +2095,9 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 			"plugin":        plugin,
 			"interface":     iface,
 			"pcap_file":     sess.PCAPFile,
+			"source":        sess.Source,
+			"listen_addr":   sess.ListenAddr,
+			"frame_style":   sess.FrameStyle,
 			"raw_packets":   sess.RawPackets,
 			"events":        sess.Events,
 			"metrics":       sess.Metrics,
@@ -2051,7 +2361,7 @@ func main() {
 		server.WithToolCapabilities(true),
 	)
 
-	capture, err := newMCPCapture(*iface, resolvedPluginsDir, *workDir, *pipelineAddr, s, *enableRawDebug)
+	capture, err := newMCPCapture(*iface, resolvedPluginsDir, *workDir, *pipelineAddr, *addr, s, *enableRawDebug)
 	if err != nil {
 		slog.Error("init mcp capture", "error", err)
 		os.Exit(1)
@@ -2063,10 +2373,15 @@ func main() {
 	}
 
 	s.AddTool(mcp.NewTool("start_capture",
-		mcp.WithDescription("Start capturing traffic on a server port, or replay a pcap file. Packets are always captured and stored; an optional plugin enables protocol decoding."),
-		mcp.WithNumber("port", mcp.Required(), mcp.Description("Server port to capture or filter, e.g. 8080")),
+		mcp.WithDescription("Start capturing traffic. Two capture sources are supported: source=nic (default) captures on a network interface filtered by port; source=proxy starts the mobile proxy gRPC listener (gta-singbox-agent connects and pushes connection-level frames). Packets are always captured and stored; an optional plugin enables protocol decoding."),
+		mcp.WithNumber("port", mcp.DefaultNumber(0), mcp.Description("Server port to capture or filter, e.g. 8080. Required for source=nic; ignored for source=proxy")),
 		mcp.WithString("plugin", mcp.Description("Optional plugin name for protocol decoding, e.g. http. If omitted or no matching plugin is found, only raw packets are stored.")),
 		mcp.WithString("pcap_file", mcp.Description("Optional pcap file to replay instead of live capture")),
+		mcp.WithString("source", mcp.DefaultString("nic"), mcp.Description("Capture source: nic (network interface, default) or proxy (mobile proxy via gta-singbox-agent)")),
+		mcp.WithString("listen_addr", mcp.DefaultString("127.0.0.1:9090"), mcp.Description("For source=proxy: gRPC listen address that gta-singbox-agent connects to, e.g. 127.0.0.1:9090 or unix:///tmp/gta-mobile.sock")),
+		mcp.WithString("frame_style", mcp.DefaultString("raw"), mcp.Description("For source=proxy: frame reassembly style, raw (each data chunk as one frame) or length_prefix (N-byte length header)")),
+		mcp.WithNumber("prefix_len", mcp.DefaultNumber(4), mcp.Description("For source=proxy + frame_style=length_prefix: length prefix byte count 1|2|4")),
+		mcp.WithString("little_endian", mcp.DefaultString("false"), mcp.Description("For source=proxy + frame_style=length_prefix: length prefix byte order, 'true' for little-endian, default big-endian")),
 	), capture.handleStartCapture)
 
 	s.AddTool(mcp.NewTool("stop_capture",
@@ -2129,6 +2444,19 @@ func main() {
 		mcp.WithDescription("Return the full plugin development guide (markdown). Covers architecture, plugin.yaml schema, Decode RPC contract, lifecycle, framing, and best practices. KEY TAKEAWAY: for pcap sources DecodeRequest.payload is a COMPLETE link-layer frame (link header + IP + TCP/UDP + app bytes), NOT pre-stripped L7 — strip it per link_type with framing.ExtractL7 and reassemble TCP with framing.Reassembler first. Only ProxyPayload(1001)/TLSPlaintext(1002) are already L7. Read this BEFORE writing any decoder."),
 	), capture.handleGetPluginDevGuide)
 
+	s.AddTool(mcp.NewTool("get_proxy_server_config",
+		mcp.WithDescription("Get the current mobile proxy capture server config and runtime status (agent process + always-on session), plus the machine LAN IP and a connect_addr (HTTP CONNECT proxy address for the phone). Use this to render the server config page and generate a scan-to-connect QR code. Proxy capture no longer requires manually starting a session — the pipeline keeps it running."),
+	), capture.handleGetProxyServerConfig)
+
+	s.AddTool(mcp.NewTool("update_proxy_server_config",
+		mcp.WithDescription("Apply a new mobile proxy capture server config: persists to proxy.json, hot-restarts gta-singbox-agent and restarts the always-on proxy session so the change takes effect immediately. Empty fields keep the current value (listen_addr is the proxy port the phone connects to, e.g. 0.0.0.0:12000; server_addr is the mobile source gRPC addr, e.g. 127.0.0.1:9090; frame_style raw|length_prefix with prefix_len 1|2|4)."),
+		mcp.WithString("listen_addr", mcp.Description("HTTP CONNECT proxy listen address, e.g. 0.0.0.0:12000 (empty = keep current)")),
+		mcp.WithString("server_addr", mcp.Description("Mobile source gRPC address the agent pushes to, e.g. 127.0.0.1:9090 (empty = keep current)")),
+		mcp.WithString("frame_style", mcp.Description("Frame reassembly style: raw | length_prefix (empty = keep current)")),
+		mcp.WithNumber("prefix_len", mcp.Description("Length prefix byte count for length_prefix: 1|2|4")),
+		mcp.WithString("little_endian", mcp.Description("Length prefix byte order: 'true' for little-endian, default big-endian")),
+	), capture.handleUpdateProxyServerConfig)
+
 	s.AddTool(mcp.NewTool("get_registry_addr",
 		mcp.WithDescription("Return the registry address the pipeline is currently listening on (its -registry-addr, e.g. :9091). Plugins MUST connect here by setting GTA_REGISTRY_ADDR at startup; this tool removes the guesswork of reading pipeline startup logs. Use it to learn where a freshly launched plugin should register, or to confirm activate_plugin's resolved address."),
 	), capture.handleGetRegistryAddr)
@@ -2174,6 +2502,37 @@ func main() {
 		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
 		mcp.WithString("filter", mcp.Description("Optional expr expression to filter events, e.g. data.entity == \"buff\" && data.hp > 5. Available fields: id, timestamp, session_id, protocol, raw_len, data.*")),
 	), capture.handleListDecodedData)
+
+	// 代理抓包专有：连接/流/帧查询（Connections 页面数据源）。
+	// 与 list_decoded_data 分离：这些工具按 conn_id 聚合，是移动代理抓包的核心入口。
+	s.AddTool(mcp.NewTool("list_connections",
+		mcp.WithDescription("List proxy capture connections aggregated by conn_id (newest first). Each row has client/server endpoints, protocol, source, start/end time, duration, event count and frame count. Requires a mobile proxy capture session."),
+		mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max rows to return")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+	), capture.handleListConnections)
+
+	s.AddTool(mcp.NewTool("get_connection_detail",
+		mcp.WithDescription("Get one proxy capture connection's detail: client/server endpoints, protocol, source, app/device, time range, duration and stream/frame/event counts. Use the conn_id from list_connections."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+		mcp.WithString("conn_id", mcp.Required(), mcp.Description("Connection ID from list_connections")),
+	), capture.handleGetConnectionDetail)
+
+	s.AddTool(mcp.NewTool("list_connection_streams",
+		mcp.WithDescription("List the streams within one connection (Stream View). Events are grouped by correlation_id; unpaired events (e.g. pushes) each form their own stream. Each stream contains its ordered decoded events with direction and msg_name."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+		mcp.WithString("conn_id", mcp.Required(), mcp.Description("Connection ID from list_connections")),
+		mcp.WithNumber("limit", mcp.DefaultNumber(200), mcp.Description("Max streams to return")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+	), capture.handleListConnectionStreams)
+
+	s.AddTool(mcp.NewTool("list_connection_frames",
+		mcp.WithDescription("List the raw reassembled frames within one connection (Frames / Raw view). Each frame has timestamp, direction, src/dst, protocol, link_type and base64 payload."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+		mcp.WithString("conn_id", mcp.Required(), mcp.Description("Connection ID from list_connections")),
+		mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max rows to return")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+	), capture.handleListConnectionFrames)
 
 	s.AddTool(mcp.NewTool("list_state_changes",
 		mcp.WithDescription("List state change projections from a capture session, with optional filtering by subject_type, subject_id, op, path, or flow_id."),
@@ -2332,6 +2691,8 @@ func main() {
 	mux.Handle("/message", sseServer.MessageHandler())
 	mux.Handle("/mcp", httpServer)
 	mux.HandleFunc("/events/plugins", capture.handleEventsSSE)
+	// 手机 sing-box 客户端远程 profile 配置端点（扫码导入用）。
+	mux.HandleFunc("/singbox/profile", capture.handleSingboxProfile)
 
 	// CORS 中间件：浏览器端 MCP 客户端（如 Claude Desktop 的 webview，origin 异于 8087）
 	// 发起跨域请求时，浏览器先发 OPTIONS 预检。mux 默认对 OPTIONS 返回 404 且无 CORS 头，

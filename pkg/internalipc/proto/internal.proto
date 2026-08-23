@@ -46,6 +46,11 @@ service CaptureControl {
   // gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
   // 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
   rpc GetRegistryAddr(GetRegistryAddrRequest) returns (GetRegistryAddrResponse);
+  // GetProxyConfig 返回当前代理抓包服务器配置与运行时状态（agent 子进程 + 代理会话）。
+  rpc GetProxyConfig(GetProxyConfigRequest) returns (GetProxyConfigResponse);
+  // UpdateProxyConfig 应用新的代理抓包服务器配置：持久化 proxy.json、热重启
+  // gta-singbox-agent、并确保代理抓包会话常驻（免手动开始抓包）。
+  rpc UpdateProxyConfig(UpdateProxyConfigRequest) returns (UpdateProxyConfigResponse);
 }
 
 // DecodeRawPacketsRequest 离线解码请求。
@@ -196,6 +201,15 @@ message PcapFileConfig {
   string path = 1;
 }
 
+// MobileSourceConfig 启动移动代理抓包（gta-singbox-agent 推送）。
+// 监听地址形如 "127.0.0.1:9090"（tcp）或 "unix:///tmp/gta-mobile.sock"（unix）。
+message MobileSourceConfig {
+  string listen_addr = 1;   // gRPC 服务监听地址，agent 连这里
+  string frame_style = 2;   // raw | length_prefix（默认 raw）
+  int32 prefix_len = 3;     // length_prefix 的长度前缀字节数 1|2|4（默认 4）
+  bool little_endian = 4;   // 长度前缀字节序，默认大端
+}
+
 message StartCaptureRequest {
   string session_id = 1;
   string plugin = 2;
@@ -203,6 +217,7 @@ message StartCaptureRequest {
   oneof source {
     PcapLiveConfig live = 4;
     PcapFileConfig file = 5;
+    MobileSourceConfig mobile = 6;
   }
 }
 
@@ -346,4 +361,48 @@ message GetRegistryAddrRequest {}
 // 将其填入 GTA_REGISTRY_ADDR 才能向运行时注册。空字符串表示 pipeline 未配置注册中心。
 message GetRegistryAddrResponse {
   string registry_addr = 1;
+}
+
+// GetProxyConfigRequest 无参数，返回 pipeline 当前的代理抓包服务器配置。
+message GetProxyConfigRequest {}
+
+// ProxyConfigState 是代理抓包服务器的配置 + 运行时状态快照。
+message ProxyConfigState {
+  string listen_addr = 1;    // agent HTTP CONNECT 代理监听地址（手机连这里）
+  string server_addr = 2;    // mobile Source gRPC 监听地址（agent 推这里）
+  string frame_style = 3;    // raw | length_prefix
+  int32 prefix_len = 4;      // length_prefix 长度前缀字节数
+  bool little_endian = 5;    // 长度前缀字节序
+  bool agent_running = 6;    // gta-singbox-agent 子进程是否存活
+  int32 agent_pid = 7;       // agent 子进程 PID（未运行时为 0）
+  bool session_running = 8;  // 代理抓包会话是否运行中
+  string session_id = 9;     // 代理抓包会话 id（未运行时为空）
+  string config_path = 10;   // 配置文件绝对路径
+  string plugin = 11;        // 代理抓包会话绑定的解码插件名（空=仅抓原始包）
+  repeated string include_hosts = 12;  // 连接筛选：仅抓取目标主机在此列表内的连接
+  repeated int32 include_ports = 13;   // 连接筛选：仅抓取目标端口在此列表内的连接
+}
+
+message GetProxyConfigResponse {
+  ProxyConfigState state = 1;
+}
+
+// UpdateProxyConfigRequest 新的代理抓包服务器配置。
+// listen_addr 必填（host:port）；其余字段可空（走默认值，等价于不修改）。
+// include_hosts/include_ports 为空表示不筛选（抓取全部连接）。
+message UpdateProxyConfigRequest {
+  string listen_addr = 1;
+  string server_addr = 2;
+  string frame_style = 3;
+  int32 prefix_len = 4;
+  bool little_endian = 5;
+  string plugin = 6;
+  repeated string include_hosts = 7;
+  repeated int32 include_ports = 8;
+}
+
+message UpdateProxyConfigResponse {
+  bool ok = 1;
+  string message = 2;        // 错误信息或状态说明
+  ProxyConfigState state = 3; // 应用后的最新状态
 }

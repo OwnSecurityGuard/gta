@@ -39,6 +39,9 @@ func main() {
 	debug := flag.Bool("debug", false, "enable debug logging")
 	logFormat := flag.String("log-format", "json", "log format: json | text")
 	logFile := flag.String("log-file", "", "log file path (default: <workdir>/logs/gta-pipeline.log)")
+	// sing-box server（gta-singbox-agent）自动拉起：默认随 pipeline 启动，常驻等待手机代理连接。
+	spawnAgent := flag.Bool("spawn-agent", true, "spawn gta-singbox-agent at startup (always-on proxy listener, disabled with -spawn-agent=false)")
+	agentBin := flag.String("agent-bin", "", "path to gta-singbox-agent binary (default: <workdir>/bin/gta-singbox-agent[.exe])")
 	flag.Parse()
 
 	absWorkDir, _ := filepath.Abs(*workDir)
@@ -145,15 +148,22 @@ func main() {
 		}
 	}()
 
+	// 默认自动拉起 gta-singbox-agent（sing-box server 常驻，等待手机代理软件连接）。
+	// 同时启动常驻代理抓包会话；二进制缺失时告警但不阻断 pipeline 启动。
+	// 可用 -spawn-agent=false 关闭 agent 自动拉起（常驻会话仍启动）。
+	engine.StartAlwaysOnProxy(*spawnAgent, *agentBin)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
 		slog.Info("received signal, shutting down", "signal", sig)
-		// 先优雅停止所有抓包会话：cancel + 等待各自 finalize 写库（running→stopped），
-		// 确保退出前本进程的活跃会话状态已落库。超时由 shutdownCtx 控制，不阻塞退出。
+		// 先终止 sing-box agent 子进程与常驻代理会话（幂等，重复调用无副作用）。
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer shutdownCancel()
+		engine.StopProxyServer(shutdownCtx)
+		// 再优雅停止所有抓包会话：cancel + 等待各自 finalize 写库（running→stopped），
+		// 确保退出前本进程的活跃会话状态已落库。超时由 shutdownCtx 控制，不阻塞退出。
 		engine.StopAll(shutdownCtx)
 		grpcSrv.GracefulStop()
 		registryGrpc.GracefulStop()

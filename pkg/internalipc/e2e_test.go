@@ -148,3 +148,9 @@ func (f *fakeCaptureEngine) Verify(ctx context.Context, req capturecontrol.Verif
 func (f *fakeCaptureEngine) SampleBytes(ctx context.Context, req capturecontrol.SampleBytesRequest) (capturecontrol.SampleBytesResult, error) {
 	return capturecontrol.SampleBytesResult{}, nil
 }
+func (f *fakeCaptureEngine) GetProxyConfig(ctx context.Context) (capturecontrol.ProxyConfigState, error) {
+	return capturecontrol.ProxyConfigState{}, nil
+}
+func (f *fakeCaptureEngine) UpdateProxyConfig(ctx context.Context, req capturecontrol.ProxyConfigUpdate) (capturecontrol.ProxyConfigState, error) {
+	return capturecontrol.ProxyConfigState{}, nil
+}

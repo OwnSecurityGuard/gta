@@ -6,6 +6,8 @@ export interface DecodedEvent {
   protocol: string;
   raw_len: number;
   data: Record<string, unknown>;
+  /** 代理抓包特有：捕获上下文（Captured By / Connection / Stream / Source）。 */
+  capture?: import("./connection").CaptureContext;
 }
 
 /** list_decoded_data 完整响应 */

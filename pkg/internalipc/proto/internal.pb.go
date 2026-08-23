@@ -1259,6 +1259,76 @@ func (x *PcapFileConfig) GetPath() string {
 	return ""
 }
 
+// MobileSourceConfig 启动移动代理抓包（gta-singbox-agent 推送）。
+// 监听地址形如 "127.0.0.1:9090"（tcp）或 "unix:///tmp/gta-mobile.sock"（unix）。
+type MobileSourceConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ListenAddr    string                 `protobuf:"bytes,1,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"`        // gRPC 服务监听地址，agent 连这里
+	FrameStyle    string                 `protobuf:"bytes,2,opt,name=frame_style,json=frameStyle,proto3" json:"frame_style,omitempty"`        // raw | length_prefix（默认 raw）
+	PrefixLen     int32                  `protobuf:"varint,3,opt,name=prefix_len,json=prefixLen,proto3" json:"prefix_len,omitempty"`          // length_prefix 的长度前缀字节数 1|2|4（默认 4）
+	LittleEndian  bool                   `protobuf:"varint,4,opt,name=little_endian,json=littleEndian,proto3" json:"little_endian,omitempty"` // 长度前缀字节序，默认大端
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MobileSourceConfig) Reset() {
+	*x = MobileSourceConfig{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MobileSourceConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MobileSourceConfig) ProtoMessage() {}
+
+func (x *MobileSourceConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MobileSourceConfig.ProtoReflect.Descriptor instead.
+func (*MobileSourceConfig) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *MobileSourceConfig) GetListenAddr() string {
+	if x != nil {
+		return x.ListenAddr
+	}
+	return ""
+}
+
+func (x *MobileSourceConfig) GetFrameStyle() string {
+	if x != nil {
+		return x.FrameStyle
+	}
+	return ""
+}
+
+func (x *MobileSourceConfig) GetPrefixLen() int32 {
+	if x != nil {
+		return x.PrefixLen
+	}
+	return 0
+}
+
+func (x *MobileSourceConfig) GetLittleEndian() bool {
+	if x != nil {
+		return x.LittleEndian
+	}
+	return false
+}
+
 type StartCaptureRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -1268,6 +1338,7 @@ type StartCaptureRequest struct {
 	//
 	//	*StartCaptureRequest_Live
 	//	*StartCaptureRequest_File
+	//	*StartCaptureRequest_Mobile
 	Source        isStartCaptureRequest_Source `protobuf_oneof:"source"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1275,7 +1346,7 @@ type StartCaptureRequest struct {
 
 func (x *StartCaptureRequest) Reset() {
 	*x = StartCaptureRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[15]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1287,7 +1358,7 @@ func (x *StartCaptureRequest) String() string {
 func (*StartCaptureRequest) ProtoMessage() {}
 
 func (x *StartCaptureRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[15]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1300,7 +1371,7 @@ func (x *StartCaptureRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartCaptureRequest.ProtoReflect.Descriptor instead.
 func (*StartCaptureRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{15}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *StartCaptureRequest) GetSessionId() string {
@@ -1349,6 +1420,15 @@ func (x *StartCaptureRequest) GetFile() *PcapFileConfig {
 	return nil
 }
 
+func (x *StartCaptureRequest) GetMobile() *MobileSourceConfig {
+	if x != nil {
+		if x, ok := x.Source.(*StartCaptureRequest_Mobile); ok {
+			return x.Mobile
+		}
+	}
+	return nil
+}
+
 type isStartCaptureRequest_Source interface {
 	isStartCaptureRequest_Source()
 }
@@ -1361,9 +1441,15 @@ type StartCaptureRequest_File struct {
 	File *PcapFileConfig `protobuf:"bytes,5,opt,name=file,proto3,oneof"`
 }
 
+type StartCaptureRequest_Mobile struct {
+	Mobile *MobileSourceConfig `protobuf:"bytes,6,opt,name=mobile,proto3,oneof"`
+}
+
 func (*StartCaptureRequest_Live) isStartCaptureRequest_Source() {}
 
 func (*StartCaptureRequest_File) isStartCaptureRequest_Source() {}
+
+func (*StartCaptureRequest_Mobile) isStartCaptureRequest_Source() {}
 
 type StartCaptureResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1376,7 +1462,7 @@ type StartCaptureResponse struct {
 
 func (x *StartCaptureResponse) Reset() {
 	*x = StartCaptureResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[16]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1388,7 +1474,7 @@ func (x *StartCaptureResponse) String() string {
 func (*StartCaptureResponse) ProtoMessage() {}
 
 func (x *StartCaptureResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[16]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1401,7 +1487,7 @@ func (x *StartCaptureResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartCaptureResponse.ProtoReflect.Descriptor instead.
 func (*StartCaptureResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{16}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *StartCaptureResponse) GetSessionId() string {
@@ -1434,7 +1520,7 @@ type StopCaptureRequest struct {
 
 func (x *StopCaptureRequest) Reset() {
 	*x = StopCaptureRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[17]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1446,7 +1532,7 @@ func (x *StopCaptureRequest) String() string {
 func (*StopCaptureRequest) ProtoMessage() {}
 
 func (x *StopCaptureRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[17]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1459,7 +1545,7 @@ func (x *StopCaptureRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopCaptureRequest.ProtoReflect.Descriptor instead.
 func (*StopCaptureRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{17}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *StopCaptureRequest) GetSessionId() string {
@@ -1483,7 +1569,7 @@ type StopCaptureResponse struct {
 
 func (x *StopCaptureResponse) Reset() {
 	*x = StopCaptureResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[18]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1495,7 +1581,7 @@ func (x *StopCaptureResponse) String() string {
 func (*StopCaptureResponse) ProtoMessage() {}
 
 func (x *StopCaptureResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[18]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1508,7 +1594,7 @@ func (x *StopCaptureResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopCaptureResponse.ProtoReflect.Descriptor instead.
 func (*StopCaptureResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{18}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *StopCaptureResponse) GetState() string {
@@ -1562,7 +1648,7 @@ type GetCaptureStatusRequest struct {
 
 func (x *GetCaptureStatusRequest) Reset() {
 	*x = GetCaptureStatusRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[19]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1574,7 +1660,7 @@ func (x *GetCaptureStatusRequest) String() string {
 func (*GetCaptureStatusRequest) ProtoMessage() {}
 
 func (x *GetCaptureStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[19]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1587,7 +1673,7 @@ func (x *GetCaptureStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCaptureStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetCaptureStatusRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{19}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GetCaptureStatusRequest) GetSessionId() string {
@@ -1618,7 +1704,7 @@ type GetCaptureStatusResponse struct {
 
 func (x *GetCaptureStatusResponse) Reset() {
 	*x = GetCaptureStatusResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[20]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1630,7 +1716,7 @@ func (x *GetCaptureStatusResponse) String() string {
 func (*GetCaptureStatusResponse) ProtoMessage() {}
 
 func (x *GetCaptureStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[20]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1643,7 +1729,7 @@ func (x *GetCaptureStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCaptureStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetCaptureStatusResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{20}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetCaptureStatusResponse) GetState() string {
@@ -1745,7 +1831,7 @@ type ListInterfacesRequest struct {
 
 func (x *ListInterfacesRequest) Reset() {
 	*x = ListInterfacesRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[21]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1757,7 +1843,7 @@ func (x *ListInterfacesRequest) String() string {
 func (*ListInterfacesRequest) ProtoMessage() {}
 
 func (x *ListInterfacesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[21]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1770,7 +1856,7 @@ func (x *ListInterfacesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInterfacesRequest.ProtoReflect.Descriptor instead.
 func (*ListInterfacesRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{21}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{22}
 }
 
 type ListInterfacesResponse struct {
@@ -1782,7 +1868,7 @@ type ListInterfacesResponse struct {
 
 func (x *ListInterfacesResponse) Reset() {
 	*x = ListInterfacesResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[22]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1794,7 +1880,7 @@ func (x *ListInterfacesResponse) String() string {
 func (*ListInterfacesResponse) ProtoMessage() {}
 
 func (x *ListInterfacesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[22]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1807,7 +1893,7 @@ func (x *ListInterfacesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInterfacesResponse.ProtoReflect.Descriptor instead.
 func (*ListInterfacesResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{22}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListInterfacesResponse) GetNames() []string {
@@ -1825,7 +1911,7 @@ type ListCaptureSessionsRequest struct {
 
 func (x *ListCaptureSessionsRequest) Reset() {
 	*x = ListCaptureSessionsRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[23]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1837,7 +1923,7 @@ func (x *ListCaptureSessionsRequest) String() string {
 func (*ListCaptureSessionsRequest) ProtoMessage() {}
 
 func (x *ListCaptureSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[23]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1850,7 +1936,7 @@ func (x *ListCaptureSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCaptureSessionsRequest.ProtoReflect.Descriptor instead.
 func (*ListCaptureSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{23}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{24}
 }
 
 type ListCaptureSessionsResponse struct {
@@ -1862,7 +1948,7 @@ type ListCaptureSessionsResponse struct {
 
 func (x *ListCaptureSessionsResponse) Reset() {
 	*x = ListCaptureSessionsResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[24]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1874,7 +1960,7 @@ func (x *ListCaptureSessionsResponse) String() string {
 func (*ListCaptureSessionsResponse) ProtoMessage() {}
 
 func (x *ListCaptureSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[24]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1887,7 +1973,7 @@ func (x *ListCaptureSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCaptureSessionsResponse.ProtoReflect.Descriptor instead.
 func (*ListCaptureSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{24}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ListCaptureSessionsResponse) GetSessions() []*CaptureSessionSummary {
@@ -1913,7 +1999,7 @@ type CaptureSessionSummary struct {
 
 func (x *CaptureSessionSummary) Reset() {
 	*x = CaptureSessionSummary{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[25]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1925,7 +2011,7 @@ func (x *CaptureSessionSummary) String() string {
 func (*CaptureSessionSummary) ProtoMessage() {}
 
 func (x *CaptureSessionSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[25]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1938,7 +2024,7 @@ func (x *CaptureSessionSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaptureSessionSummary.ProtoReflect.Descriptor instead.
 func (*CaptureSessionSummary) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{25}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CaptureSessionSummary) GetSessionId() string {
@@ -2005,7 +2091,7 @@ type ListPluginsRequest struct {
 
 func (x *ListPluginsRequest) Reset() {
 	*x = ListPluginsRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[26]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2017,7 +2103,7 @@ func (x *ListPluginsRequest) String() string {
 func (*ListPluginsRequest) ProtoMessage() {}
 
 func (x *ListPluginsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[26]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2030,7 +2116,7 @@ func (x *ListPluginsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPluginsRequest.ProtoReflect.Descriptor instead.
 func (*ListPluginsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{26}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{27}
 }
 
 // PluginSummary 插件注册摘要。
@@ -2050,7 +2136,7 @@ type PluginSummary struct {
 
 func (x *PluginSummary) Reset() {
 	*x = PluginSummary{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[27]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2062,7 +2148,7 @@ func (x *PluginSummary) String() string {
 func (*PluginSummary) ProtoMessage() {}
 
 func (x *PluginSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[27]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2075,7 +2161,7 @@ func (x *PluginSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginSummary.ProtoReflect.Descriptor instead.
 func (*PluginSummary) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{27}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *PluginSummary) GetInstanceId() string {
@@ -2143,7 +2229,7 @@ type ListPluginsResponse struct {
 
 func (x *ListPluginsResponse) Reset() {
 	*x = ListPluginsResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[28]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2155,7 +2241,7 @@ func (x *ListPluginsResponse) String() string {
 func (*ListPluginsResponse) ProtoMessage() {}
 
 func (x *ListPluginsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[28]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2168,7 +2254,7 @@ func (x *ListPluginsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPluginsResponse.ProtoReflect.Descriptor instead.
 func (*ListPluginsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{28}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ListPluginsResponse) GetPlugins() []*PluginSummary {
@@ -2187,7 +2273,7 @@ type GetPluginManifestRequest struct {
 
 func (x *GetPluginManifestRequest) Reset() {
 	*x = GetPluginManifestRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[29]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2199,7 +2285,7 @@ func (x *GetPluginManifestRequest) String() string {
 func (*GetPluginManifestRequest) ProtoMessage() {}
 
 func (x *GetPluginManifestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[29]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2212,7 +2298,7 @@ func (x *GetPluginManifestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPluginManifestRequest.ProtoReflect.Descriptor instead.
 func (*GetPluginManifestRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{29}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetPluginManifestRequest) GetName() string {
@@ -2232,7 +2318,7 @@ type GetPluginManifestResponse struct {
 
 func (x *GetPluginManifestResponse) Reset() {
 	*x = GetPluginManifestResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[30]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2244,7 +2330,7 @@ func (x *GetPluginManifestResponse) String() string {
 func (*GetPluginManifestResponse) ProtoMessage() {}
 
 func (x *GetPluginManifestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[30]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2257,7 +2343,7 @@ func (x *GetPluginManifestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPluginManifestResponse.ProtoReflect.Descriptor instead.
 func (*GetPluginManifestResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{30}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *GetPluginManifestResponse) GetManifest() []byte {
@@ -2284,7 +2370,7 @@ type DeregisterPluginRequest struct {
 
 func (x *DeregisterPluginRequest) Reset() {
 	*x = DeregisterPluginRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[31]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2296,7 +2382,7 @@ func (x *DeregisterPluginRequest) String() string {
 func (*DeregisterPluginRequest) ProtoMessage() {}
 
 func (x *DeregisterPluginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[31]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2309,7 +2395,7 @@ func (x *DeregisterPluginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeregisterPluginRequest.ProtoReflect.Descriptor instead.
 func (*DeregisterPluginRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{31}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *DeregisterPluginRequest) GetInstanceId() string {
@@ -2337,7 +2423,7 @@ type DeregisterPluginResponse struct {
 
 func (x *DeregisterPluginResponse) Reset() {
 	*x = DeregisterPluginResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[32]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2349,7 +2435,7 @@ func (x *DeregisterPluginResponse) String() string {
 func (*DeregisterPluginResponse) ProtoMessage() {}
 
 func (x *DeregisterPluginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[32]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2362,7 +2448,7 @@ func (x *DeregisterPluginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeregisterPluginResponse.ProtoReflect.Descriptor instead.
 func (*DeregisterPluginResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{32}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *DeregisterPluginResponse) GetOk() bool {
@@ -2398,7 +2484,7 @@ type SetSessionPluginRequest struct {
 
 func (x *SetSessionPluginRequest) Reset() {
 	*x = SetSessionPluginRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[33]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2410,7 +2496,7 @@ func (x *SetSessionPluginRequest) String() string {
 func (*SetSessionPluginRequest) ProtoMessage() {}
 
 func (x *SetSessionPluginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[33]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2423,7 +2509,7 @@ func (x *SetSessionPluginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSessionPluginRequest.ProtoReflect.Descriptor instead.
 func (*SetSessionPluginRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{33}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *SetSessionPluginRequest) GetSessionId() string {
@@ -2453,7 +2539,7 @@ type SetSessionPluginResponse struct {
 
 func (x *SetSessionPluginResponse) Reset() {
 	*x = SetSessionPluginResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[34]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2465,7 +2551,7 @@ func (x *SetSessionPluginResponse) String() string {
 func (*SetSessionPluginResponse) ProtoMessage() {}
 
 func (x *SetSessionPluginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[34]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2478,7 +2564,7 @@ func (x *SetSessionPluginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSessionPluginResponse.ProtoReflect.Descriptor instead.
 func (*SetSessionPluginResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{34}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SetSessionPluginResponse) GetOk() bool {
@@ -2518,7 +2604,7 @@ type WatchPluginsRequest struct {
 
 func (x *WatchPluginsRequest) Reset() {
 	*x = WatchPluginsRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[35]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2530,7 +2616,7 @@ func (x *WatchPluginsRequest) String() string {
 func (*WatchPluginsRequest) ProtoMessage() {}
 
 func (x *WatchPluginsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[35]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2543,7 +2629,7 @@ func (x *WatchPluginsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchPluginsRequest.ProtoReflect.Descriptor instead.
 func (*WatchPluginsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{35}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{36}
 }
 
 // PluginEvent 插件注册表状态变化通知。
@@ -2561,7 +2647,7 @@ type PluginEvent struct {
 
 func (x *PluginEvent) Reset() {
 	*x = PluginEvent{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[36]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2573,7 +2659,7 @@ func (x *PluginEvent) String() string {
 func (*PluginEvent) ProtoMessage() {}
 
 func (x *PluginEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[36]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2586,7 +2672,7 @@ func (x *PluginEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginEvent.ProtoReflect.Descriptor instead.
 func (*PluginEvent) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{36}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *PluginEvent) GetType() string {
@@ -2633,7 +2719,7 @@ type GetRegistryAddrRequest struct {
 
 func (x *GetRegistryAddrRequest) Reset() {
 	*x = GetRegistryAddrRequest{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[37]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2645,7 +2731,7 @@ func (x *GetRegistryAddrRequest) String() string {
 func (*GetRegistryAddrRequest) ProtoMessage() {}
 
 func (x *GetRegistryAddrRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[37]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2658,7 +2744,7 @@ func (x *GetRegistryAddrRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRegistryAddrRequest.ProtoReflect.Descriptor instead.
 func (*GetRegistryAddrRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{37}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{38}
 }
 
 // GetRegistryAddrResponse 返回插件应连接的注册中心地址。
@@ -2673,7 +2759,7 @@ type GetRegistryAddrResponse struct {
 
 func (x *GetRegistryAddrResponse) Reset() {
 	*x = GetRegistryAddrResponse{}
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[38]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2685,7 +2771,7 @@ func (x *GetRegistryAddrResponse) String() string {
 func (*GetRegistryAddrResponse) ProtoMessage() {}
 
 func (x *GetRegistryAddrResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[38]
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2698,7 +2784,7 @@ func (x *GetRegistryAddrResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRegistryAddrResponse.ProtoReflect.Descriptor instead.
 func (*GetRegistryAddrResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{38}
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *GetRegistryAddrResponse) GetRegistryAddr() string {
@@ -2706,6 +2792,391 @@ func (x *GetRegistryAddrResponse) GetRegistryAddr() string {
 		return x.RegistryAddr
 	}
 	return ""
+}
+
+// GetProxyConfigRequest 无参数，返回 pipeline 当前的代理抓包服务器配置。
+type GetProxyConfigRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProxyConfigRequest) Reset() {
+	*x = GetProxyConfigRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProxyConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProxyConfigRequest) ProtoMessage() {}
+
+func (x *GetProxyConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProxyConfigRequest.ProtoReflect.Descriptor instead.
+func (*GetProxyConfigRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{40}
+}
+
+// ProxyConfigState 是代理抓包服务器的配置 + 运行时状态快照。
+type ProxyConfigState struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ListenAddr     string                 `protobuf:"bytes,1,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"`                // agent HTTP CONNECT 代理监听地址（手机连这里）
+	ServerAddr     string                 `protobuf:"bytes,2,opt,name=server_addr,json=serverAddr,proto3" json:"server_addr,omitempty"`                // mobile Source gRPC 监听地址（agent 推这里）
+	FrameStyle     string                 `protobuf:"bytes,3,opt,name=frame_style,json=frameStyle,proto3" json:"frame_style,omitempty"`                // raw | length_prefix
+	PrefixLen      int32                  `protobuf:"varint,4,opt,name=prefix_len,json=prefixLen,proto3" json:"prefix_len,omitempty"`                  // length_prefix 长度前缀字节数
+	LittleEndian   bool                   `protobuf:"varint,5,opt,name=little_endian,json=littleEndian,proto3" json:"little_endian,omitempty"`         // 长度前缀字节序
+	AgentRunning   bool                   `protobuf:"varint,6,opt,name=agent_running,json=agentRunning,proto3" json:"agent_running,omitempty"`         // gta-singbox-agent 子进程是否存活
+	AgentPid       int32                  `protobuf:"varint,7,opt,name=agent_pid,json=agentPid,proto3" json:"agent_pid,omitempty"`                     // agent 子进程 PID（未运行时为 0）
+	SessionRunning bool                   `protobuf:"varint,8,opt,name=session_running,json=sessionRunning,proto3" json:"session_running,omitempty"`   // 代理抓包会话是否运行中
+	SessionId      string                 `protobuf:"bytes,9,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                   // 代理抓包会话 id（未运行时为空）
+	ConfigPath     string                 `protobuf:"bytes,10,opt,name=config_path,json=configPath,proto3" json:"config_path,omitempty"`               // 配置文件绝对路径
+	Plugin         string                 `protobuf:"bytes,11,opt,name=plugin,proto3" json:"plugin,omitempty"`                                         // 代理抓包会话绑定的解码插件名（空=仅抓原始包）
+	IncludeHosts   []string               `protobuf:"bytes,12,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`         // 连接筛选：仅抓取目标主机在此列表内的连接
+	IncludePorts   []int32                `protobuf:"varint,13,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"` // 连接筛选：仅抓取目标端口在此列表内的连接
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ProxyConfigState) Reset() {
+	*x = ProxyConfigState{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyConfigState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyConfigState) ProtoMessage() {}
+
+func (x *ProxyConfigState) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyConfigState.ProtoReflect.Descriptor instead.
+func (*ProxyConfigState) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ProxyConfigState) GetListenAddr() string {
+	if x != nil {
+		return x.ListenAddr
+	}
+	return ""
+}
+
+func (x *ProxyConfigState) GetServerAddr() string {
+	if x != nil {
+		return x.ServerAddr
+	}
+	return ""
+}
+
+func (x *ProxyConfigState) GetFrameStyle() string {
+	if x != nil {
+		return x.FrameStyle
+	}
+	return ""
+}
+
+func (x *ProxyConfigState) GetPrefixLen() int32 {
+	if x != nil {
+		return x.PrefixLen
+	}
+	return 0
+}
+
+func (x *ProxyConfigState) GetLittleEndian() bool {
+	if x != nil {
+		return x.LittleEndian
+	}
+	return false
+}
+
+func (x *ProxyConfigState) GetAgentRunning() bool {
+	if x != nil {
+		return x.AgentRunning
+	}
+	return false
+}
+
+func (x *ProxyConfigState) GetAgentPid() int32 {
+	if x != nil {
+		return x.AgentPid
+	}
+	return 0
+}
+
+func (x *ProxyConfigState) GetSessionRunning() bool {
+	if x != nil {
+		return x.SessionRunning
+	}
+	return false
+}
+
+func (x *ProxyConfigState) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ProxyConfigState) GetConfigPath() string {
+	if x != nil {
+		return x.ConfigPath
+	}
+	return ""
+}
+
+func (x *ProxyConfigState) GetPlugin() string {
+	if x != nil {
+		return x.Plugin
+	}
+	return ""
+}
+
+func (x *ProxyConfigState) GetIncludeHosts() []string {
+	if x != nil {
+		return x.IncludeHosts
+	}
+	return nil
+}
+
+func (x *ProxyConfigState) GetIncludePorts() []int32 {
+	if x != nil {
+		return x.IncludePorts
+	}
+	return nil
+}
+
+type GetProxyConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	State         *ProxyConfigState      `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProxyConfigResponse) Reset() {
+	*x = GetProxyConfigResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProxyConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProxyConfigResponse) ProtoMessage() {}
+
+func (x *GetProxyConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProxyConfigResponse.ProtoReflect.Descriptor instead.
+func (*GetProxyConfigResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *GetProxyConfigResponse) GetState() *ProxyConfigState {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+// UpdateProxyConfigRequest 新的代理抓包服务器配置。
+// listen_addr 必填（host:port）；其余字段可空（走默认值，等价于不修改）。
+// include_hosts/include_ports 为空表示不筛选（抓取全部连接）。
+type UpdateProxyConfigRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ListenAddr    string                 `protobuf:"bytes,1,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"`
+	ServerAddr    string                 `protobuf:"bytes,2,opt,name=server_addr,json=serverAddr,proto3" json:"server_addr,omitempty"`
+	FrameStyle    string                 `protobuf:"bytes,3,opt,name=frame_style,json=frameStyle,proto3" json:"frame_style,omitempty"`
+	PrefixLen     int32                  `protobuf:"varint,4,opt,name=prefix_len,json=prefixLen,proto3" json:"prefix_len,omitempty"`
+	LittleEndian  bool                   `protobuf:"varint,5,opt,name=little_endian,json=littleEndian,proto3" json:"little_endian,omitempty"`
+	Plugin        string                 `protobuf:"bytes,6,opt,name=plugin,proto3" json:"plugin,omitempty"`
+	IncludeHosts  []string               `protobuf:"bytes,7,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`
+	IncludePorts  []int32                `protobuf:"varint,8,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateProxyConfigRequest) Reset() {
+	*x = UpdateProxyConfigRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateProxyConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateProxyConfigRequest) ProtoMessage() {}
+
+func (x *UpdateProxyConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateProxyConfigRequest.ProtoReflect.Descriptor instead.
+func (*UpdateProxyConfigRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *UpdateProxyConfigRequest) GetListenAddr() string {
+	if x != nil {
+		return x.ListenAddr
+	}
+	return ""
+}
+
+func (x *UpdateProxyConfigRequest) GetServerAddr() string {
+	if x != nil {
+		return x.ServerAddr
+	}
+	return ""
+}
+
+func (x *UpdateProxyConfigRequest) GetFrameStyle() string {
+	if x != nil {
+		return x.FrameStyle
+	}
+	return ""
+}
+
+func (x *UpdateProxyConfigRequest) GetPrefixLen() int32 {
+	if x != nil {
+		return x.PrefixLen
+	}
+	return 0
+}
+
+func (x *UpdateProxyConfigRequest) GetLittleEndian() bool {
+	if x != nil {
+		return x.LittleEndian
+	}
+	return false
+}
+
+func (x *UpdateProxyConfigRequest) GetPlugin() string {
+	if x != nil {
+		return x.Plugin
+	}
+	return ""
+}
+
+func (x *UpdateProxyConfigRequest) GetIncludeHosts() []string {
+	if x != nil {
+		return x.IncludeHosts
+	}
+	return nil
+}
+
+func (x *UpdateProxyConfigRequest) GetIncludePorts() []int32 {
+	if x != nil {
+		return x.IncludePorts
+	}
+	return nil
+}
+
+type UpdateProxyConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"` // 错误信息或状态说明
+	State         *ProxyConfigState      `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`     // 应用后的最新状态
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateProxyConfigResponse) Reset() {
+	*x = UpdateProxyConfigResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateProxyConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateProxyConfigResponse) ProtoMessage() {}
+
+func (x *UpdateProxyConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateProxyConfigResponse.ProtoReflect.Descriptor instead.
+func (*UpdateProxyConfigResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *UpdateProxyConfigResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *UpdateProxyConfigResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *UpdateProxyConfigResponse) GetState() *ProxyConfigState {
+	if x != nil {
+		return x.State
+	}
+	return nil
 }
 
 var File_pkg_internalipc_proto_internal_proto protoreflect.FileDescriptor
@@ -2831,14 +3302,23 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\bsnap_len\x18\x03 \x01(\x05R\asnapLen\x12\x18\n" +
 	"\apromisc\x18\x04 \x01(\bR\apromisc\"$\n" +
 	"\x0ePcapFileConfig\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"\xd8\x01\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"\x9a\x01\n" +
+	"\x12MobileSourceConfig\x12\x1f\n" +
+	"\vlisten_addr\x18\x01 \x01(\tR\n" +
+	"listenAddr\x12\x1f\n" +
+	"\vframe_style\x18\x02 \x01(\tR\n" +
+	"frameStyle\x12\x1d\n" +
+	"\n" +
+	"prefix_len\x18\x03 \x01(\x05R\tprefixLen\x12#\n" +
+	"\rlittle_endian\x18\x04 \x01(\bR\flittleEndian\"\x97\x02\n" +
 	"\x13StartCaptureRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
 	"\x06plugin\x18\x02 \x01(\tR\x06plugin\x12\x12\n" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x125\n" +
 	"\x04live\x18\x04 \x01(\v2\x1f.gta.internalipc.PcapLiveConfigH\x00R\x04live\x125\n" +
-	"\x04file\x18\x05 \x01(\v2\x1f.gta.internalipc.PcapFileConfigH\x00R\x04fileB\b\n" +
+	"\x04file\x18\x05 \x01(\v2\x1f.gta.internalipc.PcapFileConfigH\x00R\x04file\x12=\n" +
+	"\x06mobile\x18\x06 \x01(\v2#.gta.internalipc.MobileSourceConfigH\x00R\x06mobileB\b\n" +
 	"\x06source\"d\n" +
 	"\x14StartCaptureResponse\x12\x1d\n" +
 	"\n" +
@@ -2944,7 +3424,48 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x0etimestamp_unix\x18\x05 \x01(\x03R\rtimestampUnix\"\x18\n" +
 	"\x16GetRegistryAddrRequest\">\n" +
 	"\x17GetRegistryAddrResponse\x12#\n" +
-	"\rregistry_addr\x18\x01 \x01(\tR\fregistryAddr2\xbe\v\n" +
+	"\rregistry_addr\x18\x01 \x01(\tR\fregistryAddr\"\x17\n" +
+	"\x15GetProxyConfigRequest\"\xc6\x03\n" +
+	"\x10ProxyConfigState\x12\x1f\n" +
+	"\vlisten_addr\x18\x01 \x01(\tR\n" +
+	"listenAddr\x12\x1f\n" +
+	"\vserver_addr\x18\x02 \x01(\tR\n" +
+	"serverAddr\x12\x1f\n" +
+	"\vframe_style\x18\x03 \x01(\tR\n" +
+	"frameStyle\x12\x1d\n" +
+	"\n" +
+	"prefix_len\x18\x04 \x01(\x05R\tprefixLen\x12#\n" +
+	"\rlittle_endian\x18\x05 \x01(\bR\flittleEndian\x12#\n" +
+	"\ragent_running\x18\x06 \x01(\bR\fagentRunning\x12\x1b\n" +
+	"\tagent_pid\x18\a \x01(\x05R\bagentPid\x12'\n" +
+	"\x0fsession_running\x18\b \x01(\bR\x0esessionRunning\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\t \x01(\tR\tsessionId\x12\x1f\n" +
+	"\vconfig_path\x18\n" +
+	" \x01(\tR\n" +
+	"configPath\x12\x16\n" +
+	"\x06plugin\x18\v \x01(\tR\x06plugin\x12#\n" +
+	"\rinclude_hosts\x18\f \x03(\tR\fincludeHosts\x12#\n" +
+	"\rinclude_ports\x18\r \x03(\x05R\fincludePorts\"Q\n" +
+	"\x16GetProxyConfigResponse\x127\n" +
+	"\x05state\x18\x01 \x01(\v2!.gta.internalipc.ProxyConfigStateR\x05state\"\xa3\x02\n" +
+	"\x18UpdateProxyConfigRequest\x12\x1f\n" +
+	"\vlisten_addr\x18\x01 \x01(\tR\n" +
+	"listenAddr\x12\x1f\n" +
+	"\vserver_addr\x18\x02 \x01(\tR\n" +
+	"serverAddr\x12\x1f\n" +
+	"\vframe_style\x18\x03 \x01(\tR\n" +
+	"frameStyle\x12\x1d\n" +
+	"\n" +
+	"prefix_len\x18\x04 \x01(\x05R\tprefixLen\x12#\n" +
+	"\rlittle_endian\x18\x05 \x01(\bR\flittleEndian\x12\x16\n" +
+	"\x06plugin\x18\x06 \x01(\tR\x06plugin\x12#\n" +
+	"\rinclude_hosts\x18\a \x03(\tR\fincludeHosts\x12#\n" +
+	"\rinclude_ports\x18\b \x03(\x05R\fincludePorts\"~\n" +
+	"\x19UpdateProxyConfigResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +
+	"\x05state\x18\x03 \x01(\v2!.gta.internalipc.ProxyConfigStateR\x05state2\x8d\r\n" +
 	"\x0eCaptureControl\x12[\n" +
 	"\fStartCapture\x12$.gta.internalipc.StartCaptureRequest\x1a%.gta.internalipc.StartCaptureResponse\x12X\n" +
 	"\vStopCapture\x12#.gta.internalipc.StopCaptureRequest\x1a$.gta.internalipc.StopCaptureResponse\x12g\n" +
@@ -2961,7 +3482,9 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"TestPlugin\x12\".gta.internalipc.TestPluginRequest\x1a#.gta.internalipc.TestPluginResponse\x12I\n" +
 	"\x06Verify\x12\x1e.gta.internalipc.VerifyRequest\x1a\x1f.gta.internalipc.VerifyResponse\x12X\n" +
 	"\vSampleBytes\x12#.gta.internalipc.SampleBytesRequest\x1a$.gta.internalipc.SampleBytesResponse\x12d\n" +
-	"\x0fGetRegistryAddr\x12'.gta.internalipc.GetRegistryAddrRequest\x1a(.gta.internalipc.GetRegistryAddrResponseB\x1bZ\x19gta/pkg/internalipc/protob\x06proto3"
+	"\x0fGetRegistryAddr\x12'.gta.internalipc.GetRegistryAddrRequest\x1a(.gta.internalipc.GetRegistryAddrResponse\x12a\n" +
+	"\x0eGetProxyConfig\x12&.gta.internalipc.GetProxyConfigRequest\x1a'.gta.internalipc.GetProxyConfigResponse\x12j\n" +
+	"\x11UpdateProxyConfig\x12).gta.internalipc.UpdateProxyConfigRequest\x1a*.gta.internalipc.UpdateProxyConfigResponseB\x1bZ\x19gta/pkg/internalipc/protob\x06proto3"
 
 var (
 	file_pkg_internalipc_proto_internal_proto_rawDescOnce sync.Once
@@ -2975,7 +3498,7 @@ func file_pkg_internalipc_proto_internal_proto_rawDescGZIP() []byte {
 	return file_pkg_internalipc_proto_internal_proto_rawDescData
 }
 
-var file_pkg_internalipc_proto_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_pkg_internalipc_proto_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
 var file_pkg_internalipc_proto_internal_proto_goTypes = []any{
 	(*DecodeRawPacketsRequest)(nil),     // 0: gta.internalipc.DecodeRawPacketsRequest
 	(*DecodeRawPacketsResponse)(nil),    // 1: gta.internalipc.DecodeRawPacketsResponse
@@ -2992,82 +3515,95 @@ var file_pkg_internalipc_proto_internal_proto_goTypes = []any{
 	(*SampleBytesResponse)(nil),         // 12: gta.internalipc.SampleBytesResponse
 	(*PcapLiveConfig)(nil),              // 13: gta.internalipc.PcapLiveConfig
 	(*PcapFileConfig)(nil),              // 14: gta.internalipc.PcapFileConfig
-	(*StartCaptureRequest)(nil),         // 15: gta.internalipc.StartCaptureRequest
-	(*StartCaptureResponse)(nil),        // 16: gta.internalipc.StartCaptureResponse
-	(*StopCaptureRequest)(nil),          // 17: gta.internalipc.StopCaptureRequest
-	(*StopCaptureResponse)(nil),         // 18: gta.internalipc.StopCaptureResponse
-	(*GetCaptureStatusRequest)(nil),     // 19: gta.internalipc.GetCaptureStatusRequest
-	(*GetCaptureStatusResponse)(nil),    // 20: gta.internalipc.GetCaptureStatusResponse
-	(*ListInterfacesRequest)(nil),       // 21: gta.internalipc.ListInterfacesRequest
-	(*ListInterfacesResponse)(nil),      // 22: gta.internalipc.ListInterfacesResponse
-	(*ListCaptureSessionsRequest)(nil),  // 23: gta.internalipc.ListCaptureSessionsRequest
-	(*ListCaptureSessionsResponse)(nil), // 24: gta.internalipc.ListCaptureSessionsResponse
-	(*CaptureSessionSummary)(nil),       // 25: gta.internalipc.CaptureSessionSummary
-	(*ListPluginsRequest)(nil),          // 26: gta.internalipc.ListPluginsRequest
-	(*PluginSummary)(nil),               // 27: gta.internalipc.PluginSummary
-	(*ListPluginsResponse)(nil),         // 28: gta.internalipc.ListPluginsResponse
-	(*GetPluginManifestRequest)(nil),    // 29: gta.internalipc.GetPluginManifestRequest
-	(*GetPluginManifestResponse)(nil),   // 30: gta.internalipc.GetPluginManifestResponse
-	(*DeregisterPluginRequest)(nil),     // 31: gta.internalipc.DeregisterPluginRequest
-	(*DeregisterPluginResponse)(nil),    // 32: gta.internalipc.DeregisterPluginResponse
-	(*SetSessionPluginRequest)(nil),     // 33: gta.internalipc.SetSessionPluginRequest
-	(*SetSessionPluginResponse)(nil),    // 34: gta.internalipc.SetSessionPluginResponse
-	(*WatchPluginsRequest)(nil),         // 35: gta.internalipc.WatchPluginsRequest
-	(*PluginEvent)(nil),                 // 36: gta.internalipc.PluginEvent
-	(*GetRegistryAddrRequest)(nil),      // 37: gta.internalipc.GetRegistryAddrRequest
-	(*GetRegistryAddrResponse)(nil),     // 38: gta.internalipc.GetRegistryAddrResponse
-	nil,                                 // 39: gta.internalipc.TestPluginResponse.TypeHistogramEntry
-	nil,                                 // 40: gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	nil,                                 // 41: gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	(*MobileSourceConfig)(nil),          // 15: gta.internalipc.MobileSourceConfig
+	(*StartCaptureRequest)(nil),         // 16: gta.internalipc.StartCaptureRequest
+	(*StartCaptureResponse)(nil),        // 17: gta.internalipc.StartCaptureResponse
+	(*StopCaptureRequest)(nil),          // 18: gta.internalipc.StopCaptureRequest
+	(*StopCaptureResponse)(nil),         // 19: gta.internalipc.StopCaptureResponse
+	(*GetCaptureStatusRequest)(nil),     // 20: gta.internalipc.GetCaptureStatusRequest
+	(*GetCaptureStatusResponse)(nil),    // 21: gta.internalipc.GetCaptureStatusResponse
+	(*ListInterfacesRequest)(nil),       // 22: gta.internalipc.ListInterfacesRequest
+	(*ListInterfacesResponse)(nil),      // 23: gta.internalipc.ListInterfacesResponse
+	(*ListCaptureSessionsRequest)(nil),  // 24: gta.internalipc.ListCaptureSessionsRequest
+	(*ListCaptureSessionsResponse)(nil), // 25: gta.internalipc.ListCaptureSessionsResponse
+	(*CaptureSessionSummary)(nil),       // 26: gta.internalipc.CaptureSessionSummary
+	(*ListPluginsRequest)(nil),          // 27: gta.internalipc.ListPluginsRequest
+	(*PluginSummary)(nil),               // 28: gta.internalipc.PluginSummary
+	(*ListPluginsResponse)(nil),         // 29: gta.internalipc.ListPluginsResponse
+	(*GetPluginManifestRequest)(nil),    // 30: gta.internalipc.GetPluginManifestRequest
+	(*GetPluginManifestResponse)(nil),   // 31: gta.internalipc.GetPluginManifestResponse
+	(*DeregisterPluginRequest)(nil),     // 32: gta.internalipc.DeregisterPluginRequest
+	(*DeregisterPluginResponse)(nil),    // 33: gta.internalipc.DeregisterPluginResponse
+	(*SetSessionPluginRequest)(nil),     // 34: gta.internalipc.SetSessionPluginRequest
+	(*SetSessionPluginResponse)(nil),    // 35: gta.internalipc.SetSessionPluginResponse
+	(*WatchPluginsRequest)(nil),         // 36: gta.internalipc.WatchPluginsRequest
+	(*PluginEvent)(nil),                 // 37: gta.internalipc.PluginEvent
+	(*GetRegistryAddrRequest)(nil),      // 38: gta.internalipc.GetRegistryAddrRequest
+	(*GetRegistryAddrResponse)(nil),     // 39: gta.internalipc.GetRegistryAddrResponse
+	(*GetProxyConfigRequest)(nil),       // 40: gta.internalipc.GetProxyConfigRequest
+	(*ProxyConfigState)(nil),            // 41: gta.internalipc.ProxyConfigState
+	(*GetProxyConfigResponse)(nil),      // 42: gta.internalipc.GetProxyConfigResponse
+	(*UpdateProxyConfigRequest)(nil),    // 43: gta.internalipc.UpdateProxyConfigRequest
+	(*UpdateProxyConfigResponse)(nil),   // 44: gta.internalipc.UpdateProxyConfigResponse
+	nil,                                 // 45: gta.internalipc.TestPluginResponse.TypeHistogramEntry
+	nil,                                 // 46: gta.internalipc.SampleBytesResponse.LengthHistogramEntry
+	nil,                                 // 47: gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
 }
 var file_pkg_internalipc_proto_internal_proto_depIdxs = []int32{
-	39, // 0: gta.internalipc.TestPluginResponse.type_histogram:type_name -> gta.internalipc.TestPluginResponse.TypeHistogramEntry
+	45, // 0: gta.internalipc.TestPluginResponse.type_histogram:type_name -> gta.internalipc.TestPluginResponse.TypeHistogramEntry
 	3,  // 1: gta.internalipc.TestPluginResponse.sample_events:type_name -> gta.internalipc.TestEventLite
 	4,  // 2: gta.internalipc.TestPluginResponse.error_samples:type_name -> gta.internalipc.TestErrorLite
 	7,  // 3: gta.internalipc.VerifyResponse.violations:type_name -> gta.internalipc.VerifyViolation
 	8,  // 4: gta.internalipc.VerifyResponse.quality:type_name -> gta.internalipc.VerifyQuality
 	11, // 5: gta.internalipc.SampleBytesResponse.packets:type_name -> gta.internalipc.SampledPacket
-	40, // 6: gta.internalipc.SampleBytesResponse.length_histogram:type_name -> gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	41, // 7: gta.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	46, // 6: gta.internalipc.SampleBytesResponse.length_histogram:type_name -> gta.internalipc.SampleBytesResponse.LengthHistogramEntry
+	47, // 7: gta.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
 	13, // 8: gta.internalipc.StartCaptureRequest.live:type_name -> gta.internalipc.PcapLiveConfig
 	14, // 9: gta.internalipc.StartCaptureRequest.file:type_name -> gta.internalipc.PcapFileConfig
-	25, // 10: gta.internalipc.ListCaptureSessionsResponse.sessions:type_name -> gta.internalipc.CaptureSessionSummary
-	27, // 11: gta.internalipc.ListPluginsResponse.plugins:type_name -> gta.internalipc.PluginSummary
-	15, // 12: gta.internalipc.CaptureControl.StartCapture:input_type -> gta.internalipc.StartCaptureRequest
-	17, // 13: gta.internalipc.CaptureControl.StopCapture:input_type -> gta.internalipc.StopCaptureRequest
-	19, // 14: gta.internalipc.CaptureControl.GetCaptureStatus:input_type -> gta.internalipc.GetCaptureStatusRequest
-	23, // 15: gta.internalipc.CaptureControl.ListCaptureSessions:input_type -> gta.internalipc.ListCaptureSessionsRequest
-	21, // 16: gta.internalipc.CaptureControl.ListInterfaces:input_type -> gta.internalipc.ListInterfacesRequest
-	0,  // 17: gta.internalipc.CaptureControl.DecodeRawPackets:input_type -> gta.internalipc.DecodeRawPacketsRequest
-	26, // 18: gta.internalipc.CaptureControl.ListPlugins:input_type -> gta.internalipc.ListPluginsRequest
-	29, // 19: gta.internalipc.CaptureControl.GetPluginManifest:input_type -> gta.internalipc.GetPluginManifestRequest
-	31, // 20: gta.internalipc.CaptureControl.DeregisterPlugin:input_type -> gta.internalipc.DeregisterPluginRequest
-	33, // 21: gta.internalipc.CaptureControl.SetSessionPlugin:input_type -> gta.internalipc.SetSessionPluginRequest
-	35, // 22: gta.internalipc.CaptureControl.WatchPlugins:input_type -> gta.internalipc.WatchPluginsRequest
-	2,  // 23: gta.internalipc.CaptureControl.TestPlugin:input_type -> gta.internalipc.TestPluginRequest
-	6,  // 24: gta.internalipc.CaptureControl.Verify:input_type -> gta.internalipc.VerifyRequest
-	10, // 25: gta.internalipc.CaptureControl.SampleBytes:input_type -> gta.internalipc.SampleBytesRequest
-	37, // 26: gta.internalipc.CaptureControl.GetRegistryAddr:input_type -> gta.internalipc.GetRegistryAddrRequest
-	16, // 27: gta.internalipc.CaptureControl.StartCapture:output_type -> gta.internalipc.StartCaptureResponse
-	18, // 28: gta.internalipc.CaptureControl.StopCapture:output_type -> gta.internalipc.StopCaptureResponse
-	20, // 29: gta.internalipc.CaptureControl.GetCaptureStatus:output_type -> gta.internalipc.GetCaptureStatusResponse
-	24, // 30: gta.internalipc.CaptureControl.ListCaptureSessions:output_type -> gta.internalipc.ListCaptureSessionsResponse
-	22, // 31: gta.internalipc.CaptureControl.ListInterfaces:output_type -> gta.internalipc.ListInterfacesResponse
-	1,  // 32: gta.internalipc.CaptureControl.DecodeRawPackets:output_type -> gta.internalipc.DecodeRawPacketsResponse
-	28, // 33: gta.internalipc.CaptureControl.ListPlugins:output_type -> gta.internalipc.ListPluginsResponse
-	30, // 34: gta.internalipc.CaptureControl.GetPluginManifest:output_type -> gta.internalipc.GetPluginManifestResponse
-	32, // 35: gta.internalipc.CaptureControl.DeregisterPlugin:output_type -> gta.internalipc.DeregisterPluginResponse
-	34, // 36: gta.internalipc.CaptureControl.SetSessionPlugin:output_type -> gta.internalipc.SetSessionPluginResponse
-	36, // 37: gta.internalipc.CaptureControl.WatchPlugins:output_type -> gta.internalipc.PluginEvent
-	5,  // 38: gta.internalipc.CaptureControl.TestPlugin:output_type -> gta.internalipc.TestPluginResponse
-	9,  // 39: gta.internalipc.CaptureControl.Verify:output_type -> gta.internalipc.VerifyResponse
-	12, // 40: gta.internalipc.CaptureControl.SampleBytes:output_type -> gta.internalipc.SampleBytesResponse
-	38, // 41: gta.internalipc.CaptureControl.GetRegistryAddr:output_type -> gta.internalipc.GetRegistryAddrResponse
-	27, // [27:42] is the sub-list for method output_type
-	12, // [12:27] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	15, // 10: gta.internalipc.StartCaptureRequest.mobile:type_name -> gta.internalipc.MobileSourceConfig
+	26, // 11: gta.internalipc.ListCaptureSessionsResponse.sessions:type_name -> gta.internalipc.CaptureSessionSummary
+	28, // 12: gta.internalipc.ListPluginsResponse.plugins:type_name -> gta.internalipc.PluginSummary
+	41, // 13: gta.internalipc.GetProxyConfigResponse.state:type_name -> gta.internalipc.ProxyConfigState
+	41, // 14: gta.internalipc.UpdateProxyConfigResponse.state:type_name -> gta.internalipc.ProxyConfigState
+	16, // 15: gta.internalipc.CaptureControl.StartCapture:input_type -> gta.internalipc.StartCaptureRequest
+	18, // 16: gta.internalipc.CaptureControl.StopCapture:input_type -> gta.internalipc.StopCaptureRequest
+	20, // 17: gta.internalipc.CaptureControl.GetCaptureStatus:input_type -> gta.internalipc.GetCaptureStatusRequest
+	24, // 18: gta.internalipc.CaptureControl.ListCaptureSessions:input_type -> gta.internalipc.ListCaptureSessionsRequest
+	22, // 19: gta.internalipc.CaptureControl.ListInterfaces:input_type -> gta.internalipc.ListInterfacesRequest
+	0,  // 20: gta.internalipc.CaptureControl.DecodeRawPackets:input_type -> gta.internalipc.DecodeRawPacketsRequest
+	27, // 21: gta.internalipc.CaptureControl.ListPlugins:input_type -> gta.internalipc.ListPluginsRequest
+	30, // 22: gta.internalipc.CaptureControl.GetPluginManifest:input_type -> gta.internalipc.GetPluginManifestRequest
+	32, // 23: gta.internalipc.CaptureControl.DeregisterPlugin:input_type -> gta.internalipc.DeregisterPluginRequest
+	34, // 24: gta.internalipc.CaptureControl.SetSessionPlugin:input_type -> gta.internalipc.SetSessionPluginRequest
+	36, // 25: gta.internalipc.CaptureControl.WatchPlugins:input_type -> gta.internalipc.WatchPluginsRequest
+	2,  // 26: gta.internalipc.CaptureControl.TestPlugin:input_type -> gta.internalipc.TestPluginRequest
+	6,  // 27: gta.internalipc.CaptureControl.Verify:input_type -> gta.internalipc.VerifyRequest
+	10, // 28: gta.internalipc.CaptureControl.SampleBytes:input_type -> gta.internalipc.SampleBytesRequest
+	38, // 29: gta.internalipc.CaptureControl.GetRegistryAddr:input_type -> gta.internalipc.GetRegistryAddrRequest
+	40, // 30: gta.internalipc.CaptureControl.GetProxyConfig:input_type -> gta.internalipc.GetProxyConfigRequest
+	43, // 31: gta.internalipc.CaptureControl.UpdateProxyConfig:input_type -> gta.internalipc.UpdateProxyConfigRequest
+	17, // 32: gta.internalipc.CaptureControl.StartCapture:output_type -> gta.internalipc.StartCaptureResponse
+	19, // 33: gta.internalipc.CaptureControl.StopCapture:output_type -> gta.internalipc.StopCaptureResponse
+	21, // 34: gta.internalipc.CaptureControl.GetCaptureStatus:output_type -> gta.internalipc.GetCaptureStatusResponse
+	25, // 35: gta.internalipc.CaptureControl.ListCaptureSessions:output_type -> gta.internalipc.ListCaptureSessionsResponse
+	23, // 36: gta.internalipc.CaptureControl.ListInterfaces:output_type -> gta.internalipc.ListInterfacesResponse
+	1,  // 37: gta.internalipc.CaptureControl.DecodeRawPackets:output_type -> gta.internalipc.DecodeRawPacketsResponse
+	29, // 38: gta.internalipc.CaptureControl.ListPlugins:output_type -> gta.internalipc.ListPluginsResponse
+	31, // 39: gta.internalipc.CaptureControl.GetPluginManifest:output_type -> gta.internalipc.GetPluginManifestResponse
+	33, // 40: gta.internalipc.CaptureControl.DeregisterPlugin:output_type -> gta.internalipc.DeregisterPluginResponse
+	35, // 41: gta.internalipc.CaptureControl.SetSessionPlugin:output_type -> gta.internalipc.SetSessionPluginResponse
+	37, // 42: gta.internalipc.CaptureControl.WatchPlugins:output_type -> gta.internalipc.PluginEvent
+	5,  // 43: gta.internalipc.CaptureControl.TestPlugin:output_type -> gta.internalipc.TestPluginResponse
+	9,  // 44: gta.internalipc.CaptureControl.Verify:output_type -> gta.internalipc.VerifyResponse
+	12, // 45: gta.internalipc.CaptureControl.SampleBytes:output_type -> gta.internalipc.SampleBytesResponse
+	39, // 46: gta.internalipc.CaptureControl.GetRegistryAddr:output_type -> gta.internalipc.GetRegistryAddrResponse
+	42, // 47: gta.internalipc.CaptureControl.GetProxyConfig:output_type -> gta.internalipc.GetProxyConfigResponse
+	44, // 48: gta.internalipc.CaptureControl.UpdateProxyConfig:output_type -> gta.internalipc.UpdateProxyConfigResponse
+	32, // [32:49] is the sub-list for method output_type
+	15, // [15:32] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_pkg_internalipc_proto_internal_proto_init() }
@@ -3075,9 +3611,10 @@ func file_pkg_internalipc_proto_internal_proto_init() {
 	if File_pkg_internalipc_proto_internal_proto != nil {
 		return
 	}
-	file_pkg_internalipc_proto_internal_proto_msgTypes[15].OneofWrappers = []any{
+	file_pkg_internalipc_proto_internal_proto_msgTypes[16].OneofWrappers = []any{
 		(*StartCaptureRequest_Live)(nil),
 		(*StartCaptureRequest_File)(nil),
+		(*StartCaptureRequest_Mobile)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -3085,7 +3622,7 @@ func file_pkg_internalipc_proto_internal_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_internalipc_proto_internal_proto_rawDesc), len(file_pkg_internalipc_proto_internal_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   42,
+			NumMessages:   48,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

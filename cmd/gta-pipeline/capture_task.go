@@ -13,6 +13,7 @@ import (
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
 	"gta/pkg/capture"
+	"gta/pkg/capture/mobile"
 	"gta/pkg/capture/pcapfile"
 	"gta/pkg/capture/pcaplive"
 	"gta/pkg/decode"
@@ -39,6 +40,7 @@ type captureTask struct {
 	pcapFile   string
 	sourceName string
 	liveCfg    *capturecontrol.LiveConfig
+	mobileCfg  *capturecontrol.MobileConfig
 	start      time.Time
 
 	// 解码插件绑定：创建时设定，运行中可经 SetSessionPlugin 热切换（pluginMu 保护）。
@@ -315,7 +317,7 @@ func (t *captureTask) run() {
 	engine = analyze.NewEngine(t.rules, t.logger)
 	baseline = state.NewBaselineManager(nil)
 
-	sources, err := openCaptureSources(t.ctx, t.iface, t.port, t.pcapFile, t.liveCfg)
+	sources, err := openCaptureSources(t.ctx, t.iface, t.port, t.pcapFile, t.liveCfg, t.mobileCfg)
 	if err != nil {
 		t.logger.Error("capture init failed", "error", err, "interface", t.iface, "port", t.port, "pcap_file", t.pcapFile)
 		return
@@ -483,11 +485,25 @@ func decoderAction(client, current pb.DecoderClient, haveDispatcher bool) string
 }
 
 // openCaptureSources 根据配置打开一个或多个 capture source。
-// 若 pcapFile 非空则回放文件；若 iface/live.Device 非空则打开指定网卡；
+// 若 pcapFile 非空则回放文件；若 live.Device 非空则打开指定网卡；
+// 若 mobile 非空则启动移动代理抓包源（gRPC server，等待 gta-singbox-agent 推送）；
 // 否则打开所有可用网卡。live 中的 BPF/SnapLen/Promisc 透传给 pcap-live。
-func openCaptureSources(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig) ([]capture.Source, error) {
+func openCaptureSources(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig) ([]capture.Source, error) {
 	if pcapFile != "" {
 		src, err := capture.Open(ctx, "pcap-file", pcapfile.PcapFileConfig{Path: pcapFile})
+		if err != nil {
+			return nil, err
+		}
+		return []capture.Source{src}, nil
+	}
+
+	if mcfg != nil {
+		src, err := capture.Open(ctx, "mobile", mobile.MobileConfig{
+			ListenAddr:   mcfg.ListenAddr,
+			FrameStyle:   mobile.FrameStyle(mcfg.FrameStyle),
+			PrefixLen:    mcfg.PrefixLen,
+			LittleEndian: mcfg.LittleEndian,
+		})
 		if err != nil {
 			return nil, err
 		}

@@ -159,6 +159,12 @@ type EventContext struct {
 	RawPacketID    string `msgpack:"raw_packet_id,omitempty"`
 	MessageOrdinal int    `msgpack:"message_ordinal,omitempty"`
 	Direction      string `msgpack:"direction,omitempty"`
+	// ConnID 是代理抓包场景下的连接标识（如移动代理的 conn_id）。
+	// 同一连接的两个方向共享同一 ConnID，供 Connections 页面按连接聚合。
+	ConnID string `msgpack:"conn_id,omitempty"`
+	// Source 是抓包来源名称（mobile / pcap-live / pcap-file / fake），
+	// 供前端区分"代理抓包"与普通网卡抓包（Capture Context 展示）。
+	Source string `msgpack:"source,omitempty"`
 }
 
 // MarshalMsgpack 将 EventContext 编码为 MsgPack 字节。
@@ -168,6 +174,8 @@ func (c EventContext) MarshalMsgpack() ([]byte, error) {
 		"raw_packet_id":   c.RawPacketID,
 		"message_ordinal": c.MessageOrdinal,
 		"direction":       c.Direction,
+		"conn_id":         c.ConnID,
+		"source":          c.Source,
 	})
 	return v.MarshalMsgpack()
 }
@@ -198,6 +206,16 @@ func UnmarshalContextMsgpack(data []byte) (EventContext, error) {
 		if f, ok := obj["direction"]; ok {
 			if s, ok := f.AsString(); ok {
 				ctx.Direction = s
+			}
+		}
+		if f, ok := obj["conn_id"]; ok {
+			if s, ok := f.AsString(); ok {
+				ctx.ConnID = s
+			}
+		}
+		if f, ok := obj["source"]; ok {
+			if s, ok := f.AsString(); ok {
+				ctx.Source = s
 			}
 		}
 	}

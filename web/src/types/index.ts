@@ -57,3 +57,21 @@ export type {
   TraceProtocolFlowResult,
 } from "./behavior";
 export type { QueryCaptureTableResult } from "./table-browser";
+export type {
+  CaptureContext,
+  ConnectionSummary,
+  ConnectionDetail,
+  ConnectionEvent,
+  ConnectionStream,
+  ConnectionFrame,
+  ListConnectionsResult,
+  GetConnectionDetailResult,
+  ListConnectionStreamsResult,
+  ListConnectionFramesResult,
+} from "./connection";
+export type {
+  ProxyConfigState,
+  GetProxyConfigResult,
+  UpdateProxyConfigResult,
+  ProxyConfigUpdateVars,
+} from "./proxy";

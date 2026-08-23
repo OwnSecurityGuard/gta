@@ -51,6 +51,39 @@ type CaptureEngine interface {
 	SampleBytes(ctx context.Context, req SampleBytesRequest) (SampleBytesResult, error)
 	// GetRegistryAddr 返回插件应连接的注册中心地址（即 -registry-addr 的值）。
 	GetRegistryAddr(ctx context.Context) (string, error)
+	// GetProxyConfig 返回当前代理抓包服务器配置与运行时状态。
+	GetProxyConfig(ctx context.Context) (ProxyConfigState, error)
+	// UpdateProxyConfig 应用新的代理抓包服务器配置（持久化 + 热重启 agent + 常驻会话）。
+	UpdateProxyConfig(ctx context.Context, req ProxyConfigUpdate) (ProxyConfigState, error)
+}
+
+// ProxyConfigState 是代理抓包服务器的配置 + 运行时状态快照（与 proto 对应）。
+type ProxyConfigState struct {
+	ListenAddr     string
+	ServerAddr     string
+	FrameStyle     string
+	PrefixLen      int32
+	LittleEndian   bool
+	AgentRunning   bool
+	AgentPID       int32
+	SessionRunning bool
+	SessionID      string
+	ConfigPath     string
+	Plugin         string
+	IncludeHosts   []string
+	IncludePorts   []int32
+}
+
+// ProxyConfigUpdate 是新的代理抓包服务器配置（字段为空表示不修改）。
+type ProxyConfigUpdate struct {
+	ListenAddr   string
+	ServerAddr   string
+	FrameStyle   string
+	PrefixLen    int32
+	LittleEndian bool
+	Plugin       string
+	IncludeHosts []string
+	IncludePorts []int32
 }
 
 // PluginEvent 是插件注册表状态变化通知（与 proto PluginEvent 对应，但用 Go 原生类型）。
@@ -125,6 +158,7 @@ type StartSessionRequest struct {
 	Port      int
 	Live      *LiveConfig
 	File      *FileConfig
+	Mobile    *MobileConfig
 }
 
 // LiveConfig 对应 proto PcapLiveConfig。
@@ -138,6 +172,14 @@ type LiveConfig struct {
 // FileConfig 对应 proto PcapFileConfig。
 type FileConfig struct {
 	Path string
+}
+
+// MobileConfig 对应 proto MobileSourceConfig。
+type MobileConfig struct {
+	ListenAddr   string
+	FrameStyle   string
+	PrefixLen    int
+	LittleEndian bool
 }
 
 // StartSessionResult 是启动结果。
@@ -227,6 +269,13 @@ func (s *Server) StartCapture(ctx context.Context, req *pb.StartCaptureRequest) 
 		}
 	case *pb.StartCaptureRequest_File:
 		engineReq.File = &FileConfig{Path: src.File.GetPath()}
+	case *pb.StartCaptureRequest_Mobile:
+		engineReq.Mobile = &MobileConfig{
+			ListenAddr:   src.Mobile.GetListenAddr(),
+			FrameStyle:   src.Mobile.GetFrameStyle(),
+			PrefixLen:    int(src.Mobile.GetPrefixLen()),
+			LittleEndian: src.Mobile.GetLittleEndian(),
+		}
 	}
 	res, err := s.engine.StartSession(ctx, engineReq)
 	if err != nil {
@@ -472,4 +521,57 @@ func (s *Server) WatchPlugins(req *pb.WatchPluginsRequest, stream grpc.ServerStr
 		}
 	}
 	return nil
+}
+
+// GetProxyConfig 处理查询代理抓包服务器配置 RPC。
+func (s *Server) GetProxyConfig(ctx context.Context, req *pb.GetProxyConfigRequest) (*pb.GetProxyConfigResponse, error) {
+	st, err := s.engine.GetProxyConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetProxyConfigResponse{State: stateToProto(st)}, nil
+}
+
+// UpdateProxyConfig 处理应用代理抓包服务器配置 RPC。
+// 引擎负责持久化 + 热重启 agent + 确保代理会话常驻；失败时 ok=false + message 说明。
+func (s *Server) UpdateProxyConfig(ctx context.Context, req *pb.UpdateProxyConfigRequest) (*pb.UpdateProxyConfigResponse, error) {
+	st, err := s.engine.UpdateProxyConfig(ctx, ProxyConfigUpdate{
+		ListenAddr:   req.GetListenAddr(),
+		ServerAddr:   req.GetServerAddr(),
+		FrameStyle:   req.GetFrameStyle(),
+		PrefixLen:    req.GetPrefixLen(),
+		LittleEndian: req.GetLittleEndian(),
+		Plugin:       req.GetPlugin(),
+		IncludeHosts: req.GetIncludeHosts(),
+		IncludePorts: req.GetIncludePorts(),
+	})
+	if err != nil {
+		return &pb.UpdateProxyConfigResponse{
+			Ok:      false,
+			Message: err.Error(),
+		}, nil
+	}
+	return &pb.UpdateProxyConfigResponse{
+		Ok:      true,
+		Message: "proxy server config applied",
+		State:   stateToProto(st),
+	}, nil
+}
+
+func stateToProto(st ProxyConfigState) *pb.ProxyConfigState {
+	return &pb.ProxyConfigState{
+		ListenAddr:     st.ListenAddr,
+		ServerAddr:     st.ServerAddr,
+		FrameStyle:     st.FrameStyle,
+		PrefixLen:      st.PrefixLen,
+		LittleEndian:   st.LittleEndian,
+		AgentRunning:   st.AgentRunning,
+		AgentPid:       st.AgentPID,
+		SessionRunning: st.SessionRunning,
+		SessionId:      st.SessionID,
+		ConfigPath:     st.ConfigPath,
+		Plugin:         st.Plugin,
+		IncludeHosts:   st.IncludeHosts,
+		IncludePorts:   st.IncludePorts,
+	}
 }

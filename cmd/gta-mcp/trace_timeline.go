@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -12,21 +13,64 @@ import (
 	"gta/pkg/event"
 )
 
+// TimelineProtocol 是 _meta.protocol 中投影的通信语义（Protocol Behavior Resolver 产出）。
+// 它与原始业务 JSON 并存：有语义则增强展示，无语义则前端自动降级为普通 JSON 事件。
+type TimelineProtocol struct {
+	Message     string               `json:"message,omitempty"`
+	Role        string               `json:"role,omitempty"` // request | response | push | unknown
+	Delivery    string               `json:"delivery,omitempty"`
+	Correlation *TimelineCorrelation `json:"correlation,omitempty"`
+	Error       *TimelineError       `json:"error,omitempty"`
+}
+
+// TimelineCorrelation 描述一条消息的 Request/Response 关联。
+type TimelineCorrelation struct {
+	Direction string `json:"direction,omitempty"` // request | response
+	Rule      string `json:"rule,omitempty"`
+	Key       string `json:"key,omitempty"`
+	Value     string `json:"value,omitempty"`
+}
+
+// TimelineError 描述一条消息的错误语义。
+type TimelineError struct {
+	Failed bool   `json:"failed"`
+	Code   string `json:"code,omitempty"`
+}
+
 // TimelineNode 是会话时间线树的一个节点，对应一条已解码事件。
 // 父子关系来自 TraceContext.CausationID（OpenTelemetry 的 parent span id）；
 // 同一 correlation_id 的事件聚合为一个"会话/对话"（request/response 分组）。
 // Children 使用指针，便于在单次遍历中无损挂载子树，序列化时由 encoding/json 自动解引用。
 type TimelineNode struct {
-	ID            string         `json:"id"`
-	Timestamp     time.Time      `json:"timestamp"`
-	SchemaID      string         `json:"schema_id,omitempty"`
-	Type          string         `json:"type,omitempty"`
-	MsgName       string         `json:"msg_name,omitempty"`
-	Direction     string         `json:"direction,omitempty"`
-	CorrelationID string         `json:"correlation_id,omitempty"`
-	IsPush        bool           `json:"is_push,omitempty"`
-	Summary       string         `json:"summary,omitempty"`
-	Children      []*TimelineNode `json:"children,omitempty"`
+	ID            string             `json:"id"`
+	Timestamp     time.Time          `json:"timestamp"`
+	SchemaID      string             `json:"schema_id,omitempty"`
+	Type          string             `json:"type,omitempty"`
+	MsgName       string             `json:"msg_name,omitempty"`
+	Direction     string             `json:"direction,omitempty"`
+	CorrelationID string             `json:"correlation_id,omitempty"`
+	IsPush        bool               `json:"is_push,omitempty"`
+	Proto         *TimelineProtocol  `json:"proto,omitempty"`
+	JSON          string             `json:"json,omitempty"` // 干净业务 JSON（不含 _meta），供 Raw JSON 视图
+	Summary       string             `json:"summary,omitempty"`
+	Children      []*TimelineNode    `json:"children,omitempty"`
+}
+
+// timelineProtocol 从事件 _meta.protocol 读取通信语义；不存在或不可解析时返回 nil。
+func timelineProtocol(ev *event.Event) *TimelineProtocol {
+	v, ok := ev.MetaValue("protocol")
+	if !ok {
+		return nil
+	}
+	b, err := v.ToJSON()
+	if err != nil {
+		return nil
+	}
+	var p TimelineProtocol
+	if err := json.Unmarshal(b, &p); err != nil {
+		return nil
+	}
+	return &p
 }
 
 // ConversationView 是同一 correlation_id 下事件的聚合视图。
@@ -131,8 +175,10 @@ func buildTimeline(events []*event.Event, plugin, status string) *SessionTimelin
 			w.node.MsgName = msg.MsgName
 			w.node.Direction = msg.Direction
 			w.node.IsPush = msg.IsPush
+			w.node.JSON = string(msg.JSON)
 			w.node.Summary = truncateText(string(msg.JSON), 400)
 		}
+		w.node.Proto = timelineProtocol(ev)
 		w.node.CorrelationID = ev.Trace.CorrelationID
 		wraps = append(wraps, w)
 		wrapByID[string(ev.Identity.ID)] = w

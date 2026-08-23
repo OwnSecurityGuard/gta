@@ -34,6 +34,8 @@ const (
 	CaptureControl_Verify_FullMethodName              = "/gta.internalipc.CaptureControl/Verify"
 	CaptureControl_SampleBytes_FullMethodName         = "/gta.internalipc.CaptureControl/SampleBytes"
 	CaptureControl_GetRegistryAddr_FullMethodName     = "/gta.internalipc.CaptureControl/GetRegistryAddr"
+	CaptureControl_GetProxyConfig_FullMethodName      = "/gta.internalipc.CaptureControl/GetProxyConfig"
+	CaptureControl_UpdateProxyConfig_FullMethodName   = "/gta.internalipc.CaptureControl/UpdateProxyConfig"
 )
 
 // CaptureControlClient is the client API for CaptureControl service.
@@ -83,6 +85,11 @@ type CaptureControlClient interface {
 	// gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
 	// 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
 	GetRegistryAddr(ctx context.Context, in *GetRegistryAddrRequest, opts ...grpc.CallOption) (*GetRegistryAddrResponse, error)
+	// GetProxyConfig 返回当前代理抓包服务器配置与运行时状态（agent 子进程 + 代理会话）。
+	GetProxyConfig(ctx context.Context, in *GetProxyConfigRequest, opts ...grpc.CallOption) (*GetProxyConfigResponse, error)
+	// UpdateProxyConfig 应用新的代理抓包服务器配置：持久化 proxy.json、热重启
+	// gta-singbox-agent、并确保代理抓包会话常驻（免手动开始抓包）。
+	UpdateProxyConfig(ctx context.Context, in *UpdateProxyConfigRequest, opts ...grpc.CallOption) (*UpdateProxyConfigResponse, error)
 }
 
 type captureControlClient struct {
@@ -252,6 +259,26 @@ func (c *captureControlClient) GetRegistryAddr(ctx context.Context, in *GetRegis
 	return out, nil
 }
 
+func (c *captureControlClient) GetProxyConfig(ctx context.Context, in *GetProxyConfigRequest, opts ...grpc.CallOption) (*GetProxyConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProxyConfigResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_GetProxyConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) UpdateProxyConfig(ctx context.Context, in *UpdateProxyConfigRequest, opts ...grpc.CallOption) (*UpdateProxyConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateProxyConfigResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_UpdateProxyConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CaptureControlServer is the server API for CaptureControl service.
 // All implementations must embed UnimplementedCaptureControlServer
 // for forward compatibility.
@@ -299,6 +326,11 @@ type CaptureControlServer interface {
 	// gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
 	// 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
 	GetRegistryAddr(context.Context, *GetRegistryAddrRequest) (*GetRegistryAddrResponse, error)
+	// GetProxyConfig 返回当前代理抓包服务器配置与运行时状态（agent 子进程 + 代理会话）。
+	GetProxyConfig(context.Context, *GetProxyConfigRequest) (*GetProxyConfigResponse, error)
+	// UpdateProxyConfig 应用新的代理抓包服务器配置：持久化 proxy.json、热重启
+	// gta-singbox-agent、并确保代理抓包会话常驻（免手动开始抓包）。
+	UpdateProxyConfig(context.Context, *UpdateProxyConfigRequest) (*UpdateProxyConfigResponse, error)
 	mustEmbedUnimplementedCaptureControlServer()
 }
 
@@ -353,6 +385,12 @@ func (UnimplementedCaptureControlServer) SampleBytes(context.Context, *SampleByt
 }
 func (UnimplementedCaptureControlServer) GetRegistryAddr(context.Context, *GetRegistryAddrRequest) (*GetRegistryAddrResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRegistryAddr not implemented")
+}
+func (UnimplementedCaptureControlServer) GetProxyConfig(context.Context, *GetProxyConfigRequest) (*GetProxyConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProxyConfig not implemented")
+}
+func (UnimplementedCaptureControlServer) UpdateProxyConfig(context.Context, *UpdateProxyConfigRequest) (*UpdateProxyConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateProxyConfig not implemented")
 }
 func (UnimplementedCaptureControlServer) mustEmbedUnimplementedCaptureControlServer() {}
 func (UnimplementedCaptureControlServer) testEmbeddedByValue()                        {}
@@ -638,6 +676,42 @@ func _CaptureControl_GetRegistryAddr_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CaptureControl_GetProxyConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProxyConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).GetProxyConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_GetProxyConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).GetProxyConfig(ctx, req.(*GetProxyConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_UpdateProxyConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateProxyConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).UpdateProxyConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_UpdateProxyConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).UpdateProxyConfig(ctx, req.(*UpdateProxyConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CaptureControl_ServiceDesc is the grpc.ServiceDesc for CaptureControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -700,6 +774,14 @@ var CaptureControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRegistryAddr",
 			Handler:    _CaptureControl_GetRegistryAddr_Handler,
+		},
+		{
+			MethodName: "GetProxyConfig",
+			Handler:    _CaptureControl_GetProxyConfig_Handler,
+		},
+		{
+			MethodName: "UpdateProxyConfig",
+			Handler:    _CaptureControl_UpdateProxyConfig_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

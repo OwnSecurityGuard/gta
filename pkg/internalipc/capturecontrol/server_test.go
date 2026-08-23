@@ -11,6 +11,7 @@ import (
 type fakeEngine struct {
 	startResult   StartSessionResult
 	startErr      error
+	startLastReq  StartSessionRequest
 	stopResult    StopSessionResult
 	stopErr       error
 	statusResult  StatusResult
@@ -32,6 +33,7 @@ type fakeEngine struct {
 }
 
 func (f *fakeEngine) StartSession(ctx context.Context, req StartSessionRequest) (StartSessionResult, error) {
+	f.startLastReq = req
 	return f.startResult, f.startErr
 }
 func (f *fakeEngine) StopSession(ctx context.Context, sessionID string) (StopSessionResult, error) {
@@ -78,6 +80,14 @@ func (f *fakeEngine) GetPluginManifest(ctx context.Context, name string) ([]byte
 }
 func (f *fakeEngine) GetRegistryAddr(ctx context.Context) (string, error) {
 	return ":9091", nil
+}
+
+func (f *fakeEngine) GetProxyConfig(ctx context.Context) (ProxyConfigState, error) {
+	return ProxyConfigState{}, nil
+}
+
+func (f *fakeEngine) UpdateProxyConfig(ctx context.Context, req ProxyConfigUpdate) (ProxyConfigState, error) {
+	return ProxyConfigState{}, nil
 }
 
 func TestServer_StartCapture(t *testing.T) {
@@ -191,5 +201,39 @@ func TestServer_DecodeRawPackets(t *testing.T) {
 	}
 	if engine.decodeLastReq.Limit != 50 || !engine.decodeLastReq.ClearExisting {
 		t.Errorf("unexpected limit/clear_existing: %+v", engine.decodeLastReq)
+	}
+}
+
+// TestServer_StartCaptureMobile 验证 mobile source 配置正确映射到 CaptureEngine。
+func TestServer_StartCaptureMobile(t *testing.T) {
+	engine := &fakeEngine{
+		startResult: StartSessionResult{SessionID: "m1", State: "Running", DBPath: "/tmp/m1.db"},
+	}
+	srv := NewServer(engine)
+	resp, err := srv.StartCapture(context.Background(), &pb.StartCaptureRequest{
+		SessionId: "m1",
+		Plugin:    "game",
+		Source: &pb.StartCaptureRequest_Mobile{
+			Mobile: &pb.MobileSourceConfig{
+				ListenAddr:   "127.0.0.1:9090",
+				FrameStyle:   "length_prefix",
+				PrefixLen:    4,
+				LittleEndian: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.GetSessionId() != "m1" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+	m := engine.startLastReq.Mobile
+	if m == nil {
+		t.Fatalf("expected mobile config, got nil")
+	}
+	if m.ListenAddr != "127.0.0.1:9090" || m.FrameStyle != "length_prefix" ||
+		m.PrefixLen != 4 || !m.LittleEndian {
+		t.Errorf("unexpected mobile config: %+v", m)
 	}
 }

@@ -4,6 +4,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Badge } from "@/components/ui/badge";
 import {
   ChevronLeft,
   ChevronRight,
@@ -15,6 +16,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import type { DecodedEvent } from "@/types/event";
+import type { CaptureContext } from "@/types/connection";
 import { unpackJsonStrings } from "@/lib/utils";
 
 interface EventTableProps {
@@ -229,9 +231,28 @@ function tokenizeJson(text: string): JsonToken[] {
   return tokens;
 }
 
+// ─── 捕获上下文（Capture Context，代理抓包特有） ────────────────
+
+/** 展示 Captured By / Connection / Stream / Source 归属徽标组。 */
+function CaptureCell({ capture }: { capture: CaptureContext }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 min-w-0" title={`连接 ${capture.conn_id} · 流 ${capture.stream_id} · 来源 ${capture.source || ""}`}>
+      <Badge variant="outline" className="text-[10px] font-normal whitespace-nowrap">
+        {capture.captured_by || "Proxy"}
+      </Badge>
+      <Badge variant="secondary" className="font-mono text-[10px] whitespace-nowrap">
+        C#{String(capture.conn_seq).padStart(3, "0")}
+      </Badge>
+      <Badge variant="secondary" className="font-mono text-[10px] whitespace-nowrap">
+        S#{capture.stream_seq}
+      </Badge>
+    </div>
+  );
+}
+
 // ─── 展开行：完整 JSON ────────────────────────────────────────
 
-const COLSPAN = 5; // Timestamp | Dir | Msg | Summary | Size
+const COLSPAN = 6; // Timestamp | Dir | Msg | Capture | Summary | Size
 
 function ExpandedRow({ data }: { data: Record<string, unknown> }) {
   return (
@@ -279,6 +300,11 @@ const EventRow = memo(function EventRow({
         {/* 消息名 */}
         <TableCell className="min-w-[140px] max-w-[220px]">
           <MessageCell msgName={meta.msgName} isPush={meta.isPush} />
+        </TableCell>
+
+        {/* 捕获上下文（代理抓包特有） */}
+        <TableCell className="w-44 max-w-[200px]">
+          {event.capture ? <CaptureCell capture={event.capture} /> : <span className="text-xs text-muted-foreground/50">-</span>}
         </TableCell>
 
         {/* Payload 摘要 */}
@@ -405,6 +431,7 @@ export function EventTable({ sessionId, filter }: EventTableProps) {
             <TableHead className="w-44">时间</TableHead>
             <TableHead className="w-24">方向</TableHead>
             <TableHead className="min-w-[140px]">消息</TableHead>
+            <TableHead className="w-44">捕获</TableHead>
             <TableHead>摘要</TableHead>
             <TableHead className="w-16 text-right">大小</TableHead>
           </TableRow>

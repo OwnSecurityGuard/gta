@@ -7,6 +7,7 @@ import {
   useSessionStatus,
   useDeleteSession,
 } from "@/hooks/use-mcp";
+import { useIdentity } from "@/hooks/use-auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -106,6 +107,7 @@ function SessionItem({
   onSwitch,
   onDeleted,
   liveStatus,
+  ownerBadge,
 }: {
   session: SessionInfo;
   isSelected: boolean;
@@ -114,6 +116,8 @@ function SessionItem({
   onDeleted?: (sessionId: string) => void;
   /** 仅对“当前选中会话”注入 get_session_status 实时态；其余为 undefined */
   liveStatus?: SessionStatusResult | null;
+  /** 归属徽标文案（undefined = 不显示） */
+  ownerBadge?: string;
 }) {
   const isRunning = session.status === "running";
   const hasStopped = !isRunning && !!session.stopped_at;
@@ -165,7 +169,7 @@ function SessionItem({
           : "border-border bg-card hover:border-primary/40",
       )}
     >
-      {/* 头部：状态点 + 开始时间 + Badge */}
+      {/* 头部：状态点 + 开始时间 + 归属徽标 + Badge */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span
@@ -177,6 +181,14 @@ function SessionItem({
           <span className="text-sm font-medium truncate font-mono">
             {formatTime(session.started_at)}
           </span>
+          {ownerBadge && (
+            <span
+              className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              title={`归属：${session.owner}`}
+            >
+              {ownerBadge}
+            </span>
+          )}
         </div>
         <Badge variant={isRunning ? "default" : "secondary"} className="shrink-0">
           {isRunning ? "运行中" : "已停止"}
@@ -321,8 +333,17 @@ export function SessionSidebar({
   // 仅对当前选中会话拉取 get_session_status（5s 轮询），使其统计与状态点保持“实时”。
   const liveStatus = useSessionStatus(selectedSessionId);
   const [switchTarget, setSwitchTarget] = useState<SessionInfo | null>(null);
+  const identity = useIdentity();
+  const [ownerView, setOwnerView] = useState<"all" | "mine">("all");
 
   const sessions = data?.sessions ?? [];
+
+  // admin 可见态：身份头标记 admin，或列表里出现了非本人归属的会话（兜底）。
+  // 出现他人会话说明当前身份能跨 owner 查看（服务端已按身份过滤）。
+  const foreignOwners = sessions.some(
+    (s) => !!s.owner && (!identity || s.owner !== identity.owner),
+  );
+  const showOwnerFilter = identity?.isAdmin === true || (identity !== null && foreignOwners);
 
   // 排序：运行中优先，然后按 started_at 倒序（最新的在上）
   const sortedSessions = [...sessions].sort((a, b) => {
@@ -331,6 +352,17 @@ export function SessionSidebar({
     if (aRunning !== bRunning) return bRunning - aRunning;
     return b.started_at.localeCompare(a.started_at);
   });
+
+  // 「只看我的」为纯前端过滤（服务端已按身份过滤，这里只是收窄视图）。
+  const visibleSessions =
+    ownerView === "mine" && identity
+      ? sortedSessions.filter((s) => !s.owner || s.owner === identity.owner)
+      : sortedSessions;
+
+  const ownerBadgeOf = (s: SessionInfo): string | undefined => {
+    if (!s.owner) return undefined;
+    return identity && s.owner === identity.owner ? "我" : s.owner;
+  };
 
   const runningCount = sessions.filter((s) => s.status === "running").length;
 
@@ -346,6 +378,34 @@ export function SessionSidebar({
           </span>
         )}
       </div>
+
+      {/* admin 视图筛选：默认「全部」 */}
+      {showOwnerFilter && (
+        <div className="flex items-center gap-1 border-b px-4 py-2">
+          <span className="mr-1 text-xs text-muted-foreground">视图</span>
+          {(
+            [
+              { id: "all", label: "全部" },
+              { id: "mine", label: "只看我的" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              aria-pressed={ownerView === opt.id}
+              onClick={() => setOwnerView(opt.id)}
+              className={
+                "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors " +
+                (ownerView === opt.id
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:text-foreground")
+              }
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 会话列表 */}
       <ScrollArea className="flex-1 p-3">
@@ -379,8 +439,16 @@ export function SessionSidebar({
           />
         )}
 
+        {!isLoading && !isError && sessions.length > 0 && visibleSessions.length === 0 && (
+          <EmptyState
+            icon={<Inbox className="h-5 w-5" />}
+            title="该视图下暂无会话"
+            hint="当前为「只看我的」视图，切换回「全部」查看团队其他成员的会话。"
+          />
+        )}
+
         <div className="space-y-2">
-          {sortedSessions.map((session) => (
+          {visibleSessions.map((session) => (
             <SessionItem
               key={session.session_id}
               session={session}
@@ -388,6 +456,7 @@ export function SessionSidebar({
               onClick={() => onSelectSession(session.session_id)}
               onSwitch={setSwitchTarget}
               onDeleted={onDeleted}
+              ownerBadge={ownerBadgeOf(session)}
               liveStatus={
                 session.session_id === selectedSessionId ? (liveStatus.data ?? null) : null
               }

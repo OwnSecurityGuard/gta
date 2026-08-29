@@ -2216,6 +2216,7 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 		seen[sess.SessionID] = true
 		out = append(out, map[string]any{
 			"session_id":    sess.SessionID,
+			"owner":         sess.Owner,
 			"started_at":    sess.StartedAt,
 			"stopped_at":    sess.StoppedAt,
 			"status":        status,

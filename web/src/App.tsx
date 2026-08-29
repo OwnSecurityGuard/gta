@@ -129,9 +129,10 @@ export default function App() {
   }, [activeTab]);
 
   // 401 发生时自动打开设置弹窗，引导填入访问令牌（横幅常驻直至保存新 token）。
+  // 其它弹窗打开时暂不抢占（避免遮挡下抢焦点/一次 ESC 关两个），关掉后仍会自动补开。
   useEffect(() => {
-    if (authError) setSettingsOpen(true);
-  }, [authError]);
+    if (authError && !startOpen && !proxyConfigOpen) setSettingsOpen(true);
+  }, [authError, startOpen, proxyConfigOpen]);
 
   const handleSelectSession = useCallback((sessionId: string) => {
     setSelectedSessionId(sessionId);

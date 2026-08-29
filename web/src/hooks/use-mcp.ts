@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { mcpClient } from "@/lib/mcp-client";
 import { useAuthToken } from "@/hooks/use-auth";
-import { withTokenParam, notifyAuthError } from "@/lib/auth";
+import { withTokenParam, notifyAuthError, wasRecentlyUnauthorized } from "@/lib/auth";
 import type { ListSessionsResult } from "@/types/session";
 import type { ListDecodedDataResult, CaptureSchemaResult } from "@/types/event";
 import type { SessionTimelineResult } from "@/types/timeline";
@@ -271,10 +271,15 @@ export function usePluginEventStream() {
     es.onerror = () => {
       // EventSource 默认会自动重连；此处仅记录，无需手动处理。
       // 轮询兜底维持面板在重连间隙内的基本可用性。
-      // 例外：服务端 401 会使连接进入 CLOSED（规范 fail the connection，不再自动重连），
-      // 此时应置位全局 401 标志弹出令牌引导，而不是傻等下次轮询。
       if (es.readyState === EventSource.CLOSED) {
-        notifyAuthError();
+        // CLOSED 不代表一定是 401（代理 5xx/后端重启同样进入 CLOSED 终态）。
+        // 仅当 mcp-client 最近上报过 401 才置位横幅；token 模式下轮询必然
+        // 在 10s 窗口内产生 401 信号，真实 401 不会漏报。
+        if (wasRecentlyUnauthorized()) {
+          notifyAuthError();
+        } else {
+          slogError("plugin event stream closed (non-401), relying on polling fallback");
+        }
         return;
       }
       slogError("plugin event stream error, relying on polling fallback");

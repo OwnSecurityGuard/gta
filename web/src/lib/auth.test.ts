@@ -10,6 +10,7 @@ import {
   setToken,
   subscribeIdentity,
   subscribeToken,
+  wasRecentlyUnauthorized,
   withTokenParam,
 } from "@/lib/auth";
 
@@ -23,6 +24,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   store.clear();
   setToken(null);
@@ -83,6 +85,32 @@ describe("authError", () => {
     expect(getAuthError()).toBe(true);
     setToken("gta_new");
     expect(getAuthError()).toBe(false);
+  });
+});
+
+describe("wasRecentlyUnauthorized", () => {
+  it("窗口内无 401 信号为 false；notifyAuthError 后立即为 true；超出窗口后回到 false", () => {
+    const t0 = Date.now(); // 真实时间（此刻还没装假时钟）
+    vi.useFakeTimers();
+    // 推过默认 10s 窗口：抹平本文件更早用例可能残留的 lastUnauthorizedAt。
+    vi.setSystemTime(t0 + 10_001);
+    expect(wasRecentlyUnauthorized()).toBe(false);
+    notifyAuthError();
+    expect(wasRecentlyUnauthorized()).toBe(true);
+    vi.setSystemTime(t0 + 20_002); // 距最近一次 notify 已超出窗口
+    expect(wasRecentlyUnauthorized()).toBe(false);
+  });
+
+  it("flag 已置位时重复 notifyAuthError 仍刷新时间戳（幂等早退之前记录）", () => {
+    const t0 = Date.now();
+    vi.useFakeTimers();
+    vi.setSystemTime(t0 + 10_001);
+    notifyAuthError(); // 首次：置位 flag + 记录时间戳
+    vi.setSystemTime(t0 + 19_000); // 距首次 9s，仍在窗口内
+    notifyAuthError(); // 重复：flag 已置位走早退，但时间戳必须被刷新
+    vi.setSystemTime(t0 + 28_000); // 距首次 18s（远超窗口），距第二次仅 9s
+    expect(wasRecentlyUnauthorized()).toBe(true);
+    expect(getAuthError()).toBe(true); // 幂等：flag 不因重复 notify 变化
   });
 });
 

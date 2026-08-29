@@ -118,12 +118,16 @@ export function subscribeIdentity(listener: () => void): () => void {
 
 let authError = false;
 const authErrorListeners = new Set<() => void>();
+// 最近一次 401 信号的时刻（ms epoch）。SSE onerror 拿不到状态码，只能拿它与 CLOSED 交叉验证。
+let lastUnauthorizedAt = 0;
 
 export function getAuthError(): boolean {
   return authError;
 }
 
 export function notifyAuthError(): void {
+  // 时间戳必须在幂等早退之前记录：flag 已置位时的重复上报也要刷新新鲜度。
+  lastUnauthorizedAt = Date.now();
   if (authError) return;
   authError = true;
   for (const l of authErrorListeners) l();
@@ -133,6 +137,13 @@ export function clearAuthError(): void {
   if (!authError) return;
   authError = false;
   for (const l of authErrorListeners) l();
+}
+
+/** 最近 WINDOW_MS 内是否出现过 401 信号。供 SSE onerror 交叉验证：
+ * EventSource 进入 CLOSED 的原因不只有 401（代理 5xx、后端重启同样 fail the connection），
+ * 不能把所有 CLOSED 都当成"需要令牌"。 */
+export function wasRecentlyUnauthorized(windowMs = 10_000): boolean {
+  return Date.now() - lastUnauthorizedAt < windowMs;
 }
 
 export function subscribeAuthError(listener: () => void): () => void {

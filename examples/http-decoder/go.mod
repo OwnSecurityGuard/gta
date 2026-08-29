@@ -1,12 +1,12 @@
 // http-decoder plugin dependencies (locked, based on plugins/go.mod.template).
-// Uses the published gta-plugin-sdk v0.4.1 (no replace), so it builds on any
+// Uses the published gta-plugin-sdk v0.5.0 (no replace), so it builds on any
 // machine and in CI. Add a local replace temporarily only when debugging the SDK.
 module http-decoder
 
 go 1.25.5
 
 require (
-	github.com/OwnSecurityGuard/gta-plugin-sdk v0.4.1
+	github.com/OwnSecurityGuard/gta-plugin-sdk v0.5.0
 	google.golang.org/grpc v1.71.0
 )
 

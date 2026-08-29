@@ -10,8 +10,6 @@
 #
 # 构建（版本注入与 Makefile 的 -X ldflags 同源，见 pkg/version/version.go）：
 #   docker build --build-arg VERSION=v0.5.0 --build-arg GIT_COMMIT=abc1234 -t gta-server .
-#
-# 注意：构建需要网络访问 GitHub 以拉取 gta-plugin-sdk（见下方 INTERIM 注释）。
 
 # ============================================================================
 # 阶段 1：builder
@@ -28,23 +26,11 @@ RUN apt-get update \
 
 WORKDIR /src
 
-# ============================================================================
-# 临时措施（INTERIM，与 .github/workflows/ci.yml 的 build-test 相同）——
-# 等待 gta-plugin-sdk 发布 v0.5.0 后删除：
-#   1. 升级 go.mod 中 gta-plugin-sdk 版本；
-#   2. 删除下面的 git clone 与 go.work 生成；
-#   3. 删除本注释。
-# ============================================================================
-RUN git clone --depth 1 https://github.com/OwnSecurityGuard/gta-plugin-sdk /src/gta-plugin-sdk
-
 # 先只拷贝 go.mod/go.sum 做 go mod download，充分利用层缓存。
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-
-# go.work 指向本地 SDK checkout（与 ci.yml 中生成的内容一致）。
-RUN printf 'go 1.25.5\n\nuse (\n\t./\n\t./gta-plugin-sdk\n)\n' > go.work
 
 RUN CGO_ENABLED=1 \
 	go build -tags pcap -trimpath \

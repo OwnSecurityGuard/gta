@@ -17,41 +17,6 @@ jobs:
         with:
           go-version: "1.25"
 
-      # ============================================================================
-      # 临时措施（INTERIM）—— 等待 gta-plugin-sdk 发布包含隧道支持的新版本后删除。
-      #
-      # 背景：host 代码（pkg/plugin/tunnel.go、pkg/plugin/manager.go 等）依赖
-      # gta-plugin-sdk 的 proto Connect/TunnelFrame 与 RunRegisterLoopWithOptions，
-      # 这些特性目前只存在于 SDK 仓库 main 分支（commit be2ec09 之后），
-      # 尚未发布（go.mod 钉的是 v0.4.1，不含这些符号）。
-      #
-      # 处理方式：把 SDK 仓库（默认分支）checkout 到本仓库的兄弟目录
-      # gta-plugin-sdk/，并在构建前动态生成 go.work（go.work 已被 .gitignore
-      # 忽略，绝不提交）让 host 以 workspace 模式对本地 SDK 编译。
-      #
-      # TODO: SDK 发布 v0.5.0（或包含隧道支持的任意 tag）后：
-      #   1. 升级 host go.mod 中 gta-plugin-sdk 的版本；
-      #   2. 删除下面 "Checkout gta-plugin-sdk" 与 "Generate go.work" 两步；
-      #   3. 本注释一并删除。
-      # ============================================================================
-      - name: Checkout gta-plugin-sdk (interim, until SDK v0.5.0 tag)
-        uses: actions/checkout@v4
-        with:
-          repository: OwnSecurityGuard/gta-plugin-sdk
-          ref: main
-          path: gta-plugin-sdk
-      - name: Generate go.work (interim, do not commit go.work)
-        run: |
-          cat > go.work <<'EOF'
-          // go 版本须与 go.mod 的 go 指令保持一致（当前 1.25.5）；升级 go.mod 时同步此处。
-          go 1.25.5
-
-          use (
-          	./
-          	./gta-plugin-sdk
-          )
-          EOF
-
       # pcap 采集层无构建标签，Linux 上需要 libpcap 头文件（cgo）。
       - name: Install libpcap
         run: sudo apt-get update && sudo apt-get install -y libpcap-dev
@@ -101,26 +66,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-
-      # INTERIM：与 build-test 相同的 SDK checkout + go.work 步骤（SDK 隧道支持
-      # 未发布；SDK v0.5.0 发布后随 build-test 一并删除这两步）。
-      - name: Checkout gta-plugin-sdk (interim, until SDK v0.5.0 tag)
-        uses: actions/checkout@v4
-        with:
-          repository: OwnSecurityGuard/gta-plugin-sdk
-          ref: main
-          path: gta-plugin-sdk
-      - name: Generate go.work (interim, do not commit go.work)
-        run: |
-          cat > go.work <<'EOF'
-          // go 版本须与 go.mod 的 go 指令保持一致（当前 1.25.5）；升级 go.mod 时同步此处。
-          go 1.25.5
-
-          use (
-          	./
-          	./gta-plugin-sdk
-          )
-          EOF
 
       # CGO_ENABLED=0 交叉编译，无需 libpcap-dev。
       - name: Build release matrix

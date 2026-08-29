@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
-	github.com/OwnSecurityGuard/gta-plugin-sdk v0.4.1
+	github.com/OwnSecurityGuard/gta-plugin-sdk v0.5.0
 	github.com/expr-lang/expr v1.17.0
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
@@ -18,7 +18,7 @@ require (
 )
 
 // 契约单向流动：SDK 定义，gta 消费。
-// 已切换为已发布的远程模块 gta-plugin-sdk v0.4.1（无 replace），
+// 已切换为已发布的远程模块 gta-plugin-sdk v0.5.0（无 replace），
 // 任何人 clone 后可直接构建。本地开发调试 SDK 时再临时加 replace。
 
 require (

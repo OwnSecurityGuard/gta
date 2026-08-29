@@ -27,19 +27,13 @@
 
 ## 1. 准备
 
-服务器要求：Linux + Docker（含 compose 插件）+ 可访问 GitHub（见下方"临时依赖"）。
+服务器要求：Linux + Docker（含 compose 插件）。
 
 ```bash
 git clone https://github.com/OwnSecurityGuard/gta
 cd gta
 cp .env.example .env
 ```
-
-> **临时依赖（INTERIM）**：在 gta-plugin-sdk v0.5.0 发布之前，`Dockerfile` 与 CI 都会
-> `git clone` SDK 仓库（[gta-plugin-sdk](https://github.com/OwnSecurityGuard/gta-plugin-sdk)）
-> 并生成临时 `go.work` 来构建。因此**服务器构建镜像时需要能访问该 GitHub 仓库**
-> （私有网络下需配好 git 凭据或代理）。待 SDK v0.5.0 打 tag、本仓库 go.mod 升级后，
-> 这一步会自动消失，届时无需额外操作。
 
 ## 2. 配置 token（`.env`）
 

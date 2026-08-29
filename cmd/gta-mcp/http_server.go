@@ -41,7 +41,7 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 }
 
 // requiredResolver 是带 Required() 的 auth.Resolver：报告是否配置了 token
-//（与 auth.StaticResolver.Required 语义一致）。
+// （与 auth.StaticResolver.Required 语义一致）。
 type requiredResolver interface {
 	auth.Resolver
 	Required() bool

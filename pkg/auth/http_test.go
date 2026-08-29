@@ -106,3 +106,66 @@ func TestMiddleware_SetsWWWAuthenticate(t *testing.T) {
 		t.Fatal("401 响应应带 WWW-Authenticate 头")
 	}
 }
+
+// doRequest 按完整目标 URL 发请求并返回 recorder，用于断言响应头。
+func doRequest(t *testing.T, r Resolver, target, header string) (called bool, owner string, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	var gotOwner string
+	srv := Middleware(r, probeHandler(&called, &gotOwner))
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	if header != "" {
+		req.Header.Set("Authorization", header)
+	}
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	return called, gotOwner, rec
+}
+
+// TestMiddleware_QueryParamToken 验证 EventSource 场景：浏览器 SSE 无法携带自定义头，
+// 头缺失时回退解析查询参数 ?token=（admin 身份一并回显）。
+func TestMiddleware_QueryParamToken(t *testing.T) {
+	t.Parallel()
+	called, owner, rec := doRequest(t, mustResolver(t, "alice=gta_aaa,bob=gta_bbb:admin"), "/mcp?token=gta_bbb", "")
+	if !called {
+		t.Fatal("查询参数携带合法 token 应放行")
+	}
+	if owner != "bob" {
+		t.Fatalf("owner 应为 bob，实际 %q", owner)
+	}
+	if got := rec.Header().Get(HeaderAdmin); got != "true" {
+		t.Fatalf("admin 应回显 X-GTA-Admin: true，实际 %q", got)
+	}
+}
+
+// TestMiddleware_HeaderBeatsQueryParam 验证头永远优先于查询参数。
+func TestMiddleware_HeaderBeatsQueryParam(t *testing.T) {
+	t.Parallel()
+	called, owner, _ := doRequest(t, mustResolver(t, "alice=gta_aaa,bob=gta_bbb:admin"), "/mcp?token=gta_bbb", "Bearer gta_aaa")
+	if !called || owner != "alice" {
+		t.Fatalf("头应优先于查询参数: called=%v owner=%q", called, owner)
+	}
+}
+
+// TestMiddleware_RejectsBadQueryParam 验证查询参数里的非法 token 同样 401。
+func TestMiddleware_RejectsBadQueryParam(t *testing.T) {
+	t.Parallel()
+	called, _, rec := doRequest(t, mustResolver(t, "alice=gta_aaa"), "/mcp?token=gta_zzz", "")
+	if called {
+		t.Fatal("非法查询参数 token 必须拒绝且不触达下游")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("状态码应为 401，实际 %d", rec.Code)
+	}
+}
+
+// TestMiddleware_IdentityHeaders 验证身份回显头：owner 恒回显，admin 仅 admin 回显。
+func TestMiddleware_IdentityHeaders(t *testing.T) {
+	t.Parallel()
+	_, _, rec := doRequest(t, mustResolver(t, "alice=gta_aaa,bob=gta_bbb:admin"), "/mcp", "Bearer gta_aaa")
+	if got := rec.Header().Get(HeaderOwner); got != "alice" {
+		t.Fatalf("X-GTA-Owner 应为 alice，实际 %q", got)
+	}
+	if got := rec.Header().Get(HeaderAdmin); got != "" {
+		t.Fatalf("非 admin 不应回显 X-GTA-Admin，实际 %q", got)
+	}
+}

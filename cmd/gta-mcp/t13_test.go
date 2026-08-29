@@ -274,6 +274,20 @@ func TestCORSMiddlewareAllowlist(t *testing.T) {
 	}
 }
 
+// TestCORSExposeIdentityHeaders 验证命中 allowlist 的跨域响应暴露身份回显头，
+// 否则前端 JS 在跨域直连场景下读不到 X-GTA-Owner / X-GTA-Admin。
+func TestCORSExposeIdentityHeaders(t *testing.T) {
+	h := buildHTTPHandler([]string{"http://good.example.com"}, nil, okHandler())
+	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req.Header.Set("Origin", "http://good.example.com")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	expose := rec.Header().Get("Access-Control-Expose-Headers")
+	if !strings.Contains(expose, auth.HeaderOwner) || !strings.Contains(expose, auth.HeaderAdmin) {
+		t.Fatalf("应暴露 X-GTA-Owner/X-GTA-Admin，实际 %q", expose)
+	}
+}
+
 func TestCORSMiddlewarePreflight(t *testing.T) {
 	h := buildHTTPHandler([]string{"http://good.example.com"}, nil, okHandler())
 

@@ -25,6 +25,8 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 		if origin != "" && allowed[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Add("Vary", "Origin")
+			// 身份回显头默认不对跨域 JS 暴露，须显式加入 Expose-Headers 前端才读得到。
+			w.Header().Set("Access-Control-Expose-Headers", auth.HeaderOwner+", "+auth.HeaderAdmin)
 		}
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")

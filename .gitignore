@@ -86,3 +86,6 @@ current.json
 
 # Windows 保留名伪文件
 NUL
+
+# Local Go workspace (SDK local dev), do not commit
+go.work

@@ -60,6 +60,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 	if _, err := cs.db.Exec(schema); err != nil {
 		return err
 	}
+	if err := cs.migrateSessionsAddOwner(); err != nil {
+		return err
+	}
 	// plugin_debug_access 审计表（设计 §6）：sample_bytes 等取证工具的访问留痕。
 	// 仅追加，无 UPDATE/DELETE 路径；写入方唯一为 Runtime Plane（pipeline /
 	// 内嵌的 Developer Plane），避免与 MCP 进程加剧 SQLite 锁竞争。
@@ -79,6 +82,9 @@ CREATE TABLE IF NOT EXISTS plugin_debug_access (
 	if _, err := cs.db.Exec(auditSchema); err != nil {
 		return err
 	}
+	if _, err := cs.db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		return err
+	}
 	if _, err := cs.db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		return err
 	}
@@ -86,6 +92,48 @@ CREATE TABLE IF NOT EXISTS plugin_debug_access (
 		return err
 	}
 	return nil
+}
+
+// migrateSessionsAddOwner 为既有数据库补齐 sessions.owner 列（默认 ''）。
+// 老库回填 '' = 匿名：已有会话全部归属匿名 owner，本地单机用法行为不变。
+func (cs *ControlStore) migrateSessionsAddOwner() error {
+	if hasOwnerColumn(cs.db) {
+		return nil
+	}
+	if _, err := cs.db.Exec(`ALTER TABLE sessions ADD COLUMN owner TEXT NOT NULL DEFAULT ''`); err != nil {
+		// 迁移的 check-then-ALTER 不是原子的：两个进程并发打开同一老库时，
+		// 后者会撞 "duplicate column name: owner"。列已在（对手刚加成功），
+		// 复查 PRAGMA 确认后视为迁移完成而不是启动失败。
+		if hasOwnerColumn(cs.db) {
+			slog.Info("sessions.owner column added concurrently by another process; skipping migration")
+			return nil
+		}
+		return fmt.Errorf("migrate sessions.owner: %w", err)
+	}
+	slog.Info("migrated control store: added sessions.owner column (backfilled '' = anonymous)")
+	return nil
+}
+
+// hasOwnerColumn 复查 sessions 表是否已有 owner 列。
+func hasOwnerColumn(db *sql.DB) bool {
+	rows, err := db.Query("PRAGMA table_info(sessions)")
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notNull, pk int
+		var dfltValue any
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dfltValue, &pk); err != nil {
+			return false
+		}
+		if name == "owner" {
+			return true
+		}
+	}
+	return false
 }
 
 // Close 关闭数据库连接。
@@ -109,35 +157,54 @@ func (cs *ControlStore) CreateSession(ctx context.Context, meta SessionMeta) err
 		stoppedAt = sql.NullTime{Time: *meta.StoppedAt, Valid: true}
 	}
 	_, err := cs.db.ExecContext(ctx, `
-INSERT INTO sessions(session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
+INSERT INTO sessions(owner, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
                      raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		meta.SessionID, meta.StartedAt, stoppedAt, meta.Status, meta.Port, meta.Plugin,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		meta.Owner, meta.SessionID, meta.StartedAt, stoppedAt, meta.Status, meta.Port, meta.Plugin,
 		meta.Interface, meta.PCAPFile, meta.RawPackets, meta.Events, meta.Metrics,
 		meta.DecodeErrors, meta.DurationSec, meta.DBPath, extraJSON, meta.ManifestSnapshot,
 	)
 	return err
 }
 
-// GetSession 查询单个会话元数据。
+// sessionSelectCols 是 sessions 查询的列清单（scanSession 与之配套）。
+const sessionSelectCols = `owner, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
+	raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot`
+
+// GetSession 查询单个会话元数据（不过滤 owner，行为与引入 owner 前一致）。
 func (cs *ControlStore) GetSession(ctx context.Context, sessionID string) (*SessionMeta, error) {
-	row := cs.db.QueryRowContext(ctx, `
-SELECT session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
-       raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot
-FROM sessions WHERE session_id=?`, sessionID)
+	return cs.GetSessionFor(ctx, sessionID, SessionOwnerFilter{AllOwners: true})
+}
+
+// GetSessionFor 按 owner 过滤地查询单个会话；不可见时按未找到处理。
+func (cs *ControlStore) GetSessionFor(ctx context.Context, sessionID string, f SessionOwnerFilter) (*SessionMeta, error) {
+	row := cs.db.QueryRowContext(ctx, `SELECT `+sessionSelectCols+` FROM sessions WHERE session_id=?`, sessionID)
 	meta, err := scanSession(row)
 	if err != nil {
 		return nil, fmt.Errorf("get session %s: %w", sessionID, err)
 	}
+	if !f.Matches(*meta) {
+		// 不可见按未找到处理，避免向非归属者泄露会话存在性。
+		return nil, fmt.Errorf("get session %s: %w", sessionID, sql.ErrNoRows)
+	}
 	return meta, nil
 }
 
-// ListSessions 列出所有会话元数据，按 started_at 降序。
+// ListSessions 列出所有会话元数据（不过滤 owner），按 started_at 降序。
 func (cs *ControlStore) ListSessions(ctx context.Context) ([]SessionMeta, error) {
-	rows, err := cs.db.QueryContext(ctx, `
-SELECT session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
-       raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot
-FROM sessions ORDER BY started_at DESC`)
+	return cs.ListSessionsFor(ctx, SessionOwnerFilter{AllOwners: true})
+}
+
+// ListSessionsFor 按 owner 过滤地列出会话元数据，按 started_at 降序。
+func (cs *ControlStore) ListSessionsFor(ctx context.Context, f SessionOwnerFilter) ([]SessionMeta, error) {
+	query := `SELECT ` + sessionSelectCols + ` FROM sessions`
+	args := []any{}
+	if !f.AllOwners {
+		query += ` WHERE owner=?`
+		args = append(args, f.Owner)
+	}
+	query += ` ORDER BY started_at DESC`
+	rows, err := cs.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +286,7 @@ func scanSession(s sessionScanner) (*SessionMeta, error) {
 	var stoppedAt sql.NullTime
 	var extraJSON sql.NullString
 	if err := s.Scan(
-		&meta.SessionID, &meta.StartedAt, &stoppedAt, &meta.Status, &meta.Port, &meta.Plugin,
+		&meta.Owner, &meta.SessionID, &meta.StartedAt, &stoppedAt, &meta.Status, &meta.Port, &meta.Plugin,
 		&meta.Interface, &meta.PCAPFile, &meta.RawPackets, &meta.Events, &meta.Metrics,
 		&meta.DecodeErrors, &meta.DurationSec, &meta.DBPath, &extraJSON,
 		&meta.ManifestSnapshot,

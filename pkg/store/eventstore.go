@@ -68,9 +68,30 @@ type ProjectionReader interface {
 type SessionStore interface {
 	CreateSession(ctx context.Context, meta SessionMeta) error
 	GetSession(ctx context.Context, sessionID string) (*SessionMeta, error)
+	// GetSessionFor 是 owner 感知的 GetSession：按 SessionOwnerFilter 过滤，
+	// 目标会话不属于该 owner（且未授予 AllOwners）时返回 not found。
+	GetSessionFor(ctx context.Context, sessionID string, f SessionOwnerFilter) (*SessionMeta, error)
 	ListSessions(ctx context.Context) ([]SessionMeta, error)
+	// ListSessionsFor 是 owner 感知的 ListSessions：只返回该 owner 的会话。
+	ListSessionsFor(ctx context.Context, f SessionOwnerFilter) ([]SessionMeta, error)
 	UpdateSession(ctx context.Context, meta SessionMeta) error
 	DeleteSession(ctx context.Context, sessionID string) error
+}
+
+// SessionOwnerFilter 描述会话查询的 owner 可见性。
+//
+// Owner 为空串表示匿名（本地单机用法）：只看 owner='' 的会话。
+// AllOwners 为 true（admin）时不过滤，可看到所有 owner 的会话。
+// 兼容约定：无过滤（ListSessions/GetSession）等价于 AllOwners=true，
+// 保证既有调用方行为完全不变。
+type SessionOwnerFilter struct {
+	Owner     string
+	AllOwners bool
+}
+
+// Matches 判断 meta 是否对该过滤器可见。
+func (f SessionOwnerFilter) Matches(meta SessionMeta) bool {
+	return f.AllOwners || meta.Owner == f.Owner
 }
 
 // ===== 查询参数类型 =====
@@ -185,6 +206,9 @@ type ColumnSchema struct {
 // SessionMeta 是会话生命周期元数据（control metadata，非事件数据）。
 // 持久化在 control.sqlite 的 sessions 表。
 type SessionMeta struct {
+	// Owner 是会话归属者（pkg/auth 的 Principal.Owner）。
+	// 空串表示匿名（本地单机用法）。一等字段，持久化到 sessions.owner 列。
+	Owner        string         `json:"owner,omitempty"`
 	SessionID    string         `json:"session_id"`
 	StartedAt    time.Time      `json:"started_at"`
 	StoppedAt    *time.Time     `json:"stopped_at,omitempty"`

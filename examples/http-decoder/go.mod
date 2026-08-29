@@ -1,12 +1,12 @@
 // http-decoder plugin dependencies (locked, based on plugins/go.mod.template).
-// Local dev: replace points at the local SDK source (same as plugins/godot-gateway).
-// Distribution: drop the replace and use the published gta-plugin-sdk v0.3.0.
+// Uses the published gta-plugin-sdk v0.4.1 (no replace), so it builds on any
+// machine and in CI. Add a local replace temporarily only when debugging the SDK.
 module http-decoder
 
 go 1.25.5
 
 require (
-	github.com/OwnSecurityGuard/gta-plugin-sdk v0.3.0
+	github.com/OwnSecurityGuard/gta-plugin-sdk v0.4.1
 	google.golang.org/grpc v1.71.0
 )
 
@@ -22,5 +22,3 @@ require (
 	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/OwnSecurityGuard/gta-plugin-sdk => E:\ai_workspace\gta-plugin-sdk

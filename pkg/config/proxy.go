@@ -45,10 +45,17 @@ type ProxyServerConfig struct {
 }
 
 // DefaultProxyServerConfig 返回与 gta-pipeline 启动参数一致的默认值。
+// ServerAddr 不再写死（T11）：环境变量 GTA_PROXY_SERVER_ADDR 可覆盖默认值
+// 127.0.0.1:9090（gta.yaml 的 proxy.server_addr 经 LoadProxyServerConfigWithDefault
+// 作为更高优先级的兜底注入）。
 func DefaultProxyServerConfig() ProxyServerConfig {
+	serverAddr := DefaultProxyServerAddr
+	if v := strings.TrimSpace(os.Getenv("GTA_PROXY_SERVER_ADDR")); v != "" {
+		serverAddr = v
+	}
 	return ProxyServerConfig{
 		ListenAddr: "0.0.0.0:12000",
-		ServerAddr: "127.0.0.1:9090",
+		ServerAddr: serverAddr,
 		FrameStyle: "raw",
 		PrefixLen:  4,
 	}
@@ -169,7 +176,18 @@ func ProxyConfigPath(workDir string) string {
 // LoadProxyServerConfig 读取 proxy.json；文件不存在或内容非法时回退默认值。
 // 路径为空时同样回退默认值（便于未配置的启动场景）。
 func LoadProxyServerConfig(path string) (ProxyServerConfig, error) {
+	return LoadProxyServerConfigWithDefault(path, "")
+}
+
+// LoadProxyServerConfigWithDefault 同 LoadProxyServerConfig，但允许调用方注入
+// server_addr 的兜底值（T11：gta.yaml 的 proxy.server_addr）。优先级：
+// proxy.json 显式值 > defaultServerAddr > DefaultProxyServerConfig（含
+// GTA_PROXY_SERVER_ADDR 环境变量）> 127.0.0.1:9090。
+func LoadProxyServerConfigWithDefault(path, defaultServerAddr string) (ProxyServerConfig, error) {
 	cfg := DefaultProxyServerConfig()
+	if strings.TrimSpace(defaultServerAddr) != "" {
+		cfg.ServerAddr = strings.TrimSpace(defaultServerAddr)
+	}
 	if strings.TrimSpace(path) == "" {
 		return cfg, nil
 	}

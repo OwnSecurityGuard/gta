@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	pb "gta/pkg/internalipc/proto"
 	mcp "github.com/mark3labs/mcp-go/mcp"
+
+	"gta/pkg/auth"
+	pb "gta/pkg/internalipc/proto"
 )
 
 // handleBeginCaptureRun 标记一次用户操作的开始，不清除/停止现有 capture。
@@ -30,7 +32,7 @@ func (m *mcpCapture) handleBeginCaptureRun(ctx context.Context, req mcp.CallTool
 	port := req.GetInt("port", 0)
 
 	m.mu.Lock()
-	current, err := m.sessionMgr.readCurrent()
+	current, err := m.sessionMgr.readCurrent(auth.OwnerFrom(ctx))
 	m.mu.Unlock()
 
 	// 决定 capture_isolation_mode
@@ -127,11 +129,11 @@ func (m *mcpCapture) handleBeginCaptureRun(ctx context.Context, req mcp.CallTool
 	slog.Info("begin_capture_run", "run_id", runID, "session_id", sessionID, "feature", featureName, "isolation", isolationMode)
 
 	result := map[string]any{
-		"run_id":               runID,
-		"time_from":            now.Format(time.RFC3339Nano),
-		"capture_status":       captureStatus,
+		"run_id":                 runID,
+		"time_from":              now.Format(time.RFC3339Nano),
+		"capture_status":         captureStatus,
 		"capture_isolation_mode": isolationMode,
-		"session_id":           sessionID,
+		"session_id":             sessionID,
 	}
 	if len(uncertainties) > 0 {
 		result["uncertainties"] = uncertainties
@@ -158,11 +160,11 @@ func (m *mcpCapture) handleEndCaptureRun(ctx context.Context, req mcp.CallToolRe
 		// 幂等：返回已存在的 summary
 		slog.Info("end_capture_run idempotent", "run_id", runID)
 		return successResult(map[string]any{
-			"run_id":         rec.RunID,
-			"time_to":        rec.TimeTo.Format(time.RFC3339Nano),
-			"duration_ms":    rec.DurationMs,
-			"summary":        rec.Summary,
-			"idempotent":     true,
+			"run_id":      rec.RunID,
+			"time_to":     rec.TimeTo.Format(time.RFC3339Nano),
+			"duration_ms": rec.DurationMs,
+			"summary":     rec.Summary,
+			"idempotent":  true,
 		}), nil
 	}
 
@@ -179,7 +181,7 @@ func (m *mcpCapture) handleEndCaptureRun(ctx context.Context, req mcp.CallToolRe
 	// 通过 gRPC 获取当前计数计算 delta
 	var summary RunSummary
 	captureRunning := false
-	current, err := m.sessionMgr.readCurrent()
+	current, err := m.sessionMgr.readCurrent(auth.OwnerFrom(ctx))
 	if err == nil && current != nil && current.Status == "running" && current.SessionID == rec.SessionID && m.pipelineClient != nil {
 		captureRunning = true
 		resp, grpcErr := m.pipelineClient.GetCaptureStatus(ctx, &pb.GetCaptureStatusRequest{SessionId: rec.SessionID})
@@ -197,77 +199,77 @@ func (m *mcpCapture) handleEndCaptureRun(ctx context.Context, req mcp.CallToolRe
 	}
 
 	// 查询 db 获取 flow_count / request_count / server_message_count
-	reader, err := m.openReader(rec.SessionID)
-		if err == nil {
-			defer reader.Close()
+	reader, err := m.openReader(ctx, rec.SessionID)
+	if err == nil {
+		defer reader.Close()
 
-			// 查询 events 表
-			events, qerr := reader.QueryEvents(ctx, rec.SessionID, 100000, 0)
-			if qerr == nil {
-				// 统计时间窗口内的事件
-				flowIDs := make(map[string]bool)
-				clientCount := 0
-				serverCount := 0
-				totalCount := 0
+		// 查询 events 表
+		events, qerr := reader.QueryEvents(ctx, rec.SessionID, 100000, 0)
+		if qerr == nil {
+			// 统计时间窗口内的事件
+			flowIDs := make(map[string]bool)
+			clientCount := 0
+			serverCount := 0
+			totalCount := 0
 
-				for _, ev := range events {
-					// 时间窗口过滤
-					if ev.Identity.Timestamp.Before(rec.TimeFrom) || ev.Identity.Timestamp.After(now) {
-						continue
-					}
-					totalCount++
+			for _, ev := range events {
+				// 时间窗口过滤
+				if ev.Identity.Timestamp.Before(rec.TimeFrom) || ev.Identity.Timestamp.After(now) {
+					continue
+				}
+				totalCount++
 
-					// 提取 flow_id（优先从 Context，回退到 Payload）
-					flowIDValue := ev.Context.FlowID
-					if flowIDValue == "" {
-						if payloadObj, ok := ev.Payload.Value.AsObject(); ok {
-							if flowIDVal, exists := payloadObj["flow_id"]; exists {
-								if s, ok := flowIDVal.AsString(); ok {
-									flowIDValue = s
-								}
+				// 提取 flow_id（优先从 Context，回退到 Payload）
+				flowIDValue := ev.Context.FlowID
+				if flowIDValue == "" {
+					if payloadObj, ok := ev.Payload.Value.AsObject(); ok {
+						if flowIDVal, exists := payloadObj["flow_id"]; exists {
+							if s, ok := flowIDVal.AsString(); ok {
+								flowIDValue = s
 							}
 						}
 					}
-					if flowIDValue != "" {
-						flowIDs[flowIDValue] = true
-					}
+				}
+				if flowIDValue != "" {
+					flowIDs[flowIDValue] = true
+				}
 
-					// 提取 direction（优先从 Context，回退到 Payload）
-					direction := ev.Context.Direction
-					if direction == "" {
-						if payloadObj, ok := ev.Payload.Value.AsObject(); ok {
-							if dirVal, exists := payloadObj["direction"]; exists {
-								if d, ok := dirVal.AsString(); ok {
-									direction = d
-								}
+				// 提取 direction（优先从 Context，回退到 Payload）
+				direction := ev.Context.Direction
+				if direction == "" {
+					if payloadObj, ok := ev.Payload.Value.AsObject(); ok {
+						if dirVal, exists := payloadObj["direction"]; exists {
+							if d, ok := dirVal.AsString(); ok {
+								direction = d
 							}
 						}
 					}
-					if direction == "client_to_server" {
-						clientCount++
-					} else if direction == "server_to_client" {
-						serverCount++
-					}
 				}
+				if direction == "client_to_server" {
+					clientCount++
+				} else if direction == "server_to_client" {
+					serverCount++
+				}
+			}
 
-				summary.CapturedFlowCount = int64(len(flowIDs))
-				summary.ClientRequestCount = int64(clientCount)
-				summary.ServerMessageCount = int64(serverCount)
-				if !captureRunning {
-					summary.CapturedMessageCount = int64(totalCount)
-				}
-			} else {
-				// 查询失败
-				summary.CapturedFlowCount = -1
-				summary.ClientRequestCount = -1
-				summary.ServerMessageCount = -1
+			summary.CapturedFlowCount = int64(len(flowIDs))
+			summary.ClientRequestCount = int64(clientCount)
+			summary.ServerMessageCount = int64(serverCount)
+			if !captureRunning {
+				summary.CapturedMessageCount = int64(totalCount)
 			}
 		} else {
-			// reader 不可用
+			// 查询失败
 			summary.CapturedFlowCount = -1
 			summary.ClientRequestCount = -1
 			summary.ServerMessageCount = -1
 		}
+	} else {
+		// reader 不可用
+		summary.CapturedFlowCount = -1
+		summary.ClientRequestCount = -1
+		summary.ServerMessageCount = -1
+	}
 
 	if err := m.runRegistry.End(runID, now, summary); err != nil {
 		return errorResult(err), nil
@@ -276,10 +278,10 @@ func (m *mcpCapture) handleEndCaptureRun(ctx context.Context, req mcp.CallToolRe
 	slog.Info("end_capture_run", "run_id", runID, "duration_ms", now.Sub(rec.TimeFrom).Milliseconds())
 
 	return successResult(map[string]any{
-		"run_id":        runID,
-		"time_to":       now.Format(time.RFC3339Nano),
-		"duration_ms":   now.Sub(rec.TimeFrom).Milliseconds(),
-		"summary":       summary,
+		"run_id":      runID,
+		"time_to":     now.Format(time.RFC3339Nano),
+		"duration_ms": now.Sub(rec.TimeFrom).Milliseconds(),
+		"summary":     summary,
 	}), nil
 }
 
@@ -305,8 +307,8 @@ func (m *mcpCapture) handleGetRunStatus(ctx context.Context, req mcp.CallToolReq
 	}
 
 	result := map[string]any{
-		"run_id":   rec.RunID,
-		"status":   status,
+		"run_id":    rec.RunID,
+		"status":    status,
 		"time_from": rec.TimeFrom.Format(time.RFC3339Nano),
 	}
 
@@ -320,7 +322,7 @@ func (m *mcpCapture) handleGetRunStatus(ctx context.Context, req mcp.CallToolReq
 		result["flow_count"] = -1
 		result["client_request_count"] = -1
 		result["server_message_count"] = -1
-		current, err := m.sessionMgr.readCurrent()
+		current, err := m.sessionMgr.readCurrent(auth.OwnerFrom(ctx))
 		if err == nil && current != nil && current.Status == "running" && current.SessionID == rec.SessionID && m.pipelineClient != nil {
 			resp, grpcErr := m.pipelineClient.GetCaptureStatus(ctx, &pb.GetCaptureStatusRequest{SessionId: rec.SessionID})
 			if grpcErr == nil {

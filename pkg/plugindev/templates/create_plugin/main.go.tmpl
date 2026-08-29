@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"github.com/OwnSecurityGuard/gta-plugin-sdk"
 	"github.com/OwnSecurityGuard/gta-plugin-sdk/event"
@@ -10,6 +12,17 @@ import (
 )
 
 func main() {
+	// gta-agent 托管模式：agent 注入 GTA_TUNNEL=1 / GTA_AUTH_TOKEN 环境变量，
+	// 插件以隧道模式注册到共享 pipeline（无本地回拨端点）。
+	// 未设置环境变量时行为与原默认完全一致（本地 socket 注册）。
+	opts := sdk.RegisterOptions{
+		Tunnel:    os.Getenv("GTA_TUNNEL") != "",
+		AuthToken: os.Getenv("GTA_AUTH_TOKEN"),
+	}
+	if opts.Tunnel {
+		sdk.RunRegisterLoopWithOptions(decodePacket, opts)
+		return
+	}
 	sdk.RunRegisterLoop(decodePacket)
 }
 

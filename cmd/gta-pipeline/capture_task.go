@@ -8,14 +8,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/gopacket/pcap"
-
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
 	"gta/pkg/capture"
+	"gta/pkg/capture/agent"
 	"gta/pkg/capture/mobile"
 	"gta/pkg/capture/pcapfile"
-	"gta/pkg/capture/pcaplive"
 	"gta/pkg/decode"
 	"gta/pkg/event"
 	"gta/pkg/internalipc"
@@ -41,7 +39,13 @@ type captureTask struct {
 	sourceName string
 	liveCfg    *capturecontrol.LiveConfig
 	mobileCfg  *capturecontrol.MobileConfig
-	start      time.Time
+	// agentHub 非 nil 时，本会话额外打开 agent capture source，
+	// 接收 gta-agent 经 AgentIngest server 推送的本机原始帧。
+	agentHub *agent.Hub
+	// agentOnly 为 true 时不打开任何基础 source，仅订阅 agent hub
+	//（hub 未配置时 openCaptureSources 返回错误）。
+	agentOnly bool
+	start     time.Time
 
 	// 解码插件绑定：创建时设定，运行中可经 SetSessionPlugin 热切换（pluginMu 保护）。
 	pluginMu sync.RWMutex
@@ -51,8 +55,11 @@ type captureTask struct {
 
 	// 依赖（注入，不持有所有权）
 	registry *plugin.RegistryServer
-	rules    []*analyze.CompiledRule
-	logger   *slog.Logger // 带 session_id 等上下文字段的 logger
+	// owner 是会话发起者的属主（来自 StartSession RPC 的 auth 上下文；
+	// 未接入认证时为空串 = 匿名/本地语义），用于 owner 作用域的插件路由。
+	owner  string
+	rules  []*analyze.CompiledRule
+	logger *slog.Logger // 带 session_id 等上下文字段的 logger
 
 	// Protocol Behavior Resolver（可选）：protocolCfg 非空时在 Start 时构建。
 	protocolCfg     *protocolconfig.File
@@ -317,7 +324,7 @@ func (t *captureTask) run() {
 	engine = analyze.NewEngine(t.rules, t.logger)
 	baseline = state.NewBaselineManager(nil)
 
-	sources, err := openCaptureSources(t.ctx, t.iface, t.port, t.pcapFile, t.liveCfg, t.mobileCfg)
+	sources, err := openCaptureSources(t.ctx, t.iface, t.port, t.pcapFile, t.liveCfg, t.mobileCfg, t.agentHub, t.sessionID, t.agentOnly)
 	if err != nil {
 		t.logger.Error("capture init failed", "error", err, "interface", t.iface, "port", t.port, "pcap_file", t.pcapFile)
 		return
@@ -447,22 +454,25 @@ func (t *captureTask) SetSessionPlugin(ctx context.Context, plugin string) (stri
 
 // resolveDecoderClient 解析本次会话应使用的 DecoderClient 与 schema registry。
 // 路由规则（GAP 2 修复）：
-//   - 指定插件名（t.plugin != ""）：优先 FindByName 精确路由，名查不到时退化按协议 hint（Find），
+//   - 指定插件名（t.plugin != ""）：优先 FindByNameFor 精确路由（owner 作用域，
+//     t.owner 为空时与旧 FindByName 行为一致），名查不到时退化按协议 hint（FindFor），
 //     使 A 项目会话绑 A 插件、B 项目会话绑 B 插件，多项目并行互不干扰。
 //   - 未指定插件名：沿用原行为，按 "tcp" 协议 hint 取第一个在线插件（兼容默认抓包场景）。
+//
+// 解析顺序（名精确 → 协议退化）保持不变。
 func (t *captureTask) resolveDecoderClient() (pb.DecoderClient, *schema.Registry, bool) {
 	plugin := t.getPlugin()
 	if plugin != "" {
-		if c, sr, ok := t.registry.FindByName(plugin); ok {
+		if c, sr, ok := t.registry.FindByNameFor(t.owner, plugin); ok {
 			return c, sr, true
 		}
-		if c, sr, ok := t.registry.Find(plugin); ok {
+		if c, sr, ok := t.registry.FindFor(t.owner, plugin); ok {
 			// 退化兼容：把 plugin 字段当作协议 hint
 			return c, sr, true
 		}
 		return nil, nil, false
 	}
-	return t.registry.Find("tcp")
+	return t.registry.FindFor(t.owner, "tcp")
 }
 
 // decoderAction 给定一次 registry.Find 的结果与当前 dispatcher 状态，
@@ -484,11 +494,41 @@ func decoderAction(client, current pb.DecoderClient, haveDispatcher bool) string
 	return "build"
 }
 
-// openCaptureSources 根据配置打开一个或多个 capture source。
+// openCaptureSources 打开基础 source，并在 agentHub 非 nil 时追加 agent source。
+// agent source 消费 AgentIngest server 按 session_id 路由的 gta-agent 推送，
+// 与其它 source（live/mobile/pcap-file）并行 merge。agentOnly 为 true 时跳过
+// 基础 source，仅打开 agent source（hub 未配置时报错）。
+func openCaptureSources(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig, agentHub *agent.Hub, sessionID string, agentOnly bool) ([]capture.Source, error) {
+	var sources []capture.Source
+	if !agentOnly {
+		var err error
+		sources, err = openCaptureSourcesBase(ctx, iface, port, pcapFile, live, mcfg)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if agentHub != nil {
+		src, err := capture.Open(ctx, agent.SourceName, agent.Config{
+			Hub:       agentHub,
+			SessionID: sessionID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, src)
+	}
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no capture source available: agent source requires agent ingest to be configured (pipeline -agent-ingest-addr)")
+	}
+	return sources, nil
+}
+
+// openCaptureSourcesBase 根据配置打开一个或多个 capture source。
 // 若 pcapFile 非空则回放文件；若 live.Device 非空则打开指定网卡；
 // 若 mobile 非空则启动移动代理抓包源（gRPC server，等待 gta-singbox-agent 推送）；
 // 否则打开所有可用网卡。live 中的 BPF/SnapLen/Promisc 透传给 pcap-live。
-func openCaptureSources(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig) ([]capture.Source, error) {
+// （agent source 的追加不在这里，见 openCaptureSources 包装层。）
+func openCaptureSourcesBase(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig) ([]capture.Source, error) {
 	if pcapFile != "" {
 		src, err := capture.Open(ctx, "pcap-file", pcapfile.PcapFileConfig{Path: pcapFile})
 		if err != nil {
@@ -534,15 +574,17 @@ func openCaptureSources(ctx context.Context, iface string, port int, pcapFile st
 		return []capture.Source{src}, nil
 	}
 
-	devs, err := pcap.FindAllDevs()
+	// 实时抓包能力（网卡枚举 + pcaplive source）按 -tags pcap 门控，
+	// 见 pcap_live_pcap.go / pcap_live_nopcap.go。
+	ifaces, err := listInterfaces()
 	if err != nil {
-		return nil, fmt.Errorf("list interfaces: %w", err)
+		return nil, err
 	}
 	var sources []capture.Source
-	for _, dev := range devs {
-		src, err := openLiveSource(ctx, dev.Name, port, bpf, snapLen, promisc)
+	for _, dev := range ifaces {
+		src, err := openLiveSource(ctx, dev, port, bpf, snapLen, promisc)
 		if err != nil {
-			slog.Warn("skip capture interface", "name", dev.Name, "error", err)
+			slog.Warn("skip capture interface", "name", dev, "error", err)
 			continue
 		}
 		sources = append(sources, src)
@@ -551,23 +593,6 @@ func openCaptureSources(ctx context.Context, iface string, port int, pcapFile st
 		return nil, fmt.Errorf("no capture interfaces available")
 	}
 	return sources, nil
-}
-
-// openLiveSource 打开实时网卡抓包 source。
-// bpf 为空时默认 "tcp port <port>"；snapLen 为 0 时默认 1600。
-func openLiveSource(ctx context.Context, iface string, port int, bpf string, snapLen int32, promisc bool) (capture.Source, error) {
-	if bpf == "" {
-		bpf = fmt.Sprintf("tcp port %d", port)
-	}
-	if snapLen == 0 {
-		snapLen = 1600
-	}
-	return capture.Open(ctx, "pcap-live", pcaplive.PcapLiveConfig{
-		Device:  iface,
-		BPF:     bpf,
-		SnapLen: snapLen,
-		Promisc: promisc,
-	})
 }
 
 // closeCaptureSources 关闭所有 source，忽略错误。

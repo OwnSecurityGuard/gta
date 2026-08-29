@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,22 +26,27 @@ import (
 	"google.golang.org/grpc"
 	"gopkg.in/yaml.v3"
 
+	"gta/docs"
+	"gta/pkg/auth"
 	"gta/pkg/config"
 	"gta/pkg/event"
 	"gta/pkg/internalipc"
 	pb "gta/pkg/internalipc/proto"
 	"gta/pkg/logging"
 	"gta/pkg/plugin"
-	"gta/docs"
 	plugindevclient "gta/pkg/plugindev/client"
 	plugindevserver "gta/pkg/plugindev/server"
 	"gta/pkg/schema"
 	"gta/pkg/store"
+	"gta/pkg/version"
 
 	_ "modernc.org/sqlite"
 )
 
 type sessionMetadata struct {
+	// Owner 是会话归属者（pkg/auth 的 Principal.Owner）。
+	// 空串表示匿名（本地单机用法），落到 current.json；非空落到 current.<owner>.json。
+	Owner        string                 `json:"owner,omitempty"`
 	SessionID    string                 `json:"session_id"`
 	StartedAt    string                 `json:"started_at"`
 	StoppedAt    string                 `json:"stopped_at,omitempty"`
@@ -63,6 +69,15 @@ type sessionMetadata struct {
 	// ManifestSnapshot 是会话创建时的插件 manifest 快照（plugin.yaml 原文）。
 	// 从 controlStore.SessionMeta.ManifestSnapshot 同步，用于 MCP get_session_status 输出。
 	ManifestSnapshot string `json:"manifest_snapshot,omitempty"`
+}
+
+// ownerFilterFromCtx 从 ctx 提取 owner 可见性过滤器。
+// 无身份（T12 之前的 HTTP 直连 / 本地用法）视为匿名（owner=""，非 admin）。
+func ownerFilterFromCtx(ctx context.Context) store.SessionOwnerFilter {
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		return store.SessionOwnerFilter{Owner: p.Owner, AllOwners: p.IsAdmin}
+	}
+	return store.SessionOwnerFilter{}
 }
 
 // pluginEventJSON 是插件事件 SSE 推送的 JSON 负载，与 proto PluginEvent 对应。
@@ -142,8 +157,32 @@ func (sm *sessionManager) absDBPath(sessionID string) string {
 	return path
 }
 
-func (sm *sessionManager) currentPath() string {
-	return filepath.Join(sm.workDir, "current.json")
+// currentShardName 返回 owner 对应的 current 分片文件名。
+// 匿名 owner（""）保持使用 current.json（本地单机回归底线）；
+// 非 anon owner 落到 current.<owner>.json，多客户端共享 workDir 时互不覆盖。
+// owner 中的不安全字符（文件系统/转义风险）统一替换为 '_'。
+// 注意：替换会引入分片碰撞（如 "team/prod" 与 "team:prod" 都落 current.team_prod.json；
+// Windows 文件系统大小写不敏感，"Alice" 与 "alice" 共用分片）。可接受：owner 来自
+// 受信的 token 解析器（pkg/auth），而非任意用户输入；碰撞只影响 current 指针共享，
+// 不影响 control.sqlite 里的会话归属过滤。
+func currentShardName(owner string) string {
+	if owner == "" {
+		return "current.json"
+	}
+	var b strings.Builder
+	for _, r := range owner {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return "current." + b.String() + ".json"
+}
+
+func (sm *sessionManager) currentPathFor(owner string) string {
+	return filepath.Join(sm.workDir, currentShardName(owner))
 }
 
 func (sm *sessionManager) generateSessionID() string {
@@ -180,7 +219,7 @@ func (sm *sessionManager) createSession(metadata sessionMetadata) (string, error
 }
 
 func (sm *sessionManager) writeCurrent(metadata sessionMetadata) error {
-	tmpPath := sm.currentPath() + ".tmp"
+	tmpPath := sm.currentPathFor(metadata.Owner) + ".tmp"
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return err
@@ -188,17 +227,19 @@ func (sm *sessionManager) writeCurrent(metadata sessionMetadata) error {
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, sm.currentPath())
+	return os.Rename(tmpPath, sm.currentPathFor(metadata.Owner))
 }
 
-func (sm *sessionManager) readCurrent() (*sessionMetadata, error) {
+// readCurrent 读取指定 owner 的 current 分片。
+// owner 为空串读 current.json（匿名 / 本地单机用法）。
+func (sm *sessionManager) readCurrent(owner string) (*sessionMetadata, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	return sm.readCurrentLocked()
+	return sm.readCurrentLocked(owner)
 }
 
-func (sm *sessionManager) readCurrentLocked() (*sessionMetadata, error) {
-	data, err := os.ReadFile(sm.currentPath())
+func (sm *sessionManager) readCurrentLocked(owner string) (*sessionMetadata, error) {
+	data, err := os.ReadFile(sm.currentPathFor(owner))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -212,7 +253,10 @@ func (sm *sessionManager) readCurrentLocked() (*sessionMetadata, error) {
 	return &metadata, nil
 }
 
-func (sm *sessionManager) listSessions() ([]sessionMetadata, error) {
+// listSessions 列出 workDir 下的会话元数据（filesystem 层），按 started_at 降序。
+// f 控制 owner 可见性：metadata.json 无 owner 字段的历史会话视为匿名（""），
+// 因此匿名过滤器对既有本地数据行为不变；AllOwners=true（admin）不过滤。
+func (sm *sessionManager) listSessions(f store.SessionOwnerFilter) ([]sessionMetadata, error) {
 	sessionsDir := sm.sessionsDir()
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
@@ -228,13 +272,15 @@ func (sm *sessionManager) listSessions() ([]sessionMetadata, error) {
 			continue
 		}
 		sessionID := entry.Name()
-		meta, err := sm.readSessionMetadata(sessionID)
+		meta, err := sm.readSessionMetadata(sessionID, f.Owner)
 		if err != nil {
 			slog.Warn("read session metadata failed", "session_id", sessionID, "error", err)
 			continue
 		}
 		if meta != nil {
-			sessions = append(sessions, *meta)
+			if f.Matches(store.SessionMeta{Owner: meta.Owner}) {
+				sessions = append(sessions, *meta)
+			}
 		}
 	}
 
@@ -258,8 +304,8 @@ func (sm *sessionManager) writeSessionMetadata(sessionID string, metadata sessio
 	return os.WriteFile(path, data, 0644)
 }
 
-func (sm *sessionManager) readSessionMetadata(sessionID string) (*sessionMetadata, error) {
-	current, err := sm.readCurrent()
+func (sm *sessionManager) readSessionMetadata(sessionID, owner string) (*sessionMetadata, error) {
+	current, err := sm.readCurrent(owner)
 	if err != nil {
 		return nil, err
 	}
@@ -294,20 +340,20 @@ func (sm *sessionManager) readSessionMetadata(sessionID string) (*sessionMetadat
 	}, nil
 }
 
-func (sm *sessionManager) deleteSession(sessionID string) error {
+func (sm *sessionManager) deleteSession(sessionID, owner string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	current, err := sm.readCurrentLocked()
+	current, err := sm.readCurrentLocked(owner)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	if current != nil && current.SessionID == sessionID {
-		tmpPath := sm.currentPath() + ".tmp"
+		tmpPath := sm.currentPathFor(owner) + ".tmp"
 		if err := os.WriteFile(tmpPath, []byte("{}"), 0644); err != nil {
 			return err
 		}
-		if err := os.Rename(tmpPath, sm.currentPath()); err != nil {
+		if err := os.Rename(tmpPath, sm.currentPathFor(owner)); err != nil {
 			return err
 		}
 	}
@@ -415,15 +461,20 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 		pcapFile, _ = filepath.Abs(pcapFile)
 	}
 
-	// 抓包来源：nic（网卡，默认）| proxy（移动代理 gta-singbox-agent 推送）
+	// 抓包来源：nic（网卡，默认）| proxy（移动代理 gta-singbox-agent 推送）| agent（gta-agent 推流）
+	// "mobile" 是 proxy 的历史别名。
 	source := req.GetString("source", "nic")
-	switch source {
-	case "", "nic", "proxy", "mobile":
-	default:
-		return errorResult(fmt.Errorf("unsupported source %q (allowed: nic|proxy)", source)), nil
-	}
 	if source == "mobile" {
-		source = "proxy" // 归一化别名
+		source = "proxy"
+	}
+	agentSource := false
+	switch source {
+	case "", "nic", "proxy", "agent":
+	default:
+		return errorResult(fmt.Errorf("unsupported source %q (allowed: nic|proxy|agent)", source)), nil
+	}
+	if source == "agent" {
+		agentSource = true
 	}
 	listenAddr := req.GetString("listen_addr", "")
 	frameStyle := req.GetString("frame_style", "")
@@ -435,6 +486,12 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 	grpcReq := &pb.StartCaptureRequest{
 		Plugin: pluginName,
 		Port:   int32(port),
+		Agent:  agentSource,
+	}
+	// 透传调用方身份：pipeline 记录会话归属（SessionMeta.Owner）并做 owner 作用域插件路由。
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		grpcReq.Owner = p.Owner
+		grpcReq.AllOwners = p.IsAdmin
 	}
 	switch {
 	case source == "proxy":
@@ -453,6 +510,8 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 		grpcReq.Source = &pb.StartCaptureRequest_File{
 			File: &pb.PcapFileConfig{Path: pcapFile},
 		}
+	case agentSource:
+		// 纯 agent source：不设置基础 source，pipeline 侧仅订阅 agent hub
 	default:
 		// Live capture：使用配置的网卡，若 Device 为空则由 pipeline 自动探测所有网卡
 		if port <= 0 {
@@ -472,17 +531,18 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 	// 写 metadata.json 使 getDBPath 即使 gta-mcp 与 gta-pipeline 的 workDir 不一致，
 	// 也能通过 pipeline 返回的绝对 db_path 定位到正确的会话库。
 	meta := sessionMetadata{
-		SessionID:   resp.GetSessionId(),
-		StartedAt:   time.Now().Format(time.RFC3339),
-		Status:      "running",
-		Port:        port,
-		Plugin:      pluginName,
-		Interface:   m.iface,
-		PCAPFile:    pcapFile,
-		Source:      source,
-		ListenAddr:  listenAddr,
-		FrameStyle:  frameStyle,
-		DBPath:      resp.GetDbPath(),
+		Owner:      auth.OwnerFrom(ctx),
+		SessionID:  resp.GetSessionId(),
+		StartedAt:  time.Now().Format(time.RFC3339),
+		Status:     "running",
+		Port:       port,
+		Plugin:     pluginName,
+		Interface:  m.iface,
+		PCAPFile:   pcapFile,
+		Source:     source,
+		ListenAddr: listenAddr,
+		FrameStyle: frameStyle,
+		DBPath:     resp.GetDbPath(),
 	}
 	if err := m.sessionMgr.writeSessionMetadata(resp.GetSessionId(), meta); err != nil {
 		slog.Warn("write session metadata failed", "session_id", resp.GetSessionId(), "error", err)
@@ -503,12 +563,13 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 }
 
 func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	owner := auth.OwnerFrom(ctx)
 	sessionID := req.GetString("session_id", "")
 	slog.Info("stop_capture requested", "session_id", sessionID)
 
 	if sessionID == "" {
 		// 回退到当前 session（向后兼容）
-		sess, err := m.sessionMgr.readCurrent()
+		sess, err := m.sessionMgr.readCurrent(owner)
 		if err != nil {
 			return errorResult(fmt.Errorf("read current session: %w", err)), nil
 		}
@@ -517,6 +578,9 @@ func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequ
 			return errorResult(fmt.Errorf("no active capture session")), nil
 		}
 		sessionID = sess.SessionID
+	} else if err := m.authorizeSession(ctx, sessionID); err != nil {
+		// 显式指定 session_id 时校验归属（admin 全通过）
+		return errorResult(err), nil
 	}
 
 	resp, err := m.pipelineClient.StopCapture(ctx, &pb.StopCaptureRequest{SessionId: sessionID})
@@ -525,7 +589,7 @@ func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequ
 	}
 
 	// 更新 session 元数据（如果 sessionMgr 中有记录）
-	if sess, err := m.sessionMgr.readCurrent(); err == nil && sess != nil && sess.SessionID == sessionID {
+	if sess, err := m.sessionMgr.readCurrent(owner); err == nil && sess != nil && sess.SessionID == sessionID {
 		sess.Status = "stopped"
 		sess.StoppedAt = time.Now().Format(time.RFC3339)
 		sess.RawPackets = resp.GetRawPackets()
@@ -550,11 +614,12 @@ func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequ
 }
 
 func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	owner := auth.OwnerFrom(ctx)
 	sessionID := req.GetString("session_id", "")
 
 	// 如果未指定 session_id，回退到当前 session
 	if sessionID == "" {
-		sess, err := m.sessionMgr.readCurrent()
+		sess, err := m.sessionMgr.readCurrent(owner)
 		if err != nil {
 			slog.Warn("read current session failed", "error", err)
 			return successResult(map[string]any{"state": "idle"}), nil
@@ -566,6 +631,13 @@ func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToo
 	}
 
 	slog.Debug("get_session_status requested", "session_id", sessionID)
+
+	// 显式指定 session_id 时校验归属（admin 全通过）
+	if req.GetString("session_id", "") != "" {
+		if err := m.authorizeSession(ctx, sessionID); err != nil {
+			return errorResult(err), nil
+		}
+	}
 
 	// 通过 gRPC 查询实时状态
 	if m.pipelineClient != nil {
@@ -590,7 +662,7 @@ func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToo
 	}
 
 	// 返回 sessionMgr 中的元数据
-	sess, err := m.sessionMgr.readSessionMetadata(sessionID)
+	sess, err := m.sessionMgr.readSessionMetadata(sessionID, owner)
 	if err != nil || sess == nil {
 		return successResult(map[string]any{"state": "closed", "session_id": sessionID}), nil
 	}
@@ -658,7 +730,14 @@ func (m *mcpCapture) handleListRegisteredPlugins(ctx context.Context, req mcp.Ca
 	if m.pipelineClient == nil {
 		return errorResult(fmt.Errorf("pipeline client not available")), nil
 	}
-	resp, err := m.pipelineClient.ListPlugins(ctx, &pb.ListPluginsRequest{})
+	// owner 作用域：非 admin 只见自己的 + 匿名（系统）插件；admin 见全部。
+	// 身份经 RPC 透传给 pipeline（capturecontrol.Server 注入 ctx）。
+	grpcReq := &pb.ListPluginsRequest{}
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		grpcReq.Owner = p.Owner
+		grpcReq.AllOwners = p.IsAdmin
+	}
+	resp, err := m.pipelineClient.ListPlugins(ctx, grpcReq)
 	if err != nil {
 		slog.Error("list_registered_plugins failed", "error", err)
 		return errorResult(fmt.Errorf("list registered plugins: %w", err)), nil
@@ -674,6 +753,7 @@ func (m *mcpCapture) handleListRegisteredPlugins(ctx context.Context, req mcp.Ca
 			"socket_path":    p.GetSocketPath(),
 			"online":         p.GetOnline(),
 			"last_heartbeat": p.GetLastHeartbeatUnix(),
+			"owner":          p.GetOwner(),
 		})
 	}
 	return successResult(map[string]any{"plugins": plugins}), nil
@@ -684,7 +764,13 @@ func (m *mcpCapture) handleGetPluginManifest(ctx context.Context, req mcp.CallTo
 		return errorResult(fmt.Errorf("pipeline client not available")), nil
 	}
 	name := req.GetString("name", "")
-	resp, err := m.pipelineClient.GetPluginManifest(ctx, &pb.GetPluginManifestRequest{Name: name})
+	// owner 作用域查找：只能查到自己 + 匿名（系统）插件的 manifest；admin 不限。
+	grpcReq := &pb.GetPluginManifestRequest{Name: name}
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		grpcReq.Owner = p.Owner
+		grpcReq.AllOwners = p.IsAdmin
+	}
+	resp, err := m.pipelineClient.GetPluginManifest(ctx, grpcReq)
 	if err != nil {
 		slog.Error("get_plugin_manifest failed", "error", err)
 		return errorResult(fmt.Errorf("get plugin manifest: %w", err)), nil
@@ -729,6 +815,10 @@ func (m *mcpCapture) handleSetSessionPlugin(ctx context.Context, req mcp.CallToo
 		return errorResult(fmt.Errorf("pipeline client not available")), nil
 	}
 	slog.Info("set_session_plugin requested", "session_id", sessionID, "plugin", pluginName)
+	// 归属校验：只能给自家会话换插件（admin 全通过）
+	if err := m.authorizeSession(ctx, sessionID); err != nil {
+		return errorResult(err), nil
+	}
 	resp, err := m.pipelineClient.SetSessionPlugin(ctx, &pb.SetSessionPluginRequest{
 		SessionId: sessionID,
 		Plugin:    pluginName,
@@ -795,7 +885,7 @@ func (m *mcpCapture) handleAggregateQuery(ctx context.Context, req mcp.CallToolR
 		return errorResult(err), nil
 	}
 	sessionID := req.GetString("session_id", "")
-	dbPath, err := m.getDBPath(sessionID)
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -805,7 +895,7 @@ func (m *mcpCapture) handleAggregateQuery(ctx context.Context, req mcp.CallToolR
 		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -899,7 +989,7 @@ func aggregatableContractFields(snapshot string) []aggregatableFieldView {
 
 func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	sessionID := req.GetString("session_id", "")
-	dbPath, err := m.getDBPath(sessionID)
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -912,7 +1002,7 @@ func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToo
 	sessionDir := filepath.Dir(dbPath)
 
 	// 打开 reader 用于 loadDataFields 采样推断（manifest 缺失时的兜底路径）
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(fmt.Errorf("open reader: %w", err)), nil
 	}
@@ -1038,10 +1128,10 @@ func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToo
 				"columns":     metricColumns,
 			},
 		},
-		"query_fields":  queryFields,
-		"rules":         rules,
-		"examples":      examples,
-		"field_source":  fieldSource,
+		"query_fields": queryFields,
+		"rules":        rules,
+		"examples":     examples,
+		"field_source": fieldSource,
 	}
 	if manifestView != nil {
 		result["manifest"] = manifestView
@@ -1297,7 +1387,7 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 	offset := req.GetInt("offset", 0)
 	sessionID := req.GetString("session_id", "")
 	filterExpr := req.GetString("filter", "")
-	dbPath, err := m.getDBPath(sessionID)
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1316,7 +1406,7 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 		}
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1529,7 +1619,7 @@ func (m *mcpCapture) handleListConnections(ctx context.Context, req mcp.CallTool
 	limit := req.GetInt("limit", 100)
 	offset := req.GetInt("offset", 0)
 
-	dbPath, err := m.getDBPath(sessionID)
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1538,7 +1628,7 @@ func (m *mcpCapture) handleListConnections(ctx context.Context, req mcp.CallTool
 		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1566,7 +1656,7 @@ func (m *mcpCapture) handleGetConnectionDetail(ctx context.Context, req mcp.Call
 	sessionID := req.GetString("session_id", "")
 	connID := req.GetString("conn_id", "")
 
-	dbPath, err := m.getDBPath(sessionID)
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1578,7 +1668,7 @@ func (m *mcpCapture) handleGetConnectionDetail(ctx context.Context, req mcp.Call
 		return errorResult(fmt.Errorf("conn_id is required")), nil
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1610,7 +1700,7 @@ func (m *mcpCapture) handleListConnectionStreams(ctx context.Context, req mcp.Ca
 	limit := req.GetInt("limit", 200)
 	offset := req.GetInt("offset", 0)
 
-	dbPath, err := m.getDBPath(sessionID)
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1622,7 +1712,7 @@ func (m *mcpCapture) handleListConnectionStreams(ctx context.Context, req mcp.Ca
 		return errorResult(fmt.Errorf("conn_id is required")), nil
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1652,7 +1742,7 @@ func (m *mcpCapture) handleListConnectionFrames(ctx context.Context, req mcp.Cal
 	limit := req.GetInt("limit", 100)
 	offset := req.GetInt("offset", 0)
 
-	dbPath, err := m.getDBPath(sessionID)
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1664,7 +1754,7 @@ func (m *mcpCapture) handleListConnectionFrames(ctx context.Context, req mcp.Cal
 		return errorResult(fmt.Errorf("conn_id is required")), nil
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1698,7 +1788,7 @@ func (m *mcpCapture) handleListRawPackets(ctx context.Context, req mcp.CallToolR
 	src := req.GetString("src", "")
 	dst := req.GetString("dst", "")
 
-	dbPath, err := m.getDBPath(sessionID)
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1707,7 +1797,7 @@ func (m *mcpCapture) handleListRawPackets(ctx context.Context, req mcp.CallToolR
 		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1757,7 +1847,7 @@ func (m *mcpCapture) handleListStateChanges(ctx context.Context, req mcp.CallToo
 	path := req.GetString("path", "")
 	flowID := req.GetString("flow_id", "")
 
-	dbPath, err := m.getDBPath(sessionID)
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1766,7 +1856,7 @@ func (m *mcpCapture) handleListStateChanges(ctx context.Context, req mcp.CallToo
 		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1843,7 +1933,7 @@ func (m *mcpCapture) handleQueryCaptureTable(ctx context.Context, req mcp.CallTo
 		offset = 0
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
 	}
@@ -1984,20 +2074,58 @@ func queryEnv() map[string]any {
 }
 
 // openReader 打开指定 session 的 capture.sqlite 返回 captureReader 用于查询。
-func (m *mcpCapture) openReader(sessionID string) (captureReader, error) {
-	dbPath, err := m.getDBPath(sessionID)
+func (m *mcpCapture) openReader(ctx context.Context, sessionID string) (captureReader, error) {
+	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil || dbPath == "" {
 		return nil, fmt.Errorf("no db path for session %s: %w", sessionID, err)
 	}
 	return m.readerOpener(dbPath)
 }
 
+// authorizeSession 校验调用方对指定会话的可见性（controlStore + metadata.json 双源）。
+// 规则与 store.SessionOwnerFilter.Matches 一致：admin 全可见；否则仅 owner 匹配的会话。
+// 防泄露规则：controlStore 中存在该会话但调用方不可见时直接拒绝，绝不回退到
+// 文件系统路径（metadata.json 缺失时 readSessionMetadata 会按 os.Stat 合成
+// Owner="" 的元数据，若回退将把他人会话的 db_path 泄露给匿名调用方）。
+// 仅当 controlStore 完全查不到该会话（workDir 漂移等）时才走 metadata.json 兜底。
+func (m *mcpCapture) authorizeSession(ctx context.Context, sessionID string) error {
+	f := ownerFilterFromCtx(ctx)
+	if f.AllOwners {
+		return nil
+	}
+	// 1. controlStore：按 owner 过滤，命中即通过；
+	//    会话存在但不可见 → 拒绝（不回退，见函数注释）。
+	if m.controlStore != nil && sessionID != "" {
+		meta, err := m.controlStore.GetSessionFor(ctx, sessionID, f)
+		if err == nil && meta != nil {
+			return nil
+		}
+		if _, errAll := m.controlStore.GetSession(ctx, sessionID); errAll == nil {
+			return fmt.Errorf("session %s not found or not owned by you", sessionID)
+		}
+		// controlStore 无此会话记录 → 文件系统兜底
+	}
+	// 2. sessionMgr metadata.json（本地文件，需自行比对 Owner）
+	if meta, err := m.sessionMgr.readSessionMetadata(sessionID, f.Owner); err == nil && meta != nil {
+		if f.Matches(store.SessionMeta{Owner: meta.Owner}) {
+			return nil
+		}
+		return fmt.Errorf("session %s not found or not owned by you", sessionID)
+	}
+	return nil
+}
+
 // getDBPath 获取指定 session 的 db_path。
-// 优先从 ControlStore 查询，回退到 sessionMgr。
-func (m *mcpCapture) getDBPath(sessionID string) (string, error) {
+// 优先从 ControlStore 查询（owner 过滤），回退到 sessionMgr（owner 校验）。
+func (m *mcpCapture) getDBPath(ctx context.Context, sessionID string) (string, error) {
+	if err := m.authorizeSession(ctx, sessionID); err != nil {
+		slog.Warn("getDBPath: session access denied", "session_id", sessionID, "error", err)
+		return "", err
+	}
+	owner := auth.OwnerFrom(ctx)
 	// 1. 尝试 ControlStore
 	if m.controlStore != nil && sessionID != "" {
-		meta, err := m.controlStore.GetSession(context.Background(), sessionID)
+		meta, err := m.controlStore.GetSessionFor(ctx, sessionID, ownerFilterFromCtx(ctx))
 		if err == nil && meta != nil {
 			slog.Info("getDBPath: resolved via controlStore", "session_id", sessionID, "db_path", meta.DBPath)
 			return meta.DBPath, nil
@@ -2006,14 +2134,14 @@ func (m *mcpCapture) getDBPath(sessionID string) (string, error) {
 	}
 	// 2. 回退到 sessionMgr（metadata.json，含 pipeline 返回的绝对 db_path）
 	if sessionID != "" {
-		meta, err := m.sessionMgr.readSessionMetadata(sessionID)
+		meta, err := m.sessionMgr.readSessionMetadata(sessionID, owner)
 		if err == nil && meta != nil {
 			slog.Info("getDBPath: resolved via sessionMgr metadata", "session_id", sessionID, "db_path", meta.DBPath)
 			return meta.DBPath, nil
 		}
 	}
 	// 3. 尝试当前 session
-	current, err := m.sessionMgr.readCurrent()
+	current, err := m.sessionMgr.readCurrent(owner)
 	if err == nil && current != nil {
 		slog.Info("getDBPath: resolved via current session", "session_id", sessionID, "current_session_id", current.SessionID, "db_path", current.DBPath)
 		return current.DBPath, nil
@@ -2023,7 +2151,7 @@ func (m *mcpCapture) getDBPath(sessionID string) (string, error) {
 }
 
 func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	sessions, err := m.sessionMgr.listSessions()
+	sessions, err := m.sessionMgr.listSessions(ownerFilterFromCtx(ctx))
 	if err != nil {
 		slog.Error("list_all_sessions failed", "error", err)
 		return errorResult(err), nil
@@ -2140,7 +2268,8 @@ func (m *mcpCapture) handleDeleteSession(ctx context.Context, req mcp.CallToolRe
 	}
 
 	// 检查 session 是否正在运行
-	current, err := m.sessionMgr.readCurrent()
+	owner := auth.OwnerFrom(ctx)
+	current, err := m.sessionMgr.readCurrent(owner)
 	running := err == nil && current != nil && current.Status == "running" && current.SessionID == sessionID
 
 	if running {
@@ -2148,7 +2277,12 @@ func (m *mcpCapture) handleDeleteSession(ctx context.Context, req mcp.CallToolRe
 		return errorResult(fmt.Errorf("cannot delete running session %s; stop it first", sessionID)), nil
 	}
 
-	if err := m.sessionMgr.deleteSession(sessionID); err != nil {
+	// 归属校验：只能删除自己的会话（admin 全通过）
+	if err := m.authorizeSession(ctx, sessionID); err != nil {
+		return errorResult(err), nil
+	}
+
+	if err := m.sessionMgr.deleteSession(sessionID, owner); err != nil {
 		slog.Error("delete_session failed", "session_id", sessionID, "error", err)
 		return errorResult(err), nil
 	}
@@ -2263,7 +2397,6 @@ func (m *mcpCapture) handleEventsSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -2326,19 +2459,58 @@ func resolvePluginsDir(input string) (string, error) {
 }
 
 func main() {
-	addr := flag.String("addr", ":8781", "SSE server address")
+	// 统一配置（T10）：-config 指向 gta.yaml（可选）。优先级 flag > 环境变量 GTA_* > 配置文件 > 默认值。
+	cfgPath := flag.String("config", "", "统一配置文件 gta.yaml 路径（可选；优先级 flag > 环境变量 GTA_* > 配置文件 > 默认值）")
+	addr := flag.String("addr", ":8781", "SSE server address（支持 :0 动态分配，实际地址回写 <workdir>/addr.mcp.json）")
 	iface := flag.String("iface", "", "capture interface; empty means all available interfaces")
 	pluginsDir := flag.String("plugins-dir", "plugins", "plugins directory")
-	workDir := flag.String("work-dir", ".", "working directory for session databases")
+	// 工作目录解析规则（T10）：显式 -work-dir > GTA_HOME > gta.yaml workdir >
+	// CWD 既有数据探测（存在 control.sqlite/sessions/runs 时沿用 CWD）> ~/.gta。
+	workDir := flag.String("work-dir", ".", "working directory for session databases（显式传参优先；否则 GTA_HOME > gta.yaml workdir > CWD 既有数据沿用 > ~/.gta）")
 	pipelineAddr := flag.String("pipeline-addr", ":9888", "gta-pipeline gRPC 地址（默认 :9888）")
 	debug := flag.Bool("debug", false, "enable debug logging")
 	enableRawDebug := flag.Bool("enable-raw-debug", os.Getenv("GTA_MCP_ENABLE_RAW_DEBUG") == "1", "暴露原始包调试工具（list_raw_packets / decode_raw_packets），仅限插件开发调试；默认关闭")
 	logFormat := flag.String("log-format", "json", "log format: json | text")
 	logFile := flag.String("log-file", "", "log file path (default: <workdir>/logs/gta-mcp.log)")
+	allowedOrigins := flag.String("allowed-origins", os.Getenv("GTA_MCP_ALLOWED_ORIGINS"), "CORS 允许的跨域 Origin（逗号分隔，如 http://localhost:5173,https://gta.example.com）；留空不返回 CORS 头（同源用法不受影响）")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("gta-mcp " + version.String())
+		return
+	}
+
+	flagSet := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
+	// 加载统一配置并按优先级合并（flag 显式 > 环境变量 > 文件 > 默认值）。
+	// -config 显式指定的路径不存在时硬错误（防止拼错路径静默退回默认配置）。
+	cfg, err := config.Load(*cfgPath, flagSet["config"])
+	if err != nil {
+		slog.Error("load config", "path", *cfgPath, "error", err)
+		os.Exit(1)
+	}
+	if !flagSet["addr"] && cfg.MCP.Addr != "" {
+		*addr = cfg.MCP.Addr
+	}
+	// pipeline-addr 是要连接的 pipeline CaptureControl gRPC 地址，与 pipeline 的
+	// control_addr 是同一个配置点（gta.yaml pipeline.control_addr / GTA_CONTROL_ADDR）。
+	if !flagSet["pipeline-addr"] && cfg.Pipeline.ControlAddr != "" {
+		*pipelineAddr = cfg.Pipeline.ControlAddr
+	}
+	// allowed-origins 的 flag 默认值本身就读 GTA_MCP_ALLOWED_ORIGINS（环境变量已兜底），
+	// 这里只在 flag 未显式传入且环境变量为空时用配置文件值补齐。
+	if !flagSet["allowed-origins"] && *allowedOrigins == "" && cfg.MCP.AllowedOrigins != "" {
+		*allowedOrigins = cfg.MCP.AllowedOrigins
+	}
+
+	// 工作目录：显式 flag > GTA_HOME > gta.yaml workdir > CWD 既有数据沿用 > ~/.gta。
+	absWorkDir, err := config.ResolveWorkDir(*workDir, flagSet["work-dir"], cfg.WorkDir)
+	if err != nil {
+		slog.Error("resolve workdir", "error", err)
+		os.Exit(1)
+	}
 
 	// 统一日志初始化：文件落盘 + stderr 双写 + 按大小轮转
-	absWorkDir, _ := filepath.Abs(*workDir)
 	logCfg := logging.DefaultConfig()
 	if *debug {
 		logCfg.Level = slog.LevelDebug
@@ -2348,6 +2520,8 @@ func main() {
 		*logFile = filepath.Join(absWorkDir, "logs", "gta-mcp.log")
 	}
 	logCfg.FilePath = *logFile
+	// T17：GTA_LOG_FILE_DISABLED / GTA_LOG_STDERR_DISABLED 可关闭文件落盘或 stderr 双写（容器部署用）。
+	logCfg = logging.FromEnv(logCfg)
 	logging.MustInit(logCfg)
 
 	resolvedPluginsDir, err := resolvePluginsDir(*pluginsDir)
@@ -2373,11 +2547,11 @@ func main() {
 	}
 
 	s.AddTool(mcp.NewTool("start_capture",
-		mcp.WithDescription("Start capturing traffic. Two capture sources are supported: source=nic (default) captures on a network interface filtered by port; source=proxy starts the mobile proxy gRPC listener (gta-singbox-agent connects and pushes connection-level frames). Packets are always captured and stored; an optional plugin enables protocol decoding."),
+		mcp.WithDescription("Start capturing traffic. Capture sources: source=nic (default) captures on a network interface filtered by port; source=proxy starts the mobile proxy gRPC listener (gta-singbox-agent connects and pushes connection-level frames); source=agent subscribes to the agent hub (a running gta-agent pushes raw frames for this session_id). Sources can be combined where supported (e.g. agent with pcap_file). Packets are always captured and stored; an optional plugin enables protocol decoding."),
 		mcp.WithNumber("port", mcp.DefaultNumber(0), mcp.Description("Server port to capture or filter, e.g. 8080. Required for source=nic; ignored for source=proxy")),
 		mcp.WithString("plugin", mcp.Description("Optional plugin name for protocol decoding, e.g. http. If omitted or no matching plugin is found, only raw packets are stored.")),
 		mcp.WithString("pcap_file", mcp.Description("Optional pcap file to replay instead of live capture")),
-		mcp.WithString("source", mcp.DefaultString("nic"), mcp.Description("Capture source: nic (network interface, default) or proxy (mobile proxy via gta-singbox-agent)")),
+		mcp.WithString("source", mcp.DefaultString("nic"), mcp.Description("Capture source: nic (network interface, default), proxy (mobile proxy via gta-singbox-agent) or agent (raw frames pushed by gta-agent via the agent hub)")),
 		mcp.WithString("listen_addr", mcp.DefaultString("127.0.0.1:9090"), mcp.Description("For source=proxy: gRPC listen address that gta-singbox-agent connects to, e.g. 127.0.0.1:9090 or unix:///tmp/gta-mobile.sock")),
 		mcp.WithString("frame_style", mcp.DefaultString("raw"), mcp.Description("For source=proxy: frame reassembly style, raw (each data chunk as one frame) or length_prefix (N-byte length header)")),
 		mcp.WithNumber("prefix_len", mcp.DefaultNumber(4), mcp.Description("For source=proxy + frame_style=length_prefix: length prefix byte count 1|2|4")),
@@ -2691,34 +2865,40 @@ func main() {
 	mux.Handle("/message", sseServer.MessageHandler())
 	mux.Handle("/mcp", httpServer)
 	mux.HandleFunc("/events/plugins", capture.handleEventsSSE)
-	// 手机 sing-box 客户端远程 profile 配置端点（扫码导入用）。
-	mux.HandleFunc("/singbox/profile", capture.handleSingboxProfile)
 
-	// CORS 中间件：浏览器端 MCP 客户端（如 Claude Desktop 的 webview，origin 异于 8087）
-	// 发起跨域请求时，浏览器先发 OPTIONS 预检。mux 默认对 OPTIONS 返回 404 且无 CORS 头，
-	// 会导致 "Response to preflight request doesn't pass access control check"。
-	// 这里统一处理预检并给所有响应加 Access-Control-Allow-Origin。
-	corsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Origin") != "" {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		}
-		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers",
-				"Content-Type, Accept, Authorization, Mcp-Session-Id, Last-Event-ID, X-Requested-With")
-			w.Header().Set("Access-Control-Max-Age", "86400")
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
+	// CORS：仅放行 -allowed-origins 中的 Origin（T12 之前是 *，任意站点都能
+	// 跨域调用 MCP 工具）。未配置任何 origin 时不返回 CORS 头，同源用法不受影响。
+	// 鉴权（B3）：GTA_AUTH_TOKENS 配置了 token 时强制 Bearer 校验（auth.Middleware）；
+	// 未配置（匿名模式）时保持旧行为——直接放行、不注入身份。
+	resolver, err := auth.LoadFromEnv()
+	if err != nil {
+		slog.Error("load auth tokens failed", "error", err)
+		os.Exit(1)
+	}
+	authed := buildHTTPHandler(strings.Split(*allowedOrigins, ","), resolver, mux)
+
+	// /singbox/profile 鉴权豁免：手机 sing-box 客户端扫码导入 profile 时无法携带
+	// Bearer 头（SFA 不支持自定义请求头）。该端点只输出代理监听端口/地址配置
+	// （与扫码页展示的信息一致），不含任何会话/抓包数据，故挂载在鉴权链之外。
+	root := http.NewServeMux()
+	root.HandleFunc("/singbox/profile", capture.handleSingboxProfile)
+	root.Handle("/", authed)
+	handler := http.Handler(root)
 
 	customServer := &http.Server{
 		Addr:    *addr,
-		Handler: corsHandler,
+		Handler: handler,
 	}
-	slog.Info("mcp server listening", "addr", *addr, "endpoints", []string{"/sse", "/message", "/mcp"}, "raw_debug_enabled", capture.enableRawDebug)
-	if err := customServer.ListenAndServe(); err != nil {
+	// 用 net.Listen 以便拿到实际监听地址（:0 动态分配时回写 <workdir>/addr.mcp.json，
+	// 同机可跑多套实例）。
+	lis, err := net.Listen("tcp", *addr)
+	if err != nil {
+		slog.Error("listen", "addr", *addr, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("mcp server listening", "addr", lis.Addr().String(), "endpoints", []string{"/sse", "/message", "/mcp"}, "raw_debug_enabled", capture.enableRawDebug, "auth_enabled", resolver.Required(), "allowed_origins", *allowedOrigins)
+	config.WriteAddrFile(absWorkDir, "mcp", lis.Addr().String())
+	if err := customServer.Serve(lis); err != nil && err != http.ErrServerClosed {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"gta/pkg/auth"
 	pb "gta/pkg/internalipc/proto"
 )
 
@@ -159,6 +160,9 @@ type StartSessionRequest struct {
 	Live      *LiveConfig
 	File      *FileConfig
 	Mobile    *MobileConfig
+	// Agent 为 true 时会话订阅 agent capture source（可与其他 source 组合，
+	// 单独为 true 表示纯 agent 会话）。
+	Agent bool
 }
 
 // LiveConfig 对应 proto PcapLiveConfig。
@@ -238,6 +242,7 @@ type PluginSummary struct {
 	SocketPath     string
 	Online         bool
 	LastHeartbeat  time.Time
+	Owner          string
 }
 
 // Server 实现 pb.CaptureControlServer，委托给 CaptureEngine。
@@ -254,10 +259,13 @@ func NewServer(engine CaptureEngine) *Server {
 
 // StartCapture 处理启动抓包 RPC。
 func (s *Server) StartCapture(ctx context.Context, req *pb.StartCaptureRequest) (*pb.StartCaptureResponse, error) {
+	// 透传调用方身份：engine（pipeline_service）用它记录会话归属与 owner 作用域插件路由。
+	ctx = withRequestOwner(ctx, req.GetOwner(), req.GetAllOwners())
 	engineReq := StartSessionRequest{
 		SessionID: req.GetSessionId(),
 		Plugin:    req.GetPlugin(),
 		Port:      int(req.GetPort()),
+		Agent:     req.GetAgent(),
 	}
 	switch src := req.GetSource().(type) {
 	case *pb.StartCaptureRequest_Live:
@@ -422,23 +430,40 @@ func (s *Server) TestPlugin(ctx context.Context, req *pb.TestPluginRequest) (*pb
 	}, nil
 }
 
+// withRequestOwner 把 MCP 透传来的调用方身份（owner/all_owners）注入 ctx，
+// 使 engine 侧能经 auth.OwnerFrom/auth.PrincipalFrom 做 owner 作用域过滤。
+// 两者均为空表示匿名/本地语境，不注入（engine 侧 OwnerFrom 返回 ""，行为不变）。
+//
+// 信任边界：owner/all_owners 是 RPC 请求字段，不由 gRPC 层校验——本 server
+// 假定 CaptureControl 监听在 localhost、唯一客户端是同机的 gta-mcp（管道内
+// 已有 HTTP Bearer 鉴权）。任何能直接连上该端口的进程都可伪造身份；若要把
+// 监听开放到非回环地址，必须先接入与 HTTP 侧同级的 gRPC Bearer 拦截器
+// （pkg/auth.UnaryInterceptor）。
+func withRequestOwner(ctx context.Context, owner string, allOwners bool) context.Context {
+	if owner == "" && !allOwners {
+		return ctx
+	}
+	return auth.WithPrincipal(ctx, &auth.Principal{Owner: owner, IsAdmin: allOwners})
+}
+
 // ListPlugins 处理列出已注册插件 RPC。
 func (s *Server) ListPlugins(ctx context.Context, req *pb.ListPluginsRequest) (*pb.ListPluginsResponse, error) {
-	plugins, err := s.engine.ListPlugins(ctx)
+	plugins, err := s.engine.ListPlugins(withRequestOwner(ctx, req.GetOwner(), req.GetAllOwners()))
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*pb.PluginSummary, 0, len(plugins))
 	for _, p := range plugins {
 		out = append(out, &pb.PluginSummary{
-			InstanceId:      p.InstanceID,
-			Name:            p.Name,
-			Protocol:        p.Protocol,
-			Type:            p.Type,
-			ApiVersion:      p.APIVersion,
-			SocketPath:      p.SocketPath,
-			Online:          p.Online,
+			InstanceId:        p.InstanceID,
+			Name:              p.Name,
+			Protocol:          p.Protocol,
+			Type:              p.Type,
+			ApiVersion:        p.APIVersion,
+			SocketPath:        p.SocketPath,
+			Online:            p.Online,
 			LastHeartbeatUnix: p.LastHeartbeat.Unix(),
+			Owner:             p.Owner,
 		})
 	}
 	return &pb.ListPluginsResponse{Plugins: out}, nil
@@ -446,7 +471,7 @@ func (s *Server) ListPlugins(ctx context.Context, req *pb.ListPluginsRequest) (*
 
 // GetPluginManifest 处理获取插件 manifest RPC。
 func (s *Server) GetPluginManifest(ctx context.Context, req *pb.GetPluginManifestRequest) (*pb.GetPluginManifestResponse, error) {
-	manifest, err := s.engine.GetPluginManifest(ctx, req.GetName())
+	manifest, err := s.engine.GetPluginManifest(withRequestOwner(ctx, req.GetOwner(), req.GetAllOwners()), req.GetName())
 	if err != nil {
 		return nil, err
 	}

@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/gopacket/pcap"
-
 	"gta/pkg/analyze"
+	"gta/pkg/auth"
 	"gta/pkg/capture"
+	"gta/pkg/capture/agent"
 	"gta/pkg/config"
 	"gta/pkg/internalipc"
 	"gta/pkg/internalipc/capturecontrol"
@@ -37,6 +37,10 @@ type pipelineService struct {
 	// 通过 GetRegistryAddr 暴露给 gta-mcp，供其 / 插件启动时获知 GTA_REGISTRY_ADDR。
 	registryAddr string
 
+	// agentHub 非 nil 时，每个抓包会话额外打开 agent source，
+	// 接收 gta-agent 经 AgentIngest server 推送的本机原始帧（-agent-ingest-addr 启用时）。
+	agentHub *agent.Hub
+
 	mu    sync.RWMutex
 	tasks map[string]*captureTask
 
@@ -50,6 +54,11 @@ type pipelineService struct {
 	spawnAgent     bool
 	agentBin       string
 	agentProc      *agentProcess
+
+	// proxyServerAddrOverride 是 T11 注入的 server_addr 兜底值（gta.yaml
+	// proxy.server_addr / GTA_PROXY_SERVER_ADDR）。proxy.json 未指定 server_addr
+	// 时生效；为空表示无覆盖（沿用 DefaultProxyServerConfig 默认值）。
+	proxyServerAddrOverride string
 }
 
 // newPipelineService 构造 pipelineService，不启动任何会话。
@@ -68,6 +77,10 @@ func newPipelineService(workDir string, controlStore *store.ControlStore, regist
 
 // 编译期断言：pipelineService 实现 capturecontrol.CaptureEngine 接口。
 var _ capturecontrol.CaptureEngine = (*pipelineService)(nil)
+
+// SetAgentHub 注入 agent 包路由中枢（main.go 在启用 -agent-ingest-addr 时调用）。
+// 必须在任何 StartSession 之前调用。
+func (s *pipelineService) SetAgentHub(h *agent.Hub) { s.agentHub = h }
 
 // addTask 注册 task 到 map（写锁）。
 func (s *pipelineService) addTask(t *captureTask) {
@@ -114,6 +127,9 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 	case req.Mobile != nil:
 		sourceName = "mobile"
 		mobileCfg = req.Mobile
+	case req.Agent:
+		// 纯 agent 会话：无基础 source，仅订阅 agent hub（openCaptureSources 打开）。
+		sourceName = agent.SourceName
 	default:
 		return capturecontrol.StartSessionResult{}, internalipc.ErrSourceEmpty
 	}
@@ -133,8 +149,9 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 	startTime := time.Now()
 
 	// 获取插件 manifest 快照，用于 MCP 层查询两层契约声明（Schema/State）。
+	// owner 作用域查找：调用方（gta-mcp）自己的插件可见，匿名（系统）插件兜底。
 	var manifestSnapshot string
-	if manifestBytes, err := s.registry.GetPluginManifest(req.Plugin); err == nil && len(manifestBytes) > 0 {
+	if manifestBytes, err := s.registry.GetPluginManifestFor(auth.OwnerFrom(ctx), req.Plugin); err == nil && len(manifestBytes) > 0 {
 		manifestSnapshot = string(manifestBytes)
 		slog.Debug("captured manifest snapshot for session", "session_id", sessionID, "plugin", req.Plugin, "size", len(manifestBytes))
 	} else {
@@ -142,6 +159,7 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 	}
 
 	if err := s.controlStore.CreateSession(ctx, store.SessionMeta{
+		Owner:            auth.OwnerFrom(ctx),
 		SessionID:        sessionID,
 		StartedAt:        startTime,
 		Status:           "running",
@@ -168,9 +186,12 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 		sourceName:  sourceName,
 		liveCfg:     liveCfg,
 		mobileCfg:   mobileCfg,
+		agentHub:    s.agentHub,
+		agentOnly:   req.Agent && liveCfg == nil && mobileCfg == nil && pcapFile == "",
 		start:       startTime,
 		reresolve:   make(chan struct{}, 1),
 		registry:    s.registry,
+		owner:       auth.OwnerFrom(ctx),
 		rules:       s.rules,
 		protocolCfg: s.protocolCfg,
 		logger:      s.logger.With("session_id", sessionID),
@@ -275,17 +296,10 @@ func (s *pipelineService) ListSessions(ctx context.Context) ([]capturecontrol.Se
 	return out, nil
 }
 
-// ListInterfaces 列出可用网卡名称。
+// ListInterfaces 列出可用网卡名称（实时抓包能力按 -tags pcap 门控，
+// 见 pcap_live_pcap.go / pcap_live_nopcap.go）。
 func (s *pipelineService) ListInterfaces(ctx context.Context) ([]string, error) {
-	devs, err := pcap.FindAllDevs()
-	if err != nil {
-		return nil, fmt.Errorf("list interfaces: %w", err)
-	}
-	names := make([]string, 0, len(devs))
-	for _, dev := range devs {
-		names = append(names, dev.Name)
-	}
-	return names, nil
+	return listInterfaces()
 }
 
 // finalizeTask 是 captureTask run 退出时的回调（自动结束或显式停止都会触发）。
@@ -343,10 +357,27 @@ func (s *pipelineService) StopAll(ctx context.Context) {
 }
 
 // ListPlugins 列出当前已注册的插件摘要。
-func (s *pipelineService) ListPlugins(_ context.Context) ([]capturecontrol.PluginSummary, error) {
+// owner 作用域过滤（身份来自 ctx，由 capturecontrol.Server 从 RPC 请求注入）：
+// 非 admin 只见自己的 + 匿名（系统）注册的插件；admin 见全部；
+// 匿名语境（owner=""）只见匿名插件——与 FindFor 的可见性规则一致。
+func (s *pipelineService) ListPlugins(ctx context.Context) ([]capturecontrol.PluginSummary, error) {
+	owner := auth.OwnerFrom(ctx)
+	allOwners := false
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		allOwners = p.IsAdmin
+	}
 	summaries := s.registry.List()
 	out := make([]capturecontrol.PluginSummary, 0, len(summaries))
 	for _, sp := range summaries {
+		if !allOwners {
+			if owner == "" {
+				if sp.Owner != "" {
+					continue // 匿名调用方只见匿名插件
+				}
+			} else if sp.Owner != "" && sp.Owner != owner {
+				continue // 其他 owner 的插件不可见
+			}
+		}
 		out = append(out, capturecontrol.PluginSummary{
 			InstanceID:    sp.InstanceID,
 			Name:          sp.Name,
@@ -356,14 +387,24 @@ func (s *pipelineService) ListPlugins(_ context.Context) ([]capturecontrol.Plugi
 			SocketPath:    sp.SocketPath,
 			Online:        sp.Online,
 			LastHeartbeat: sp.LastHeartbeat,
+			Owner:         sp.Owner,
 		})
 	}
 	return out, nil
 }
 
 // GetPluginManifest 获取指定插件的 manifest bytes（plugin.yaml 原始内容）。
-func (s *pipelineService) GetPluginManifest(_ context.Context, name string) ([]byte, error) {
-	return s.registry.GetPluginManifest(name)
+// owner 作用域查找（身份来自 ctx）；admin 可查任意 owner 的插件。
+func (s *pipelineService) GetPluginManifest(ctx context.Context, name string) ([]byte, error) {
+	owner := auth.OwnerFrom(ctx)
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.IsAdmin {
+		for _, sp := range s.registry.List() {
+			if sp.Name == name {
+				return s.registry.GetPluginManifestFor(sp.Owner, name)
+			}
+		}
+	}
+	return s.registry.GetPluginManifestFor(owner, name)
 }
 
 // GetRegistryAddr 返回插件应连接的注册中心地址（即 -registry-addr 的值）。

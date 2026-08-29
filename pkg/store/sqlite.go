@@ -191,6 +191,12 @@ CREATE TABLE IF NOT EXISTS event_index (
 		}
 	}
 
+	// WAL + busy_timeout：同机多进程（pipeline 写 + mcp 经 ControlStore / 只读
+	// 会话库并发读）下读不阻塞写、写不阻塞读；busy_timeout 让偶发锁冲突等待
+	// 5s 而非立即报 SQLITE_BUSY（写侧与只读侧同一保障，见 NewSQLiteStoreReadOnly）。
+	if _, err := s.db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		return err
 	}

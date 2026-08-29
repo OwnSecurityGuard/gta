@@ -19,6 +19,7 @@ import {
   FileText,
   Wifi,
   Cable,
+  Radio,
   RefreshCw,
   X,
   Inbox,
@@ -126,14 +127,18 @@ function SessionItem({
   const liveRaw = liveStatus?.raw_count ?? liveStatus?.packets_in ?? session.raw_packets;
   const liveErrors = liveStatus?.decode_errors ?? session.decode_errors;
 
-  // 来源：代理抓包用 "Mobile Proxy + 监听地址"，live 抓包用网卡名，文件回放用文件名
+  // 来源：代理抓包用 "Mobile Proxy + 监听地址"，agent 推流用 "远程 Agent"，
+  // live 抓包用网卡名，文件回放用文件名
   const isFileReplay = !!session.pcap_file;
   const isProxy = session.source === "proxy";
-  const sourceLabel = isProxy
-    ? `Mobile Proxy${session.listen_addr ? ` · ${session.listen_addr}` : ""}`
-    : isFileReplay
-      ? basename(session.pcap_file)
-      : session.interface || "(auto)";
+  const isAgent = session.source === "agent";
+  const sourceLabel = isAgent
+    ? "远程 Agent"
+    : isProxy
+      ? `Mobile Proxy${session.listen_addr ? ` · ${session.listen_addr}` : ""}`
+      : isFileReplay
+        ? basename(session.pcap_file)
+        : session.interface || "(auto)";
 
   // 结束时间：同日省略日期
   const stoppedDisplay = hasStopped
@@ -184,13 +189,16 @@ function SessionItem({
           <FileText className="h-3 w-3 shrink-0" />
         ) : isProxy ? (
           <Cable className="h-3 w-3 shrink-0" />
+        ) : isAgent ? (
+          <Radio className="h-3 w-3 shrink-0" />
         ) : (
           <Wifi className="h-3 w-3 shrink-0" />
         )}
         <span className="truncate max-w-[120px]" title={sourceLabel}>
           {sourceLabel}
         </span>
-        {session.port > 0 && <span className="font-mono">:{session.port}</span>}
+        {/* agent 源的端口仅作记录用途，不代表过滤端口，不在列表中展示 */}
+        {!isAgent && session.port > 0 && <span className="font-mono">:{session.port}</span>}
         {session.plugin && (
           <>
             <span className="text-muted-foreground/50">·</span>

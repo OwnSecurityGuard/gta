@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,16 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [token, setTokenInput] = useState(getToken() ?? "");
   const [saved, setSaved] = useState(false);
   const queryClient = useQueryClient();
+
+  // 关闭时组件仍挂载（Dialog 渲染 null），useState 初值只在首次执行；
+  // 每次打开时重新同步本地状态，保证「取消」能丢弃未保存的半截输入。
+  useEffect(() => {
+    if (open) {
+      setUrl(mcpClient.getBaseUrl());
+      setTokenInput(getToken() ?? "");
+      setSaved(false);
+    }
+  }, [open]);
 
   function handleSave() {
     mcpClient.setBaseUrl(url);
@@ -81,12 +91,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             onChange={(e) => setTokenInput(e.target.value)}
             aria-label="访问令牌"
             placeholder="服务器未开启令牌校验时留空"
-            autoComplete="off"
+            autoComplete="new-password"
             className="mt-1.5 font-mono"
           />
           <p className="mt-1 text-xs text-muted-foreground">
             团队共享服务端开启令牌校验时，向管理员领取你的 token（形如
-            <code className="font-mono"> gta_…</code>）填入；留空则按匿名/单机模式访问。保存后立即生效。
+            <code className="font-mono"> gta_…</code>）填入；留空则按匿名/单机模式访问。保存后立即生效。令牌仅保存在本机浏览器（localStorage），不会上传到其他设备。
           </p>
         </div>
       </div>

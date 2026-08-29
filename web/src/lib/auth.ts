@@ -46,6 +46,7 @@ export function getToken(): string | null {
 /** 保存/清除 token；null 或空白串视为清除（回到匿名模式）。 */
 export function setToken(next: string | null): void {
   const v = next?.trim() || null;
+  // token 未变化时早退，不做联动（如匿名模式下 setToken(null) 不会清掉已回显的 identity）。
   if (v === token) return;
   token = v;
   if (v) safeSet(TOKEN_KEY, v);
@@ -66,7 +67,15 @@ export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-/** SSE 等无法携带自定义头的 URL：把 token 拼进查询参数（后端 Middleware 支持回退解析）。 */
+/**
+ * SSE 等无法携带自定义头的 URL：把 token 拼进查询参数（后端 Middleware 支持回退解析）。
+ *
+ * 注意：
+ *  - token 进入查询串后会出现在代理/服务端访问日志里，仅限 EventSource 这类
+ *    无法携带请求头的传输使用，普通 fetch 一律走 authHeaders()；
+ *  - 仅用于无 hash 的内部路径：URL 带 hash 时参数会拼在 hash 之后，
+ *    根本不会随请求发到服务端，token 静默失效。
+ */
 export function withTokenParam(url: string): string {
   if (!token) return url;
   return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;

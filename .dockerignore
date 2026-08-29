@@ -1,0 +1,21 @@
+# 构建上下文瘦身 + 防止本地 go.work（指向仓库外的 SDK 路径）进镜像；
+# builder 阶段会重新生成 go.work。
+.git
+go.work
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+logs/
+sessions/
+runs/
+plugins/
+docs/plans/
+web/
+tmp_*
+.current*
+control.sqlite*

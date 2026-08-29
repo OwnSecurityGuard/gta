@@ -38,6 +38,7 @@ import (
 	plugindevserver "gta/pkg/plugindev/server"
 	"gta/pkg/schema"
 	"gta/pkg/store"
+	"gta/pkg/version"
 
 	_ "modernc.org/sqlite"
 )
@@ -2472,7 +2473,12 @@ func main() {
 	logFormat := flag.String("log-format", "json", "log format: json | text")
 	logFile := flag.String("log-file", "", "log file path (default: <workdir>/logs/gta-mcp.log)")
 	allowedOrigins := flag.String("allowed-origins", os.Getenv("GTA_MCP_ALLOWED_ORIGINS"), "CORS 允许的跨域 Origin（逗号分隔，如 http://localhost:5173,https://gta.example.com）；留空不返回 CORS 头（同源用法不受影响）")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("gta-mcp " + version.String())
+		return
+	}
 
 	flagSet := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"gta/pkg/plugin"
 	protocolconfig "gta/pkg/protocol/config"
 	"gta/pkg/store"
+	"gta/pkg/version"
 
 	"google.golang.org/grpc"
 )
@@ -53,7 +55,12 @@ func main() {
 	// sing-box server（gta-singbox-agent）自动拉起：默认随 pipeline 启动，常驻等待手机代理连接。
 	spawnAgent := flag.Bool("spawn-agent", true, "spawn gta-singbox-agent at startup (always-on proxy listener, disabled with -spawn-agent=false)")
 	agentBin := flag.String("agent-bin", "", "path to gta-singbox-agent binary (default: <workdir>/bin/gta-singbox-agent[.exe])")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("gta-pipeline " + version.String())
+		return
+	}
 
 	flagSet := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })

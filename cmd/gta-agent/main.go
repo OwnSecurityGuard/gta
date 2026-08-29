@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"gta/pkg/capture/agent/proto"
+	"gta/pkg/version"
 )
 
 func main() {
@@ -49,7 +51,12 @@ func main() {
 	fs.DurationVar(&batchInterval, "batch-interval", 200*time.Millisecond, "推流批时间阈值（低流量兜底刷批间隔）")
 	fs.IntVar(&snapLen, "snaplen", 1600, "pcap snaplen")
 	fs.BoolVar(&promisc, "promisc", true, "混杂模式")
+	showVersion := fs.Bool("version", false, "print version and exit")
 	_ = fs.Parse(os.Args[1:])
+	if *showVersion {
+		fmt.Println("gta-agent " + version.String())
+		return
+	}
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 

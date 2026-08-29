@@ -1,0 +1,57 @@
+# docker-compose.yml（T15）——团队服务端：gta-pipeline + gta-mcp，共用同一镜像与 /data 卷。
+#
+# 用法：
+#   cp .env.example .env   # 至少设置 GTA_AUTH_TOKENS
+#   docker compose up -d
+#
+# 配置（T10 统一配置）：容器内 GTA_HOME=/data，各监听地址用 GTA_* 环境变量覆盖
+# （与 pkg/config/app.go 对齐）；端口映射用 .env 里的 GTA_*_PORT 变量调整。
+
+services:
+  pipeline:
+    build:
+      context: .
+      args:
+        VERSION: ${GTA_VERSION:-dev}
+        GIT_COMMIT: ${GTA_GIT_COMMIT:-unknown}
+    image: gta-server:${GTA_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      GTA_HOME: /data
+      # 鉴权 token（必填）：逗号分隔多个 token，例如 gta_tok_alice,gta_tok_bob
+      GTA_AUTH_TOKENS: ${GTA_AUTH_TOKENS:?GTA_AUTH_TOKENS is required (see .env.example)}
+      # 监听地址：端口映射前保持容器内默认即可；一般无需覆盖
+      GTA_CONTROL_ADDR: ${GTA_CONTROL_ADDR:-:9888}
+      GTA_REGISTRY_ADDR: ${GTA_REGISTRY_ADDR:-:9091}
+      GTA_AGENT_INGEST_ADDR: ${GTA_AGENT_INGEST_ADDR:-:9092}
+    ports:
+      - "${GTA_CONTROL_PORT:-9888}:9888"    # CaptureControl gRPC（gta-mcp / 管理端连接）
+      - "${GTA_REGISTRY_PORT:-9091}:9091"   # PluginRegistry gRPC（插件注册）
+      - "${GTA_AGENT_INGEST_PORT:-9092}:9092" # AgentIngest gRPC（gta-agent 推流）
+    volumes:
+      - gta-data:/data
+    # -spawn-agent=false：容器内不拉起 gta-singbox-agent（手机代理流量不经服务端容器）。
+    command: ["-spawn-agent=false"]
+
+  mcp:
+    image: gta-server:${GTA_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      - pipeline
+    entrypoint: ["/usr/local/bin/gta-mcp"]
+    environment:
+      GTA_HOME: /data
+      GTA_AUTH_TOKENS: ${GTA_AUTH_TOKENS:?GTA_AUTH_TOKENS is required (see .env.example)}
+      # 连接 pipeline 的 CaptureControl：compose 网络内用服务名
+      GTA_CONTROL_ADDR: pipeline:9888
+      # MCP HTTP/SSE 监听地址
+      GTA_MCP_ADDR: ${GTA_MCP_ADDR:-:8781}
+      # CORS 允许的 Origin（逗号分隔）；留空不返回 CORS 头（同源用法不受影响）
+      GTA_MCP_ALLOWED_ORIGINS: ${GTA_MCP_ALLOWED_ORIGINS:-}
+    ports:
+      - "${GTA_MCP_PORT:-8781}:8781" # MCP HTTP/SSE（客户端浏览器/工具连接）
+    volumes:
+      - gta-data:/data
+
+volumes:
+  gta-data:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -428,4 +429,125 @@ func mustMarshal(t *testing.T, m proto.Message) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// TestTunnelDeathWithBlockedRecv 隧道断开时，阻塞中的 Recv 必须立即报错返回，
+// 不能永久挂起（Dispatcher 可能用 context.Background() 调用）。
+func TestTunnelDeathWithBlockedRecv(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := newTunnelHubPipe(ctx)
+
+	connected := make(chan pb.DecoderClient, 1)
+	hub := NewTunnelHub(
+		WithTunnelConnectHook(func(_ string, c pb.DecoderClient) { connected <- c }),
+	)
+	hubErr := make(chan error, 1)
+	go func() { hubErr <- hub.Connect(hubEnd{p}) }()
+	client := <-connected
+
+	stream, err := client.DecodeV2(ctx) // 背景为 Background 的调用方视角
+	if err != nil {
+		t.Fatalf("DecodeV2: %v", err)
+	}
+	recvErr := make(chan error, 1)
+	go func() {
+		_, err := stream.Recv()
+		recvErr <- err
+	}()
+	// 等待 Recv 真正阻塞后再断开隧道
+	time.Sleep(50 * time.Millisecond)
+	p.close()
+
+	select {
+	case err := <-recvErr:
+		if !errors.Is(err, ErrTunnelSessionClosed) {
+			t.Fatalf("expected ErrTunnelSessionClosed, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocked Recv did not return after tunnel death")
+	}
+	select {
+	case <-hubErr:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Connect did not return")
+	}
+	// 会话关闭后再 DecodeV2 必须立刻失败，而不是注册一个永远无人应答的流
+	if _, err := client.DecodeV2(ctx); !errors.Is(err, ErrTunnelSessionClosed) {
+		t.Fatalf("expected ErrTunnelSessionClosed from DecodeV2 after close, got %v", err)
+	}
+}
+
+// TestTunnelQueueOverflowAbortsAndResets 响应队列溢出（排队超过 enqueueWait）
+// 时放弃该逻辑流：本地 Recv 报错，并向插件发 reset 帧。
+func TestTunnelQueueOverflowAbortsAndResets(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := newTunnelHubPipe(ctx)
+
+	connected := make(chan pb.DecoderClient, 1)
+	hub := NewTunnelHub(
+		WithTunnelConnectHook(func(_ string, c pb.DecoderClient) { connected <- c }),
+		WithTunnelQueueParams(1, 100*time.Millisecond),
+	)
+	go func() { _ = hub.Connect(hubEnd{p}) }()
+	client := <-connected
+
+	stream, err := client.DecodeV2(ctx)
+	if err != nil {
+		t.Fatalf("DecodeV2: %v", err)
+	}
+	if err := stream.Send(&pb.DecodeRequest{InputId: "ovf-1"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	pe := pluginEnd{p}
+	f := pe.recvFrame(t) // request 帧
+	sid := f.GetStreamId()
+
+	// 不消费，连发 2 条响应：第 1 条填满队列（cap=1），第 2 条排队超时触发 abort
+	for _, resp := range []*pb.DecodeResponseV2{
+		{InputId: "ovf-1", EventType: "a"},
+		{InputId: "ovf-1", EventType: "b"},
+	} {
+		pe.sendFrame(&pb.TunnelFrame{StreamId: sid, Payload: &pb.TunnelFrame_Response{Response: mustMarshal(t, resp)}})
+	}
+
+	// abort 后应向插件发 reset 帧
+	f = pe.recvFrame(t)
+	if _, ok := f.GetPayload().(*pb.TunnelFrame_Reset_); !ok {
+		t.Fatalf("expected reset frame after queue overflow, got %T", f.GetPayload())
+	}
+	// 第 1 条已入队的响应仍可被消费，随后才报溢出中止错误
+	if resp, err := stream.Recv(); err != nil || resp.EventType != "a" {
+		t.Fatalf("expected queued response before abort, got %v, %v", resp, err)
+	}
+	if _, err := stream.Recv(); err == nil || !strings.Contains(err.Error(), "response queue overflow") {
+		t.Fatalf("expected queue overflow error, got %v", err)
+	}
+}
+
+// TestSendAfterCloseSendRejected CloseSend 之后的 Send 应被本地拒绝。
+func TestSendAfterCloseSendRejected(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := newTunnelHubPipe(ctx)
+
+	connected := make(chan pb.DecoderClient, 1)
+	hub := NewTunnelHub(
+		WithTunnelConnectHook(func(_ string, c pb.DecoderClient) { connected <- c }),
+	)
+	go func() { _ = hub.Connect(hubEnd{p}) }()
+	client := <-connected
+
+	stream, err := client.DecodeV2(ctx)
+	if err != nil {
+		t.Fatalf("DecodeV2: %v", err)
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("CloseSend: %v", err)
+	}
+	err = stream.Send(&pb.DecodeRequest{InputId: "late"})
+	if err == nil || !strings.Contains(err.Error(), "send after CloseSend") {
+		t.Fatalf("expected send-after-CloseSend error, got %v", err)
+	}
 }

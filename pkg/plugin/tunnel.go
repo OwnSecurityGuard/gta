@@ -36,6 +36,10 @@ const (
 	defaultTunnelEnqueueWait   = 5 * time.Second
 )
 
+// ErrTunnelSessionClosed 表示 Connect 隧道已断开（逻辑流随之一并结束）。
+// errors.Is 可用于识别该类错误。
+var ErrTunnelSessionClosed = errors.New("tunnel: session closed")
+
 // TunnelHub 管理所有插件拨出的 Connect 隧道流。
 // 每条 Connect 流对应一个 tunnelSession，session 暴露的 tunnelClient
 // 实现 pb.DecoderClient，可直接交给 NewDispatcher。
@@ -51,7 +55,10 @@ type TunnelHub struct {
 	respQueueSize int
 	enqueueWait   time.Duration
 
-	mu       sync.Mutex
+	mu sync.Mutex
+	// sessions 记录所有活跃隧道会话（key: 自增会话 ID）。
+	// 当前仅用于会话生命周期管理（建流登记/断开移除）；
+	// T4 可基于它增加按 owner 查找/主动断开隧道的运维 API。
 	sessions map[uint64]*tunnelSession
 	nextID   atomic.Uint64
 }
@@ -142,7 +149,7 @@ func (h *TunnelHub) Connect(stream pb.PluginRegistry_ConnectServer) error {
 		h.mu.Lock()
 		delete(h.sessions, id)
 		h.mu.Unlock()
-		sess.close(errors.New("tunnel: connect stream closed"))
+		sess.close(fmt.Errorf("%w: connect stream closed", ErrTunnelSessionClosed))
 		if h.onDisconnect != nil {
 			h.onDisconnect(sess.owner)
 		}
@@ -179,6 +186,10 @@ func (s *tunnelSession) dispatch(frame *pb.TunnelFrame) error {
 
 // deliverResponse 把响应字节解包并投递到逻辑流的有界队列。
 // 队列满时等待 enqueueWait，仍投不进去则放弃该逻辑流（reset 插件侧）。
+//
+// 注意：本函数在 Connect 的单一收包循环里同步执行，某个逻辑流排队
+// 最多阻塞 enqueueWait，期间其他逻辑流的响应帧也会被拖延（队头阻塞）。
+// 默认 5s 的等待只出现在插件产出速度远超消费速度的异常场景。
 func (s *tunnelSession) deliverResponse(streamID uint32, data []byte) error {
 	resp := &pb.DecodeResponseV2{}
 	if err := proto.Unmarshal(data, resp); err != nil {
@@ -199,7 +210,7 @@ func (s *tunnelSession) deliverResponse(streamID uint32, data []byte) error {
 	case <-ps.done:
 		return nil // 逻辑流已被取消/结束，丢弃
 	case <-s.closed:
-		return errors.New("tunnel: session closed")
+		return fmt.Errorf("tunnel: deliver response: %w", ErrTunnelSessionClosed)
 	case <-timer.C:
 		return s.abortStream(streamID, errors.New("tunnel: response queue overflow"))
 	}
@@ -224,6 +235,9 @@ func (s *tunnelSession) finishStream(streamID uint32, end *pb.StreamEnd) error {
 }
 
 // abortStream 因协议错误/队列溢出放弃逻辑流：本地报错并通知插件侧 reset。
+// reset 帧异步发送，避免 Recv 循环阻塞在 sendMu 后面（Send 可能因流控卡住）。
+// 插件侧对已结束/未知 stream_id 的 reset 是 no-op（见 SDK tunnelMux.closeRecv），
+// 因此与 end 竞争时多发的 reset 无害。
 func (s *tunnelSession) abortStream(streamID uint32, cause error) error {
 	s.mu.Lock()
 	ps, ok := s.streams[streamID]
@@ -235,17 +249,25 @@ func (s *tunnelSession) abortStream(streamID uint32, cause error) error {
 		return nil
 	}
 	ps.finish(cause)
-	return s.sendFrame(&pb.TunnelFrame{
+	frame := &pb.TunnelFrame{
 		StreamId: streamID,
 		Payload:  &pb.TunnelFrame_Reset_{Reset_: &pb.StreamReset{Reason: cause.Error()}},
-	})
+	}
+	go func() {
+		if err := s.sendFrame(frame); err != nil {
+			slog.Warn("tunnel: send reset frame failed", "owner", s.owner, "stream_id", streamID, "error", err)
+		}
+	}()
+	return nil
 }
 
 // close 关闭会话：所有未决逻辑流以 err 结束。
+// close(s.closed) 与 streams 表的清空在同一个锁内完成，
+// 保证 DecodeV2 的「检查 closed + 注册 pendingStream」不会插到清空之后。
 func (s *tunnelSession) close(err error) {
 	s.closeOnce.Do(func() {
-		close(s.closed)
 		s.mu.Lock()
+		close(s.closed)
 		pending := make([]*pendingStream, 0, len(s.streams))
 		for id, ps := range s.streams {
 			pending = append(pending, ps)
@@ -331,11 +353,6 @@ func (c *tunnelClient) DecodeV2(ctx context.Context, opts ...grpc.CallOption) (g
 	if sess.stream.Context().Err() != nil {
 		return nil, fmt.Errorf("tunnel: connect stream closed: %w", sess.stream.Context().Err())
 	}
-	select {
-	case <-sess.closed:
-		return nil, errors.New("tunnel: session closed")
-	default:
-	}
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	ps := &pendingStream{
@@ -346,11 +363,23 @@ func (c *tunnelClient) DecodeV2(ctx context.Context, opts ...grpc.CallOption) (g
 	}
 	streamID := sess.nextStreamID.Add(1)
 
+	// closed 检查与注册必须在同一把锁内：session.close() 在同一把锁里
+	// 关闭 closed 并清空 streams 表。否则若检查通过后 session 恰好关闭，
+	// 新注册的 pendingStream 将无人 finish，Recv 永久阻塞且 watcher 泄漏。
 	sess.mu.Lock()
+	select {
+	case <-sess.closed:
+		sess.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("tunnel: DecodeV2: %w", ErrTunnelSessionClosed)
+	default:
+	}
 	sess.streams[streamID] = ps
 	sess.mu.Unlock()
 
 	// 调用方取消（超时/请求放弃）→ 向插件发 reset 并结束本地逻辑流。
+	// 若与插件的 end 帧竞争（流已正常结束）多发一个 reset，插件侧对
+	// 已删除/未知 stream_id 的 reset 是 no-op（见 SDK tunnelMux.closeRecv），无害。
 	go func() {
 		select {
 		case <-streamCtx.Done():
@@ -373,15 +402,19 @@ func (c *tunnelClient) DecodeV2(ctx context.Context, opts ...grpc.CallOption) (g
 
 // tunnelStreamClient 一个逻辑 DecodeV2 流的客户端视图。
 type tunnelStreamClient struct {
-	sess     *tunnelSession
-	ps       *pendingStream
-	streamID uint32
+	sess       *tunnelSession
+	ps         *pendingStream
+	streamID   uint32
+	halfClosed atomic.Bool // CloseSend 之后的 Send 本地拒绝
 }
 
 var _ grpc.BidiStreamingClient[pb.DecodeRequest, pb.DecodeResponseV2] = (*tunnelStreamClient)(nil)
 
 // Send 把 DecodeRequest 编成 request 帧发给插件（首帧隐式开流）。
 func (t *tunnelStreamClient) Send(req *pb.DecodeRequest) error {
+	if t.halfClosed.Load() {
+		return errors.New("tunnel: send after CloseSend")
+	}
 	data, err := proto.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("tunnel: marshal request: %w", err)
@@ -430,7 +463,7 @@ func (t *tunnelStreamClient) Recv() (*pb.DecodeResponseV2, error) {
 			return t.recvAfterDone()
 		default:
 		}
-		return nil, t.ps.ctx.Err()
+		return nil, fmt.Errorf("tunnel: recv: %w", t.ps.ctx.Err())
 	}
 }
 
@@ -455,8 +488,9 @@ func (t *tunnelStreamClient) pollResp() *pb.DecodeResponseV2 {
 	}
 }
 
-// CloseSend 关闭请求侧（对应 half_close 帧）。
+// CloseSend 关闭请求侧（对应 half_close 帧）；之后的 Send 会被本地拒绝。
 func (t *tunnelStreamClient) CloseSend() error {
+	t.halfClosed.Store(true)
 	return t.sess.sendFrame(&pb.TunnelFrame{
 		StreamId: t.streamID,
 		Payload:  &pb.TunnelFrame_HalfClose{HalfClose: true},

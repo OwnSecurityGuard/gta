@@ -94,37 +94,43 @@ CREATE TABLE IF NOT EXISTS plugin_debug_access (
 // migrateSessionsAddOwner 为既有数据库补齐 sessions.owner 列（默认 ''）。
 // 老库回填 '' = 匿名：已有会话全部归属匿名 owner，本地单机用法行为不变。
 func (cs *ControlStore) migrateSessionsAddOwner() error {
-	rows, err := cs.db.Query("PRAGMA table_info(sessions)")
-	if err != nil {
-		return err
+	if hasOwnerColumn(cs.db) {
+		return nil
 	}
-	hasOwner := false
+	if _, err := cs.db.Exec(`ALTER TABLE sessions ADD COLUMN owner TEXT NOT NULL DEFAULT ''`); err != nil {
+		// 迁移的 check-then-ALTER 不是原子的：两个进程并发打开同一老库时，
+		// 后者会撞 "duplicate column name: owner"。列已在（对手刚加成功），
+		// 复查 PRAGMA 确认后视为迁移完成而不是启动失败。
+		if hasOwnerColumn(cs.db) {
+			slog.Info("sessions.owner column added concurrently by another process; skipping migration")
+			return nil
+		}
+		return fmt.Errorf("migrate sessions.owner: %w", err)
+	}
+	slog.Info("migrated control store: added sessions.owner column (backfilled '' = anonymous)")
+	return nil
+}
+
+// hasOwnerColumn 复查 sessions 表是否已有 owner 列。
+func hasOwnerColumn(db *sql.DB) bool {
+	rows, err := db.Query("PRAGMA table_info(sessions)")
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
 	for rows.Next() {
 		var cid int
 		var name, ctype string
 		var notNull, pk int
 		var dfltValue any
 		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dfltValue, &pk); err != nil {
-			rows.Close()
-			return err
+			return false
 		}
 		if name == "owner" {
-			hasOwner = true
+			return true
 		}
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	rows.Close()
-	if hasOwner {
-		return nil
-	}
-	if _, err := cs.db.Exec(`ALTER TABLE sessions ADD COLUMN owner TEXT NOT NULL DEFAULT ''`); err != nil {
-		return fmt.Errorf("migrate sessions.owner: %w", err)
-	}
-	slog.Info("migrated control store: added sessions.owner column (backfilled '' = anonymous)")
-	return nil
+	return false
 }
 
 // Close 关闭数据库连接。

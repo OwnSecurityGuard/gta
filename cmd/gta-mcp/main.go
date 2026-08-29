@@ -159,6 +159,10 @@ func (sm *sessionManager) absDBPath(sessionID string) string {
 // 匿名 owner（""）保持使用 current.json（本地单机回归底线）；
 // 非 anon owner 落到 current.<owner>.json，多客户端共享 workDir 时互不覆盖。
 // owner 中的不安全字符（文件系统/转义风险）统一替换为 '_'。
+// 注意：替换会引入分片碰撞（如 "team/prod" 与 "team:prod" 都落 current.team_prod.json；
+// Windows 文件系统大小写不敏感，"Alice" 与 "alice" 共用分片）。可接受：owner 来自
+// 受信的 token 解析器（pkg/auth），而非任意用户输入；碰撞只影响 current 指针共享，
+// 不影响 control.sqlite 里的会话归属过滤。
 func currentShardName(owner string) string {
 	if owner == "" {
 		return "current.json"
@@ -2037,6 +2041,8 @@ func (m *mcpCapture) openReader(sessionID string) (captureReader, error) {
 
 // getDBPath 获取指定 session 的 db_path。
 // 优先从 ControlStore 查询，回退到 sessionMgr。
+// TODO(T13): 此处无 ctx，sessionMgr 回退硬编码匿名分片、ControlStore 查询未按
+// owner 过滤；T13 引入 HTTP 鉴权后应把 owner/admin 从 ctx 透传进来。
 func (m *mcpCapture) getDBPath(sessionID string) (string, error) {
 	// 1. 尝试 ControlStore
 	if m.controlStore != nil && sessionID != "" {

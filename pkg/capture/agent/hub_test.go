@@ -18,17 +18,17 @@ func testPacket(id string) event.Packet {
 func TestHubDeliverToSubscriber(t *testing.T) {
 	h := NewHub()
 	ch := make(chan event.Packet, 4)
-	cancel := h.Subscribe("s1", ch)
+	sub, cancel := h.Subscribe("s1", ch)
 	defer cancel()
 
-	got := 0
 	for i := 0; i < 3; i++ {
 		h.Deliver("s1", []event.Packet{testPacket("p1")})
 	}
 	// 非阻塞投递：channel 容量 4，3 个包应全部可读。
+	got := 0
 	for got < 3 {
 		select {
-		case pkt := <-ch:
+		case pkt := <-sub.Packets():
 			if pkt.ID != "p1" {
 				t.Fatalf("packet id = %q, want p1", pkt.ID)
 			}
@@ -41,59 +41,85 @@ func TestHubDeliverToSubscriber(t *testing.T) {
 	if delivered != 3 || droppedBusy != 0 || droppedNoSub != 0 {
 		t.Fatalf("stats = (%d,%d,%d), want (3,0,0)", delivered, droppedBusy, droppedNoSub)
 	}
+	if d, dr, b := sub.Stats(); d != 3 || dr != 0 || b == 0 {
+		t.Fatalf("sub stats = (%d,%d,%d), want (3,0,>0)", d, dr, b)
+	}
 }
 
 func TestHubDropWithoutBlocking(t *testing.T) {
 	h := NewHub()
 	// 容量 1，且无人消费：模拟慢消费者。
 	ch := make(chan event.Packet, 1)
-	cancel := h.Subscribe("s1", ch)
+	sub, cancel := h.Subscribe("s1", ch)
 	defer cancel()
 
 	const total = 100
-	delivered, dropped := h.Deliver("s1", makeBatch(total))
-	if delivered+dropped != total {
-		t.Fatalf("delivered+dropped = %d, want %d", delivered+dropped, total)
-	}
+	delivered, droppedBusy, droppedNoSub := h.Deliver("s1", makeBatch(total))
 	if delivered != 1 {
 		t.Fatalf("delivered = %d, want 1 (容量 1)", delivered)
 	}
-	if dropped != total-1 {
-		t.Fatalf("dropped = %d, want %d", dropped, total-1)
+	if droppedBusy != total-1 || droppedNoSub != 0 {
+		t.Fatalf("dropped = (%d,%d), want (%d,0)", droppedBusy, droppedNoSub, total-1)
 	}
-	_, droppedBusy, _ := h.Stats()
-	if droppedBusy != total-1 {
-		t.Fatalf("droppedBusy = %d, want %d", droppedBusy, total-1)
+	if _, dr, _ := sub.Stats(); dr != total-1 {
+		t.Fatalf("sub dropped = %d, want %d", dr, total-1)
 	}
 	// channel 里应恰好还有 1 个包可读。
 	select {
-	case <-ch:
+	case <-sub.Packets():
 	default:
 		t.Fatal("expected 1 buffered packet")
 	}
 	select {
-	case <-ch:
+	case <-sub.Packets():
 		t.Fatal("expected channel to be drained")
 	default:
 	}
 }
 
+// 多订阅者：一个满一个不满时，满的那个的丢包也必须被逐个记录（review 修复项）。
+func TestHubDeliverMultipleSubscribersPartialFull(t *testing.T) {
+	h := NewHub()
+	full := make(chan event.Packet, 1)
+	subFull, cancelFull := h.Subscribe("s1", full)
+	defer cancelFull()
+	roomy := make(chan event.Packet, 8)
+	subRoomy, cancelRoomy := h.Subscribe("s1", roomy)
+	defer cancelRoomy()
+
+	const total = 3
+	delivered, droppedBusy, droppedNoSub := h.Deliver("s1", makeBatch(total))
+	if droppedNoSub != 0 {
+		t.Fatalf("droppedNoSub = %d, want 0", droppedNoSub)
+	}
+	// delivered/droppedBusy 按订阅者逐次计：full 收 1 丢 2，roomy 收 3。
+	if delivered != 4 || droppedBusy != 2 {
+		t.Fatalf("delivered/droppedBusy = %d/%d, want 4/2", delivered, droppedBusy)
+	}
+	if _, drFull, _ := subFull.Stats(); drFull != total-1 {
+		t.Fatalf("full sub dropped = %d, want %d", drFull, total-1)
+	}
+	if d, _, _ := subRoomy.Stats(); d != total {
+		t.Fatalf("roomy sub delivered = %d, want %d", d, total)
+	}
+}
+
 func TestHubDropNoSubscriber(t *testing.T) {
 	h := NewHub()
-	delivered, dropped := h.Deliver("no-such-session", makeBatch(5))
-	if delivered != 0 || dropped != 5 {
-		t.Fatalf("delivered=%d dropped=%d, want 0/5", delivered, dropped)
+	delivered, droppedBusy, droppedNoSub := h.Deliver("no-such-session", makeBatch(5))
+	if delivered != 0 || droppedBusy != 0 || droppedNoSub != 5 {
+		t.Fatalf("delivered/busy/noSub = %d/%d/%d, want 0/0/5", delivered, droppedBusy, droppedNoSub)
 	}
-	_, _, droppedNoSub := h.Stats()
-	if droppedNoSub != 5 {
-		t.Fatalf("droppedNoSub = %d, want 5", droppedNoSub)
+	_, _, n := h.Stats()
+	if n != 5 {
+		t.Fatalf("droppedNoSub = %d, want 5", n)
 	}
 }
 
 func TestHubUnsubscribeThenCloseSafe(t *testing.T) {
 	h := NewHub()
 	ch := make(chan event.Packet, 4)
-	cancel := h.Subscribe("s1", ch)
+	_, cancel := h.Subscribe("s1", ch)
 
 	done := make(chan struct{})
 	go func() {

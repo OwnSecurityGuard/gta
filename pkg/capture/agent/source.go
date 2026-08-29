@@ -89,6 +89,9 @@ type Source struct {
 	// Hub 在锁内非阻塞投递（满即丢），Close 时先取消订阅（保证无并发写）再 close。
 	ch chan event.Packet
 
+	subMu sync.Mutex
+	sub   *Subscription // Subscribe 返回的订阅句柄；Start 后非 nil（统计用）
+
 	unsubMu sync.Mutex
 	unsub   func() // Subscribe 返回的取消订阅函数；Start 前为 nil
 
@@ -110,9 +113,10 @@ func (s *Source) Start(ctx context.Context) error {
 }
 
 func (s *Source) setup() error {
-	unsub := s.cfg.Hub.Subscribe(s.cfg.SessionID, s.ch)
+	sub, unsub := s.cfg.Hub.Subscribe(s.cfg.SessionID, s.ch)
 	s.unsubMu.Lock()
 	s.unsub = unsub
+	s.sub = sub
 	s.unsubMu.Unlock()
 	return nil
 }
@@ -134,7 +138,32 @@ func (s *Source) run(ctx context.Context) {
 func (s *Source) Packets() <-chan event.Packet { return s.ch }
 func (s *Source) Err() error                   { return s.Lifecycle.Err() }
 func (s *Source) Close() error                 { return s.Lifecycle.Close() }
-func (s *Source) Stats() capture.Stats         { return s.StatTracker.Stats() }
+func (s *Source) Stats() capture.Stats {
+	stats := s.StatTracker.Stats()
+	// 把 Hub 订阅级计数透出：PacketsIn/BytesIn = 成功投递给本 Source 的包/字节，
+	// Drops = 本 Source channel 满被丢弃的包数（慢消费者丢包，明确记录）。
+	s.subMu.Lock()
+	sub := s.sub
+	s.subMu.Unlock()
+	if sub != nil {
+		delivered, dropped, bytesIn := sub.Stats()
+		if stats.PacketsIn == 0 {
+			stats.PacketsIn = delivered
+		}
+		if stats.BytesIn == 0 {
+			stats.BytesIn = bytesIn
+		}
+		if stats.Drops == 0 {
+			stats.Drops = dropped
+		}
+		if stats.Extra != nil {
+			stats.Extra["agent_delivered"] = delivered
+			stats.Extra["agent_dropped"] = dropped
+			stats.Extra["agent_bytes_in"] = bytesIn
+		}
+	}
+	return stats
+}
 
 // SessionID 返回本 Source 消费的会话 id。
 func (s *Source) SessionID() string { return s.cfg.SessionID }

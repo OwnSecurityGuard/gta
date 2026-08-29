@@ -5,9 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
 
 	"gta/pkg/auth"
 	"gta/pkg/capture/agent/proto"
@@ -17,7 +15,7 @@ import (
 // 抽成接口是为了避免 pkg/capture 依赖 pkg/store（造成反向依赖/导入环）：
 // 宿主（cmd/gta-pipeline）用 ControlStore.GetSession 实现它注入进来。
 type SessionOwnerChecker interface {
-	// SessionOwner 返回会话归属 owner；会话不存在时返回 (\"\", false)。
+	// SessionOwner 返回会话归属 owner；会话不存在时返回 ("", false)。
 	SessionOwner(sessionID string) (owner string, ok bool)
 }
 
@@ -51,10 +49,12 @@ func NewIngestServer(hub *Hub, sessions SessionOwnerChecker) *IngestServer {
 }
 
 // Push 接收 agent 的客户端流。
-// 每个PacketBatch 携带 session_id；会话归属与调用者 owner 不一致时
-// 以 PermissionDenied 结束整条流（agent 应停止推送该会话）。
+// 每个 PacketBatch 携带 session_id；会话归属与调用者 owner 不一致时按
+// batch 逐个拒绝（rejected++、告警日志每流最多一次），流继续保持，
+// PushAck.Rejected 汇总拒绝数——这样 agent 能在流结束拿到完整统计，
+// 而不是只看到第一个坏 batch 就被掐断。
 // 流中途断开（agent 重连）不影响 server 继续接受新流；重连期间
-// 未被投递的包直接丢弃（Hub 计数 droppedNoSub/droppedBusy），不做缓存补发。
+// 未被投递的包直接丢弃（无订阅者/慢消费者分开计数），不做缓存补发。
 func (s *IngestServer) Push(stream proto.AgentIngest_PushServer) error {
 	owner := auth.OwnerFrom(stream.Context())
 	seq := s.nextStreamSeq()
@@ -85,16 +85,18 @@ func (s *IngestServer) Push(stream proto.AgentIngest_PushServer) error {
 		sessionID := batch.GetSessionId()
 		if !s.authorize(owner, sessionID) {
 			rejected++
-			slog.Warn("agent ingest batch rejected: session owner mismatch",
-				"stream", seq, "owner", owner, "session_id", sessionID)
-			return status.Errorf(codes.PermissionDenied,
-				"session %s does not belong to owner %q", sessionID, owner)
+			if rejected == 1 {
+				// 每条流只告警一次，避免坏 agent 刷日志。
+				slog.Warn("agent ingest batch rejected: session owner mismatch (subsequent rejections counted silently)",
+					"stream", seq, "owner", owner, "session_id", sessionID)
+			}
+			continue
 		}
 		pkts := packetsFromBatch(batch)
 		packets += uint64(len(pkts))
-		d, dr := s.hub.Deliver(sessionID, pkts)
+		d, drBusy, drNoSub := s.hub.Deliver(sessionID, pkts)
 		delivered += d
-		dropped += dr
+		dropped += drBusy + drNoSub
 	}
 }
 

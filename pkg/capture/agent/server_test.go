@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
 	"gta/pkg/auth"
@@ -136,7 +136,8 @@ func TestPushRoundTripPreservesFullFrameAndLinkType(t *testing.T) {
 	}
 }
 
-// 场景 2：owner 不匹配 → PermissionDenied，整条流结束。
+// 场景 2：owner 不匹配 → batch 逐个拒绝（流不被掐断），
+// PushAck.Rejected 汇总拒绝数；无 token 的流在鉴权拦截器就被拒绝。
 func TestPushRejectsOwnerMismatch(t *testing.T) {
 	resolver := auth.NewStaticResolver(map[string]auth.Principal{
 		"gta_alice": {Owner: "alice"},
@@ -150,11 +151,46 @@ func TestPushRejectsOwnerMismatch(t *testing.T) {
 	})
 	dial, hub, src := newBufconnServer(t, resolver, sessions)
 
-	// bob 不能推 alice 的会话。
-	stream := newAgentClient(t, dial)
-	_ = stream.Send(testBatch("sess-1", "x"))
-	if _, err := stream.CloseAndRecv(); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
+	cc, err := grpc.NewClient("passthrough:///agent",
+		grpc.WithContextDialer(dial),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cc.Close()
+
+	// 无 token 的流：鉴权拦截器直接拒绝（Push 根本进不去）。
+	streamNoTok, err := proto.NewAgentIngestClient(cc).Push(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = streamNoTok.Send(testBatch("sess-1", "x"))
+	if _, err := streamNoTok.CloseAndRecv(); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied for missing token", status.Code(err))
+	}
+
+	// bob（有 token）不能推 alice 的会话：batch 逐个拒绝（不投递），流保持到 EOF，
+	// PushAck.Rejected 汇总拒绝数（拒绝按 batch 记录并进 ack）。
+	bobCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer gta_bob")
+	stream, err := proto.NewAgentIngestClient(cc).Push(bobCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(testBatch("sess-1", "x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(testBatch("sess-404", "y")); err != nil {
+		t.Fatal(err)
+	}
+	badAck, err := stream.CloseAndRecv()
+	if err != nil {
+		t.Fatalf("recv ack: %v", err)
+	}
+	if badAck.GetRejected() != 2 {
+		t.Fatalf("rejected = %d, want 2", badAck.GetRejected())
+	}
+	if badAck.GetPackets() != 0 || badAck.GetDelivered() != 0 {
+		t.Fatalf("rejected batches leaked packets: ack = %+v", badAck)
 	}
 	// 包不应被投递。
 	select {
@@ -167,15 +203,8 @@ func TestPushRejectsOwnerMismatch(t *testing.T) {
 	}
 
 	// alice 推自己的会话 OK。
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer gta_alice")
-	cc, err := grpc.NewClient("passthrough:///agent",
-		grpc.WithContextDialer(dial),
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cc.Close()
-	stream3, err := proto.NewAgentIngestClient(cc).Push(ctx)
+	aliceCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer gta_alice")
+	stream3, err := proto.NewAgentIngestClient(cc).Push(aliceCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,13 +221,17 @@ func TestPushRejectsOwnerMismatch(t *testing.T) {
 	}
 
 	// 不存在的会话也应拒绝。
-	stream4, err := proto.NewAgentIngestClient(cc).Push(ctx)
+	stream4, err := proto.NewAgentIngestClient(cc).Push(aliceCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = stream4.Send(testBatch("sess-404", "y"))
-	if _, err := stream4.CloseAndRecv(); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("code = %v, want PermissionDenied for unknown session", status.Code(err))
+	unknownAck, err := stream4.CloseAndRecv()
+	if err != nil {
+		t.Fatalf("recv ack: %v", err)
+	}
+	if unknownAck.GetRejected() != 1 {
+		t.Fatalf("rejected = %d, want 1 for unknown session", unknownAck.GetRejected())
 	}
 }
 
@@ -276,5 +309,13 @@ func TestPushSlowConsumerDropsWithoutBlocking(t *testing.T) {
 	}
 	if ack.GetDelivered() != 1 || ack.GetDropped() != 4 {
 		t.Fatalf("delivered/dropped = %d/%d, want 1/4", ack.GetDelivered(), ack.GetDropped())
+	}
+	// Source.Stats 必须透出 Hub 订阅级计数（review 修复项：丢弃要明确记录）。
+	st := src.Stats()
+	if st.PacketsIn != 1 || st.Drops != 4 {
+		t.Fatalf("source stats packetsIn/drops = %d/%d, want 1/4", st.PacketsIn, st.Drops)
+	}
+	if st.Extra["agent_dropped"].(uint64) != 4 {
+		t.Fatalf("extra agent_dropped = %v, want 4", st.Extra["agent_dropped"])
 	}
 }

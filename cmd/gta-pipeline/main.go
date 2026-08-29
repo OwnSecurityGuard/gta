@@ -206,7 +206,19 @@ func main() {
 		grpcSrv.GracefulStop()
 		registryGrpc.GracefulStop()
 		if agentIngestGrpc != nil {
-			agentIngestGrpc.GracefulStop()
+			// GracefulStop 会等所有活跃 Push 流结束——gta-agent 的流是长连接，
+			// 不限时会卡住整个退出流程。限时 5s，超时硬停（未投递包按约定丢弃）。
+			stopped := make(chan struct{})
+			go func() {
+				agentIngestGrpc.GracefulStop()
+				close(stopped)
+			}()
+			select {
+			case <-stopped:
+			case <-time.After(5 * time.Second):
+				slog.Warn("agent ingest graceful stop timed out, forcing stop")
+				agentIngestGrpc.Stop()
+			}
 		}
 	}()
 

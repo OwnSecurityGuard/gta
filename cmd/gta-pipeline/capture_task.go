@@ -496,7 +496,7 @@ func decoderAction(client, current pb.DecoderClient, haveDispatcher bool) string
 
 // openCaptureSources 打开基础 source，并在 agentHub 非 nil 时追加 agent source。
 // agent source 消费 AgentIngest server 按 session_id 路由的 gta-agent 推送，
-// 与其它 source（live/mobile）并行 merge；文件回放会话同样允许 agent 推送。
+// 与其它 source（live/mobile/pcap-file）并行 merge。
 func openCaptureSources(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig, agentHub *agent.Hub, sessionID string) ([]capture.Source, error) {
 	sources, err := openCaptureSourcesBase(ctx, iface, port, pcapFile, live, mcfg)
 	if err != nil {
@@ -519,8 +519,7 @@ func openCaptureSources(ctx context.Context, iface string, port int, pcapFile st
 // 若 pcapFile 非空则回放文件；若 live.Device 非空则打开指定网卡；
 // 若 mobile 非空则启动移动代理抓包源（gRPC server，等待 gta-singbox-agent 推送）；
 // 否则打开所有可用网卡。live 中的 BPF/SnapLen/Promisc 透传给 pcap-live。
-// 若 agentHub 非 nil 且非文件回放，追加 agent source（消费 AgentIngest server
-// 按 session_id 路由的 gta-agent 推送）。
+// （agent source 的追加不在这里，见 openCaptureSources 包装层。）
 func openCaptureSourcesBase(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig) ([]capture.Source, error) {
 	if pcapFile != "" {
 		src, err := capture.Open(ctx, "pcap-file", pcapfile.PcapFileConfig{Path: pcapFile})

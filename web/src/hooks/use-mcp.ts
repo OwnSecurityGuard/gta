@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { mcpClient } from "@/lib/mcp-client";
+import { useAuthToken } from "@/hooks/use-auth";
+import { withTokenParam } from "@/lib/auth";
 import type { ListSessionsResult } from "@/types/session";
 import type { ListDecodedDataResult, CaptureSchemaResult } from "@/types/event";
 import type { SessionTimelineResult } from "@/types/timeline";
@@ -258,8 +260,10 @@ export function useStopCapture() {
  */
 export function usePluginEventStream() {
   const queryClient = useQueryClient();
+  // token 变化时重建连接：EventSource 无法中途补头，也读不到新 token。
+  const token = useAuthToken();
   useEffect(() => {
-    const es = new EventSource("/events/plugins");
+    const es = new EventSource(withTokenParam("/events/plugins"));
     es.addEventListener("plugin", () => {
       void queryClient.invalidateQueries({ queryKey: ["registeredPlugins"] });
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
@@ -270,7 +274,7 @@ export function usePluginEventStream() {
       slogError("plugin event stream error, relying on polling fallback");
     };
     return () => es.close();
-  }, [queryClient]);
+  }, [queryClient, token]);
 }
 
 // ===== 分析（聚合统计）=====

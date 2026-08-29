@@ -25,13 +25,14 @@ import (
 	"google.golang.org/grpc"
 	"gopkg.in/yaml.v3"
 
+	"gta/docs"
+	"gta/pkg/auth"
 	"gta/pkg/config"
 	"gta/pkg/event"
 	"gta/pkg/internalipc"
 	pb "gta/pkg/internalipc/proto"
 	"gta/pkg/logging"
 	"gta/pkg/plugin"
-	"gta/docs"
 	plugindevclient "gta/pkg/plugindev/client"
 	plugindevserver "gta/pkg/plugindev/server"
 	"gta/pkg/schema"
@@ -41,6 +42,9 @@ import (
 )
 
 type sessionMetadata struct {
+	// Owner 是会话归属者（pkg/auth 的 Principal.Owner）。
+	// 空串表示匿名（本地单机用法），落到 current.json；非空落到 current.<owner>.json。
+	Owner        string                 `json:"owner,omitempty"`
 	SessionID    string                 `json:"session_id"`
 	StartedAt    string                 `json:"started_at"`
 	StoppedAt    string                 `json:"stopped_at,omitempty"`
@@ -63,6 +67,15 @@ type sessionMetadata struct {
 	// ManifestSnapshot 是会话创建时的插件 manifest 快照（plugin.yaml 原文）。
 	// 从 controlStore.SessionMeta.ManifestSnapshot 同步，用于 MCP get_session_status 输出。
 	ManifestSnapshot string `json:"manifest_snapshot,omitempty"`
+}
+
+// ownerFilterFromCtx 从 ctx 提取 owner 可见性过滤器。
+// 无身份（T12 之前的 HTTP 直连 / 本地用法）视为匿名（owner=""，非 admin）。
+func ownerFilterFromCtx(ctx context.Context) store.SessionOwnerFilter {
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		return store.SessionOwnerFilter{Owner: p.Owner, AllOwners: p.IsAdmin}
+	}
+	return store.SessionOwnerFilter{}
 }
 
 // pluginEventJSON 是插件事件 SSE 推送的 JSON 负载，与 proto PluginEvent 对应。
@@ -142,8 +155,28 @@ func (sm *sessionManager) absDBPath(sessionID string) string {
 	return path
 }
 
-func (sm *sessionManager) currentPath() string {
-	return filepath.Join(sm.workDir, "current.json")
+// currentShardName 返回 owner 对应的 current 分片文件名。
+// 匿名 owner（""）保持使用 current.json（本地单机回归底线）；
+// 非 anon owner 落到 current.<owner>.json，多客户端共享 workDir 时互不覆盖。
+// owner 中的不安全字符（文件系统/转义风险）统一替换为 '_'。
+func currentShardName(owner string) string {
+	if owner == "" {
+		return "current.json"
+	}
+	var b strings.Builder
+	for _, r := range owner {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return "current." + b.String() + ".json"
+}
+
+func (sm *sessionManager) currentPathFor(owner string) string {
+	return filepath.Join(sm.workDir, currentShardName(owner))
 }
 
 func (sm *sessionManager) generateSessionID() string {
@@ -180,7 +213,7 @@ func (sm *sessionManager) createSession(metadata sessionMetadata) (string, error
 }
 
 func (sm *sessionManager) writeCurrent(metadata sessionMetadata) error {
-	tmpPath := sm.currentPath() + ".tmp"
+	tmpPath := sm.currentPathFor(metadata.Owner) + ".tmp"
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return err
@@ -188,17 +221,19 @@ func (sm *sessionManager) writeCurrent(metadata sessionMetadata) error {
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, sm.currentPath())
+	return os.Rename(tmpPath, sm.currentPathFor(metadata.Owner))
 }
 
-func (sm *sessionManager) readCurrent() (*sessionMetadata, error) {
+// readCurrent 读取指定 owner 的 current 分片。
+// owner 为空串读 current.json（匿名 / 本地单机用法）。
+func (sm *sessionManager) readCurrent(owner string) (*sessionMetadata, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	return sm.readCurrentLocked()
+	return sm.readCurrentLocked(owner)
 }
 
-func (sm *sessionManager) readCurrentLocked() (*sessionMetadata, error) {
-	data, err := os.ReadFile(sm.currentPath())
+func (sm *sessionManager) readCurrentLocked(owner string) (*sessionMetadata, error) {
+	data, err := os.ReadFile(sm.currentPathFor(owner))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -212,7 +247,10 @@ func (sm *sessionManager) readCurrentLocked() (*sessionMetadata, error) {
 	return &metadata, nil
 }
 
-func (sm *sessionManager) listSessions() ([]sessionMetadata, error) {
+// listSessions 列出 workDir 下的会话元数据（filesystem 层），按 started_at 降序。
+// f 控制 owner 可见性：metadata.json 无 owner 字段的历史会话视为匿名（""），
+// 因此匿名过滤器对既有本地数据行为不变；AllOwners=true（admin）不过滤。
+func (sm *sessionManager) listSessions(f store.SessionOwnerFilter) ([]sessionMetadata, error) {
 	sessionsDir := sm.sessionsDir()
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
@@ -228,13 +266,15 @@ func (sm *sessionManager) listSessions() ([]sessionMetadata, error) {
 			continue
 		}
 		sessionID := entry.Name()
-		meta, err := sm.readSessionMetadata(sessionID)
+		meta, err := sm.readSessionMetadata(sessionID, f.Owner)
 		if err != nil {
 			slog.Warn("read session metadata failed", "session_id", sessionID, "error", err)
 			continue
 		}
 		if meta != nil {
-			sessions = append(sessions, *meta)
+			if f.Matches(store.SessionMeta{Owner: meta.Owner}) {
+				sessions = append(sessions, *meta)
+			}
 		}
 	}
 
@@ -258,8 +298,8 @@ func (sm *sessionManager) writeSessionMetadata(sessionID string, metadata sessio
 	return os.WriteFile(path, data, 0644)
 }
 
-func (sm *sessionManager) readSessionMetadata(sessionID string) (*sessionMetadata, error) {
-	current, err := sm.readCurrent()
+func (sm *sessionManager) readSessionMetadata(sessionID, owner string) (*sessionMetadata, error) {
+	current, err := sm.readCurrent(owner)
 	if err != nil {
 		return nil, err
 	}
@@ -294,20 +334,20 @@ func (sm *sessionManager) readSessionMetadata(sessionID string) (*sessionMetadat
 	}, nil
 }
 
-func (sm *sessionManager) deleteSession(sessionID string) error {
+func (sm *sessionManager) deleteSession(sessionID, owner string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	current, err := sm.readCurrentLocked()
+	current, err := sm.readCurrentLocked(owner)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	if current != nil && current.SessionID == sessionID {
-		tmpPath := sm.currentPath() + ".tmp"
+		tmpPath := sm.currentPathFor(owner) + ".tmp"
 		if err := os.WriteFile(tmpPath, []byte("{}"), 0644); err != nil {
 			return err
 		}
-		if err := os.Rename(tmpPath, sm.currentPath()); err != nil {
+		if err := os.Rename(tmpPath, sm.currentPathFor(owner)); err != nil {
 			return err
 		}
 	}
@@ -472,17 +512,18 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 	// 写 metadata.json 使 getDBPath 即使 gta-mcp 与 gta-pipeline 的 workDir 不一致，
 	// 也能通过 pipeline 返回的绝对 db_path 定位到正确的会话库。
 	meta := sessionMetadata{
-		SessionID:   resp.GetSessionId(),
-		StartedAt:   time.Now().Format(time.RFC3339),
-		Status:      "running",
-		Port:        port,
-		Plugin:      pluginName,
-		Interface:   m.iface,
-		PCAPFile:    pcapFile,
-		Source:      source,
-		ListenAddr:  listenAddr,
-		FrameStyle:  frameStyle,
-		DBPath:      resp.GetDbPath(),
+		Owner:      auth.OwnerFrom(ctx),
+		SessionID:  resp.GetSessionId(),
+		StartedAt:  time.Now().Format(time.RFC3339),
+		Status:     "running",
+		Port:       port,
+		Plugin:     pluginName,
+		Interface:  m.iface,
+		PCAPFile:   pcapFile,
+		Source:     source,
+		ListenAddr: listenAddr,
+		FrameStyle: frameStyle,
+		DBPath:     resp.GetDbPath(),
 	}
 	if err := m.sessionMgr.writeSessionMetadata(resp.GetSessionId(), meta); err != nil {
 		slog.Warn("write session metadata failed", "session_id", resp.GetSessionId(), "error", err)
@@ -503,12 +544,13 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 }
 
 func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	owner := auth.OwnerFrom(ctx)
 	sessionID := req.GetString("session_id", "")
 	slog.Info("stop_capture requested", "session_id", sessionID)
 
 	if sessionID == "" {
 		// 回退到当前 session（向后兼容）
-		sess, err := m.sessionMgr.readCurrent()
+		sess, err := m.sessionMgr.readCurrent(owner)
 		if err != nil {
 			return errorResult(fmt.Errorf("read current session: %w", err)), nil
 		}
@@ -525,7 +567,7 @@ func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequ
 	}
 
 	// 更新 session 元数据（如果 sessionMgr 中有记录）
-	if sess, err := m.sessionMgr.readCurrent(); err == nil && sess != nil && sess.SessionID == sessionID {
+	if sess, err := m.sessionMgr.readCurrent(owner); err == nil && sess != nil && sess.SessionID == sessionID {
 		sess.Status = "stopped"
 		sess.StoppedAt = time.Now().Format(time.RFC3339)
 		sess.RawPackets = resp.GetRawPackets()
@@ -550,11 +592,12 @@ func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequ
 }
 
 func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	owner := auth.OwnerFrom(ctx)
 	sessionID := req.GetString("session_id", "")
 
 	// 如果未指定 session_id，回退到当前 session
 	if sessionID == "" {
-		sess, err := m.sessionMgr.readCurrent()
+		sess, err := m.sessionMgr.readCurrent(owner)
 		if err != nil {
 			slog.Warn("read current session failed", "error", err)
 			return successResult(map[string]any{"state": "idle"}), nil
@@ -590,7 +633,7 @@ func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToo
 	}
 
 	// 返回 sessionMgr 中的元数据
-	sess, err := m.sessionMgr.readSessionMetadata(sessionID)
+	sess, err := m.sessionMgr.readSessionMetadata(sessionID, owner)
 	if err != nil || sess == nil {
 		return successResult(map[string]any{"state": "closed", "session_id": sessionID}), nil
 	}
@@ -1038,10 +1081,10 @@ func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToo
 				"columns":     metricColumns,
 			},
 		},
-		"query_fields":  queryFields,
-		"rules":         rules,
-		"examples":      examples,
-		"field_source":  fieldSource,
+		"query_fields": queryFields,
+		"rules":        rules,
+		"examples":     examples,
+		"field_source": fieldSource,
 	}
 	if manifestView != nil {
 		result["manifest"] = manifestView
@@ -2006,14 +2049,14 @@ func (m *mcpCapture) getDBPath(sessionID string) (string, error) {
 	}
 	// 2. 回退到 sessionMgr（metadata.json，含 pipeline 返回的绝对 db_path）
 	if sessionID != "" {
-		meta, err := m.sessionMgr.readSessionMetadata(sessionID)
+		meta, err := m.sessionMgr.readSessionMetadata(sessionID, "")
 		if err == nil && meta != nil {
 			slog.Info("getDBPath: resolved via sessionMgr metadata", "session_id", sessionID, "db_path", meta.DBPath)
 			return meta.DBPath, nil
 		}
 	}
 	// 3. 尝试当前 session
-	current, err := m.sessionMgr.readCurrent()
+	current, err := m.sessionMgr.readCurrent("")
 	if err == nil && current != nil {
 		slog.Info("getDBPath: resolved via current session", "session_id", sessionID, "current_session_id", current.SessionID, "db_path", current.DBPath)
 		return current.DBPath, nil
@@ -2023,7 +2066,7 @@ func (m *mcpCapture) getDBPath(sessionID string) (string, error) {
 }
 
 func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	sessions, err := m.sessionMgr.listSessions()
+	sessions, err := m.sessionMgr.listSessions(ownerFilterFromCtx(ctx))
 	if err != nil {
 		slog.Error("list_all_sessions failed", "error", err)
 		return errorResult(err), nil
@@ -2140,7 +2183,8 @@ func (m *mcpCapture) handleDeleteSession(ctx context.Context, req mcp.CallToolRe
 	}
 
 	// 检查 session 是否正在运行
-	current, err := m.sessionMgr.readCurrent()
+	owner := auth.OwnerFrom(ctx)
+	current, err := m.sessionMgr.readCurrent(owner)
 	running := err == nil && current != nil && current.Status == "running" && current.SessionID == sessionID
 
 	if running {
@@ -2148,7 +2192,7 @@ func (m *mcpCapture) handleDeleteSession(ctx context.Context, req mcp.CallToolRe
 		return errorResult(fmt.Errorf("cannot delete running session %s; stop it first", sessionID)), nil
 	}
 
-	if err := m.sessionMgr.deleteSession(sessionID); err != nil {
+	if err := m.sessionMgr.deleteSession(sessionID, owner); err != nil {
 		slog.Error("delete_session failed", "session_id", sessionID, "error", err)
 		return errorResult(err), nil
 	}

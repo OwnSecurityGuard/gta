@@ -143,6 +143,7 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 	}
 
 	if err := s.controlStore.CreateSession(ctx, store.SessionMeta{
+		Owner:            auth.OwnerFrom(ctx),
 		SessionID:        sessionID,
 		StartedAt:        startTime,
 		Status:           "running",

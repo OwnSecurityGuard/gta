@@ -45,7 +45,10 @@ type captureTask struct {
 	// agentHub 非 nil 时，本会话额外打开 agent capture source，
 	// 接收 gta-agent 经 AgentIngest server 推送的本机原始帧。
 	agentHub *agent.Hub
-	start    time.Time
+	// agentOnly 为 true 时不打开任何基础 source，仅订阅 agent hub
+	//（hub 未配置时 openCaptureSources 返回错误）。
+	agentOnly bool
+	start     time.Time
 
 	// 解码插件绑定：创建时设定，运行中可经 SetSessionPlugin 热切换（pluginMu 保护）。
 	pluginMu sync.RWMutex
@@ -324,7 +327,7 @@ func (t *captureTask) run() {
 	engine = analyze.NewEngine(t.rules, t.logger)
 	baseline = state.NewBaselineManager(nil)
 
-	sources, err := openCaptureSources(t.ctx, t.iface, t.port, t.pcapFile, t.liveCfg, t.mobileCfg, t.agentHub, t.sessionID)
+	sources, err := openCaptureSources(t.ctx, t.iface, t.port, t.pcapFile, t.liveCfg, t.mobileCfg, t.agentHub, t.sessionID, t.agentOnly)
 	if err != nil {
 		t.logger.Error("capture init failed", "error", err, "interface", t.iface, "port", t.port, "pcap_file", t.pcapFile)
 		return
@@ -496,11 +499,16 @@ func decoderAction(client, current pb.DecoderClient, haveDispatcher bool) string
 
 // openCaptureSources 打开基础 source，并在 agentHub 非 nil 时追加 agent source。
 // agent source 消费 AgentIngest server 按 session_id 路由的 gta-agent 推送，
-// 与其它 source（live/mobile/pcap-file）并行 merge。
-func openCaptureSources(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig, agentHub *agent.Hub, sessionID string) ([]capture.Source, error) {
-	sources, err := openCaptureSourcesBase(ctx, iface, port, pcapFile, live, mcfg)
-	if err != nil {
-		return nil, err
+// 与其它 source（live/mobile/pcap-file）并行 merge。agentOnly 为 true 时跳过
+// 基础 source，仅打开 agent source（hub 未配置时报错）。
+func openCaptureSources(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig, agentHub *agent.Hub, sessionID string, agentOnly bool) ([]capture.Source, error) {
+	var sources []capture.Source
+	if !agentOnly {
+		var err error
+		sources, err = openCaptureSourcesBase(ctx, iface, port, pcapFile, live, mcfg)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if agentHub != nil {
 		src, err := capture.Open(ctx, agent.SourceName, agent.Config{
@@ -511,6 +519,9 @@ func openCaptureSources(ctx context.Context, iface string, port int, pcapFile st
 			return nil, err
 		}
 		sources = append(sources, src)
+	}
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no capture source available: agent source requires agent ingest to be configured (pipeline -agent-ingest-addr)")
 	}
 	return sources, nil
 }

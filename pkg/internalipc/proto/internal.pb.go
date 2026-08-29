@@ -1339,7 +1339,15 @@ type StartCaptureRequest struct {
 	//	*StartCaptureRequest_Live
 	//	*StartCaptureRequest_File
 	//	*StartCaptureRequest_Mobile
-	Source        isStartCaptureRequest_Source `protobuf_oneof:"source"`
+	Source isStartCaptureRequest_Source `protobuf_oneof:"source"`
+	// agent 为 true 时本会话订阅 agent capture source（gta-agent 经 AgentIngest
+	// 按 session_id 推送原始帧）。可与 oneof source 组合（同时抓网卡等）；
+	// 单独为 true 且无 oneof source 时表示纯 agent 会话。
+	Agent bool `protobuf:"varint,7,opt,name=agent,proto3" json:"agent,omitempty"`
+	// 调用方身份（gta-mcp 从 HTTP auth ctx 提取后透传，见 ListPluginsRequest）。
+	// pipeline 用它记录会话归属（ControlStore SessionMeta.Owner / captureTask.owner）。
+	Owner         string `protobuf:"bytes,8,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool   `protobuf:"varint,9,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1427,6 +1435,27 @@ func (x *StartCaptureRequest) GetMobile() *MobileSourceConfig {
 		}
 	}
 	return nil
+}
+
+func (x *StartCaptureRequest) GetAgent() bool {
+	if x != nil {
+		return x.Agent
+	}
+	return false
+}
+
+func (x *StartCaptureRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *StartCaptureRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
 }
 
 type isStartCaptureRequest_Source interface {
@@ -2083,8 +2112,13 @@ func (x *CaptureSessionSummary) GetStartedAtUnix() int64 {
 	return 0
 }
 
+// ListPluginsRequest 列出已注册插件。owner/all_owners 来自调用方身份
+// （gta-mcp 从 HTTP auth ctx 提取后透传）：非 admin 只见自己的 + 匿名注册的
+// 插件；all_owners=true（admin）见全部；两者均空 = 匿名/本地语境（只见匿名插件）。
 type ListPluginsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Owner         string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,2,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2119,6 +2153,20 @@ func (*ListPluginsRequest) Descriptor() ([]byte, []int) {
 	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{27}
 }
 
+func (x *ListPluginsRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ListPluginsRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
 // PluginSummary 插件注册摘要。
 type PluginSummary struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
@@ -2130,6 +2178,7 @@ type PluginSummary struct {
 	SocketPath        string                 `protobuf:"bytes,6,opt,name=socket_path,json=socketPath,proto3" json:"socket_path,omitempty"`
 	Online            bool                   `protobuf:"varint,7,opt,name=online,proto3" json:"online,omitempty"`
 	LastHeartbeatUnix int64                  `protobuf:"varint,8,opt,name=last_heartbeat_unix,json=lastHeartbeatUnix,proto3" json:"last_heartbeat_unix,omitempty"`
+	Owner             string                 `protobuf:"bytes,9,opt,name=owner,proto3" json:"owner,omitempty"` // 注册方属主（空串 = 匿名/系统插件）
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -2220,6 +2269,13 @@ func (x *PluginSummary) GetLastHeartbeatUnix() int64 {
 	return 0
 }
 
+func (x *PluginSummary) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
 type ListPluginsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Plugins       []*PluginSummary       `protobuf:"bytes,1,rep,name=plugins,proto3" json:"plugins,omitempty"`
@@ -2266,7 +2322,9 @@ func (x *ListPluginsResponse) GetPlugins() []*PluginSummary {
 
 type GetPluginManifestRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // 插件名，留空返回所有
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                             // 插件名，留空返回所有
+	Owner         string                 `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`                           // 调用方属主（owner 作用域查找，见 ListPluginsRequest）
+	AllOwners     bool                   `protobuf:"varint,3,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"` // admin：任意 owner 的插件均可查
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2306,6 +2364,20 @@ func (x *GetPluginManifestRequest) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *GetPluginManifestRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *GetPluginManifestRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
 }
 
 type GetPluginManifestResponse struct {
@@ -3310,7 +3382,7 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"frameStyle\x12\x1d\n" +
 	"\n" +
 	"prefix_len\x18\x03 \x01(\x05R\tprefixLen\x12#\n" +
-	"\rlittle_endian\x18\x04 \x01(\bR\flittleEndian\"\x97\x02\n" +
+	"\rlittle_endian\x18\x04 \x01(\bR\flittleEndian\"\xe2\x02\n" +
 	"\x13StartCaptureRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -3318,7 +3390,11 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x125\n" +
 	"\x04live\x18\x04 \x01(\v2\x1f.gta.internalipc.PcapLiveConfigH\x00R\x04live\x125\n" +
 	"\x04file\x18\x05 \x01(\v2\x1f.gta.internalipc.PcapFileConfigH\x00R\x04file\x12=\n" +
-	"\x06mobile\x18\x06 \x01(\v2#.gta.internalipc.MobileSourceConfigH\x00R\x06mobileB\b\n" +
+	"\x06mobile\x18\x06 \x01(\v2#.gta.internalipc.MobileSourceConfigH\x00R\x06mobile\x12\x14\n" +
+	"\x05agent\x18\a \x01(\bR\x05agent\x12\x14\n" +
+	"\x05owner\x18\b \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\t \x01(\bR\tallOwnersB\b\n" +
 	"\x06source\"d\n" +
 	"\x14StartCaptureResponse\x12\x1d\n" +
 	"\n" +
@@ -3374,8 +3450,11 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x06plugin\x18\x05 \x01(\tR\x06plugin\x12\x1c\n" +
 	"\tinterface\x18\x06 \x01(\tR\tinterface\x12\x1b\n" +
 	"\tpcap_file\x18\a \x01(\tR\bpcapFile\x12&\n" +
-	"\x0fstarted_at_unix\x18\b \x01(\x03R\rstartedAtUnix\"\x14\n" +
-	"\x12ListPluginsRequest\"\xfe\x01\n" +
+	"\x0fstarted_at_unix\x18\b \x01(\x03R\rstartedAtUnix\"I\n" +
+	"\x12ListPluginsRequest\x12\x14\n" +
+	"\x05owner\x18\x01 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x02 \x01(\bR\tallOwners\"\x94\x02\n" +
 	"\rPluginSummary\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\x12\x12\n" +
@@ -3387,11 +3466,15 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\vsocket_path\x18\x06 \x01(\tR\n" +
 	"socketPath\x12\x16\n" +
 	"\x06online\x18\a \x01(\bR\x06online\x12.\n" +
-	"\x13last_heartbeat_unix\x18\b \x01(\x03R\x11lastHeartbeatUnix\"O\n" +
+	"\x13last_heartbeat_unix\x18\b \x01(\x03R\x11lastHeartbeatUnix\x12\x14\n" +
+	"\x05owner\x18\t \x01(\tR\x05owner\"O\n" +
 	"\x13ListPluginsResponse\x128\n" +
-	"\aplugins\x18\x01 \x03(\v2\x1e.gta.internalipc.PluginSummaryR\aplugins\".\n" +
+	"\aplugins\x18\x01 \x03(\v2\x1e.gta.internalipc.PluginSummaryR\aplugins\"c\n" +
 	"\x18GetPluginManifestRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"K\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x03 \x01(\bR\tallOwners\"K\n" +
 	"\x19GetPluginManifestResponse\x12\x1a\n" +
 	"\bmanifest\x18\x01 \x01(\fR\bmanifest\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"N\n" +

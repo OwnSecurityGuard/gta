@@ -113,7 +113,7 @@ func (m *mcpCapture) handleGetSessionTimeline(ctx context.Context, req mcp.CallT
 		offset = 0
 	}
 
-	reader, err := m.openReader(sessionID)
+	reader, err := m.openReader(ctx, sessionID)
 	if err != nil {
 		return errorResult(fmt.Errorf("open reader: %w", err)), nil
 	}

@@ -219,6 +219,14 @@ message StartCaptureRequest {
     PcapFileConfig file = 5;
     MobileSourceConfig mobile = 6;
   }
+  // agent 为 true 时本会话订阅 agent capture source（gta-agent 经 AgentIngest
+  // 按 session_id 推送原始帧）。可与 oneof source 组合（同时抓网卡等）；
+  // 单独为 true 且无 oneof source 时表示纯 agent 会话。
+  bool agent = 7;
+  // 调用方身份（gta-mcp 从 HTTP auth ctx 提取后透传，见 ListPluginsRequest）。
+  // pipeline 用它记录会话归属（ControlStore SessionMeta.Owner / captureTask.owner）。
+  string owner = 8;
+  bool all_owners = 9;
 }
 
 message StartCaptureResponse {
@@ -285,7 +293,13 @@ message CaptureSessionSummary {
 
 // ---- Plugin Management ----
 
-message ListPluginsRequest {}
+// ListPluginsRequest 列出已注册插件。owner/all_owners 来自调用方身份
+// （gta-mcp 从 HTTP auth ctx 提取后透传）：非 admin 只见自己的 + 匿名注册的
+// 插件；all_owners=true（admin）见全部；两者均空 = 匿名/本地语境（只见匿名插件）。
+message ListPluginsRequest {
+  string owner = 1;
+  bool all_owners = 2;
+}
 
 // PluginSummary 插件注册摘要。
 message PluginSummary {
@@ -297,6 +311,7 @@ message PluginSummary {
   string socket_path = 6;
   bool online = 7;
   int64 last_heartbeat_unix = 8;
+  string owner = 9; // 注册方属主（空串 = 匿名/系统插件）
 }
 
 message ListPluginsResponse {
@@ -305,6 +320,8 @@ message ListPluginsResponse {
 
 message GetPluginManifestRequest {
   string name = 1; // 插件名，留空返回所有
+  string owner = 2; // 调用方属主（owner 作用域查找，见 ListPluginsRequest）
+  bool all_owners = 3; // admin：任意 owner 的插件均可查
 }
 
 message GetPluginManifestResponse {

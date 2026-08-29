@@ -46,7 +46,7 @@ func (m *mcpCapture) handleTraceProtocolFlow(ctx context.Context, req mcp.CallTo
 	}
 
 	// 3. 查询 flow 内消息
-	reader, err := m.openReader(rec.SessionID)
+	reader, err := m.openReader(ctx, rec.SessionID)
 	if err != nil {
 		return errorResult(fmt.Errorf("open reader: %w", err)), nil
 	}

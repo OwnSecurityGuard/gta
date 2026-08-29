@@ -199,7 +199,7 @@ func (m *mcpCapture) handleEndCaptureRun(ctx context.Context, req mcp.CallToolRe
 	}
 
 	// 查询 db 获取 flow_count / request_count / server_message_count
-	reader, err := m.openReader(rec.SessionID)
+	reader, err := m.openReader(ctx, rec.SessionID)
 	if err == nil {
 		defer reader.Close()
 

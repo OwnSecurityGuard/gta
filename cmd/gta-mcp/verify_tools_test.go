@@ -14,12 +14,16 @@ import (
 // SampleBytes，其余接口方法由嵌入的 nil 接口提供（测试不会调用）。
 type fakeCaptureClient struct {
 	pb.CaptureControlClient
-	verifyReq  *pb.VerifyRequest
-	verifyResp *pb.VerifyResponse
-	verifyErr  error
-	sampleReq  *pb.SampleBytesRequest
-	sampleResp *pb.SampleBytesResponse
-	sampleErr  error
+	verifyReq      *pb.VerifyRequest
+	verifyResp     *pb.VerifyResponse
+	verifyErr      error
+	sampleReq      *pb.SampleBytesRequest
+	sampleResp     *pb.SampleBytesResponse
+	sampleErr      error
+	startReq       *pb.StartCaptureRequest
+	dbDir          string
+	listPluginsReq *pb.ListPluginsRequest
+	manifestReq    *pb.GetPluginManifestRequest
 }
 
 func (f *fakeCaptureClient) Verify(ctx context.Context, in *pb.VerifyRequest, _ ...grpc.CallOption) (*pb.VerifyResponse, error) {

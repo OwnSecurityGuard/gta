@@ -24,6 +24,7 @@ import type { SessionInfo } from "@/types/session";
 import type { TestPluginResult, TestEventLite } from "@/types/plugin-test";
 import type { BuildPluginResult, ExplainPluginResult } from "@/types/plugin-dev";
 import type { PluginInfo } from "@/types/decode";
+import { useIdentity } from "@/hooks/use-auth";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
 
 // 稳定的空数组引用：避免在 data 未加载时每次渲染生成新的 [] 引用，
@@ -75,6 +76,8 @@ export function PluginPanel() {
   const baselineSet = useRef(false);
 
   const plugins = data?.plugins ?? EMPTY_PLUGINS;
+  // 当前登录身份（匿名模式下为 null），用于把 owner 归属显示为「我」。
+  const identity = useIdentity();
 
   useEffect(() => {
     setHotReloads((prev) => {
@@ -239,6 +242,15 @@ export function PluginPanel() {
             onDeregister={() => setConfirmTarget(p)}
             deregistering={deregister.isPending && confirmTarget?.instance_id === p.instance_id}
             onTest={() => handleTestClick(p.name)}
+            // "local" 对应后端 pkg/auth.AnonymousOwner（匿名模式系统插件命名空间）：
+            // 匿名模式下单机用户不需要归属徽标，保持与团队化之前 UI 一致，故 owner 为 local/缺失时不显示。
+            ownerBadge={
+              p.owner && p.owner !== "local"
+                ? identity && p.owner === identity.owner
+                  ? "我"
+                  : p.owner
+                : undefined
+            }
           />
         ))}
       </div>
@@ -853,12 +865,15 @@ function PluginCard({
   onDeregister,
   deregistering,
   onTest,
+  ownerBadge,
 }: {
   plugin: RegisteredPlugin;
   hotReloadAt?: number;
   onDeregister: () => void;
   deregistering: boolean;
   onTest: () => void;
+  /** 归属徽标文案（undefined = 不显示） */
+  ownerBadge?: string;
 }) {
   return (
     <div className="gta-card p-3 transition-[box-shadow,border-color] hover:shadow-md">
@@ -866,6 +881,14 @@ function PluginCard({
         <div className="flex items-center gap-2 min-w-0">
           <Activity className="h-4 w-4 shrink-0 text-primary" />
           <span className="text-sm font-medium truncate">{plugin.name}</span>
+          {ownerBadge && (
+            <span
+              className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              title={`注册者：${plugin.owner}`}
+            >
+              {ownerBadge}
+            </span>
+          )}
           <Badge
             variant={plugin.online ? "outline" : "secondary"}
             className={plugin.online ? "border-success/30 bg-success/10 text-success" : ""}

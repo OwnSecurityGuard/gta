@@ -8,6 +8,8 @@ export interface RegisteredPlugin {
   socket_path: string;
   online: boolean;
   last_heartbeat: number;
+  /** 注册者（团队模式下的用户名；匿名/系统插件为 local） */
+  owner?: string;
 }
 
 /** list_registered_plugins 完整响应 */

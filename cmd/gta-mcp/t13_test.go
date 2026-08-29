@@ -252,6 +252,9 @@ func TestCORSMiddlewareNoOriginsConfigured(t *testing.T) {
 	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Error("no origins configured: must not emit Access-Control-Allow-Origin")
 	}
+	if rec.Header().Get("Access-Control-Expose-Headers") != "" {
+		t.Error("no origins configured: must not emit Access-Control-Expose-Headers")
+	}
 }
 
 func TestCORSMiddlewareAllowlist(t *testing.T) {
@@ -271,6 +274,23 @@ func TestCORSMiddlewareAllowlist(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Error("non-allowlisted origin must not get ACAO header")
+	}
+	if rec.Header().Get("Access-Control-Expose-Headers") != "" {
+		t.Error("non-allowlisted origin must not get Access-Control-Expose-Headers")
+	}
+}
+
+// TestCORSExposeIdentityHeaders 验证命中 allowlist 的跨域响应暴露身份回显头，
+// 否则前端 JS 在跨域直连场景下读不到 X-GTA-Owner / X-GTA-Admin。
+func TestCORSExposeIdentityHeaders(t *testing.T) {
+	h := buildHTTPHandler([]string{"http://good.example.com"}, nil, okHandler())
+	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req.Header.Set("Origin", "http://good.example.com")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	expose := rec.Header().Get("Access-Control-Expose-Headers")
+	if expose != auth.HeaderOwner+", "+auth.HeaderAdmin {
+		t.Fatalf("应恰好暴露身份回显头，实际 %q", expose)
 	}
 }
 

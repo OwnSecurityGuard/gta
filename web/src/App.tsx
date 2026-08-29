@@ -14,9 +14,10 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { StartCaptureDialog } from "@/components/start-capture-dialog";
 import { ProxyConfigDialog } from "@/components/proxy-config-dialog";
 import { Button } from "@/components/ui/button";
-import { Sun, Moon, Settings, Play, Square, Cable } from "lucide-react";
+import { Sun, Moon, Settings, Play, Square, Cable, KeyRound } from "lucide-react";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
 import { usePluginEventStream, useStopCapture, useSessions } from "@/hooks/use-mcp";
+import { useAuthError } from "@/hooks/use-auth";
 import { toast } from "@/components/ui/toast";
 
 type ViewTab = "decoded" | "analytics" | "timeline" | "runs" | "data" | "plugins" | "raw" | "connections";
@@ -60,6 +61,8 @@ export default function App() {
   const [filter, setFilter] = useState("");
   const [activeTab, setActiveTab] = useState<ViewTab>("decoded");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 服务器开启令牌校验且本地无有效凭证（401）：横幅提示并自动打开设置。
+  const authError = useAuthError();
   const [startOpen, setStartOpen] = useState(false);
   const [proxyConfigOpen, setProxyConfigOpen] = useState(false);
   const [isDark, setIsDark] = useState(() => {
@@ -125,6 +128,12 @@ export default function App() {
     }
   }, [activeTab]);
 
+  // 401 发生时自动打开设置弹窗，引导填入访问令牌（横幅常驻直至保存新 token）。
+  // 其它弹窗打开时暂不抢占（避免遮挡下抢焦点/一次 ESC 关两个），关掉后仍会自动补开。
+  useEffect(() => {
+    if (authError && !startOpen && !proxyConfigOpen) setSettingsOpen(true);
+  }, [authError, startOpen, proxyConfigOpen]);
+
   const handleSelectSession = useCallback((sessionId: string) => {
     setSelectedSessionId(sessionId);
     setFilter(""); // 切换 session 时清空 filter
@@ -175,6 +184,24 @@ export default function App() {
 
       {/* 右侧主内容区 */}
       <main className="flex min-w-0 flex-1 flex-col">
+        {/* 401 横幅：服务器要求访问令牌而本地未配置/已失效 */}
+        {authError && (
+          <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+            <KeyRound className="h-4 w-4 shrink-0" />
+            <span className="flex-1">
+              服务器开启了访问令牌校验，请在设置中填入访问令牌后重试。
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              onClick={() => setSettingsOpen(true)}
+            >
+              打开设置
+            </Button>
+          </div>
+        )}
+
         {/* 顶部工具栏：Tab 切换 + 开始抓包 + 主题/设置 */}
         <header className="flex items-center justify-between gap-3 border-b border-border bg-card/80 px-4 py-2.5 backdrop-blur">
           <div className="flex items-center gap-3">
@@ -239,11 +266,11 @@ export default function App() {
               size="sm"
               className="h-8"
               onClick={() => setStartOpen(true)}
-              title="开始网卡抓包"
-              aria-label="开始网卡抓包"
+              title="开始抓包（本机网卡 / 远程 agent）"
+              aria-label="开始抓包"
             >
               <Play className="h-4 w-4" />
-              网卡抓包
+              开始抓包
             </Button>
             {isSelectedRunning && (
               <Button
@@ -337,7 +364,7 @@ export default function App() {
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {/* 代理服务器配置弹窗 */}
       <ProxyConfigDialog open={proxyConfigOpen} onClose={() => setProxyConfigOpen(false)} />
-      {/* 开始网卡抓包弹窗 */}
+      {/* 开始抓包弹窗（本机网卡 / 远程 agent 源） */}
       <StartCaptureDialog
         open={startOpen}
         onClose={() => setStartOpen(false)}

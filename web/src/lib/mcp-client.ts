@@ -1,7 +1,28 @@
 import type { JsonRpcRequest, JsonRpcResponse, McpToolResult } from "@/types/mcp";
+import { authHeaders, getToken, notifyAuthError, setIdentity } from "@/lib/auth";
 
 /** 自增 ID 生成器 */
 let nextId = 1;
+
+/** 服务器开启 token 校验而本地未携带/凭证失效时抛出；App 层据此弹出设置引导。 */
+export class AuthError extends Error {
+  constructor(message = "需要访问令牌（HTTP 401）") {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
+/** 从响应头读取身份回显（后端 auth.Middleware 注入；匿名模式无此头 → 清空身份）。 */
+function syncIdentityFromHeaders(headers: {
+  get(k: string): string | null;
+}): void {
+  const owner = headers.get("X-GTA-Owner");
+  if (!owner) {
+    setIdentity(null);
+    return;
+  }
+  setIdentity({ owner, isAdmin: headers.get("X-GTA-Admin") === "true" });
+}
 
 /**
  * MCP JSON-RPC 客户端
@@ -41,20 +62,38 @@ export class McpClient {
       },
     };
 
+    // 记下发请求时用的 token：在途期间 token 可能被更换，401 归属判断要用。
+    const usedToken = getToken();
     const response = await fetch(this.baseUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(request),
     });
 
+    if (response.status === 401) {
+      // 在途请求可能来自已更换的旧凭证：仅当 401 属于当前 token 时才置位横幅，
+      // 否则保存新 token 后会被旧请求的迟到 401 重新点亮且无法自愈。
+      if (usedToken === getToken()) {
+        setIdentity(null);
+        notifyAuthError();
+      }
+      throw new AuthError();
+    }
     if (!response.ok) {
       throw new Error(`MCP server error: ${response.status} ${response.statusText}`);
     }
+    syncIdentityFromHeaders(response.headers);
 
     const rpcRes: JsonRpcResponse = await response.json() as JsonRpcResponse;
 
     if ("error" in rpcRes) {
-      throw new Error(`MCP RPC error [${rpcRes.error.code}]: ${rpcRes.error.message}`);
+      const msg = String(rpcRes.error.message ?? "");
+      // \b 防止误伤：如 "4014"、":40180" 这类含 401 子串的无关错误消息。
+      if (/\bunauthorized\b|\b401\b/i.test(msg)) {
+        notifyAuthError();
+        throw new AuthError(msg);
+      }
+      throw new Error(`MCP RPC error [${rpcRes.error.code}]: ${msg}`);
     }
 
     // 提取 content[0].text 并二次解析
@@ -91,15 +130,27 @@ export class McpClient {
       },
     };
 
+    // 记下发请求时用的 token：在途期间 token 可能被更换，401 归属判断要用。
+    const usedToken = getToken();
     const response = await fetch(this.baseUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(request),
     });
 
+    if (response.status === 401) {
+      // 在途请求可能来自已更换的旧凭证：仅当 401 属于当前 token 时才置位横幅，
+      // 否则保存新 token 后会被旧请求的迟到 401 重新点亮且无法自愈。
+      if (usedToken === getToken()) {
+        setIdentity(null);
+        notifyAuthError();
+      }
+      throw new AuthError();
+    }
     if (!response.ok) {
       throw new Error(`MCP initialize failed: ${response.status}`);
     }
+    syncIdentityFromHeaders(response.headers);
   }
 }
 

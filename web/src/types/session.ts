@@ -1,5 +1,7 @@
 /** list_all_sessions 返回的单个 session 元数据 */
 export interface SessionInfo {
+  /** 会话归属者（团队模式下的用户名；匿名/本地单机为空） */
+  owner?: string;
   session_id: string;
   started_at: string;
   stopped_at: string;

@@ -25,6 +25,8 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 		if origin != "" && allowed[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Add("Vary", "Origin")
+			// 身份回显头默认不对跨域 JS 暴露，须显式加入 Expose-Headers 前端才读得到。
+			w.Header().Set("Access-Control-Expose-Headers", auth.HeaderOwner+", "+auth.HeaderAdmin)
 		}
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -39,7 +41,7 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 }
 
 // requiredResolver 是带 Required() 的 auth.Resolver：报告是否配置了 token
-//（与 auth.StaticResolver.Required 语义一致）。
+// （与 auth.StaticResolver.Required 语义一致）。
 type requiredResolver interface {
 	auth.Resolver
 	Required() bool

@@ -2216,6 +2216,7 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 		seen[sess.SessionID] = true
 		out = append(out, map[string]any{
 			"session_id":    sess.SessionID,
+			"owner":         sess.Owner,
 			"started_at":    sess.StartedAt,
 			"stopped_at":    sess.StoppedAt,
 			"status":        status,
@@ -2238,6 +2239,17 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 	// 补上仅存在于 pipeline live、但 sessionMgr 未枚举到的会话（workDir 漂移兜底）
 	for id, live := range liveByID {
 		if seen[id] {
+			continue
+		}
+		// live 兜底同样不能把他人会话透给非 admin 调用方：ListCaptureSessions
+		// 的请求没有 owner 字段，pipeline 返回的是所有会话摘要，这里若不加
+		// 校验，alice 会经兜底循环看到 bob 运行中会话的 session_id/port/db_path。
+		// 可见性规则与 authorizeSession（controlStore→metadata.json 兜底）保持一致。
+		// 注意 authorizeSession 对"两处都查不到"的会话是刻意放行的（匿名/本地
+		// 单机基线 + workDir 漂移容错）；因此 token 模式部署必须让 mcp 与
+		// pipeline 共享同一 control.sqlite（compose 已如此配置），否则漂移的
+		// 他人 live 会话仍会以"两处未知"的名义浮出。
+		if err := m.authorizeSession(ctx, id); err != nil {
 			continue
 		}
 		status, _ := live["state"].(string)

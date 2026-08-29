@@ -2,7 +2,7 @@ module godot-world
 
 go 1.25.5
 
-require github.com/OwnSecurityGuard/gta-plugin-sdk v0.3.0
+require github.com/OwnSecurityGuard/gta-plugin-sdk v0.4.1
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -17,5 +17,3 @@ require (
 	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/OwnSecurityGuard/gta-plugin-sdk => E:\ai_workspace\gta-plugin-sdk

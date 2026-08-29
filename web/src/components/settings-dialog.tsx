@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { mcpClient } from "@/lib/mcp-client";
-import { Settings, Check, X } from "lucide-react";
+import { getToken, setToken } from "@/lib/auth";
+import { Settings, Check, X, KeyRound } from "lucide-react";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -12,10 +14,16 @@ interface SettingsDialogProps {
 
 export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [url, setUrl] = useState(mcpClient.getBaseUrl());
+  // 空输入 = 清除 token（回到匿名模式）。
+  const [token, setTokenInput] = useState(getToken() ?? "");
   const [saved, setSaved] = useState(false);
+  const queryClient = useQueryClient();
 
   function handleSave() {
     mcpClient.setBaseUrl(url);
+    setToken(token || null);
+    // 凭证/地址可能变了：立即重刷全部查询，让身份回显与会话列表马上生效。
+    void queryClient.invalidateQueries();
     setSaved(true);
     setTimeout(() => {
       setSaved(false);
@@ -48,18 +56,39 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         </>
       }
     >
-      <div>
-        <label className="text-sm font-medium">MCP Server 地址</label>
-        <Input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          aria-label="MCP Server 地址"
-          placeholder="/mcp（通过 Vite 代理）或 http://其他地址/mcp"
-          className="mt-1.5 font-mono"
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          默认 /mcp 通过 Vite dev server 代理到 localhost:8087。如需直连其他地址则填完整 URL。
-        </p>
+      <div className="space-y-4">
+        <div>
+          <label className="text-sm font-medium">MCP Server 地址</label>
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            aria-label="MCP Server 地址"
+            placeholder="/mcp（通过 Vite 代理）或 http://其他地址/mcp"
+            className="mt-1.5 font-mono"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            默认 /mcp 通过 Vite dev server 代理到 localhost:8781。如需直连其他地址则填完整 URL。
+          </p>
+        </div>
+        <div>
+          <label className="flex items-center gap-1.5 text-sm font-medium">
+            <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+            访问令牌（可选）
+          </label>
+          <Input
+            type="password"
+            value={token}
+            onChange={(e) => setTokenInput(e.target.value)}
+            aria-label="访问令牌"
+            placeholder="服务器未开启令牌校验时留空"
+            autoComplete="off"
+            className="mt-1.5 font-mono"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            团队共享服务端开启令牌校验时，向管理员领取你的 token（形如
+            <code className="font-mono"> gta_…</code>）填入；留空则按匿名/单机模式访问。保存后立即生效。
+          </p>
+        </div>
       </div>
     </Dialog>
   );

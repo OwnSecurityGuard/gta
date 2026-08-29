@@ -290,3 +290,156 @@ func waitEvent(t *testing.T, ch <-chan PluginEvent, typ PluginEventType) {
 		}
 	}
 }
+
+// TestTunnelUnboundReaped 验证从未绑定隧道的注册（插件崩溃在 Connect 前/
+// 从未 Connect）超过宽限期（2×timeout）后被 CheckOffline 回收。
+func TestTunnelUnboundReaped(t *testing.T) {
+	s := NewRegistryServer(10)
+	defer s.Close()
+
+	resp, err := s.Register(ownerCtx("alice"), &pb.RegisterRequest{
+		Tunnel:   true,
+		Manifest: []byte(sharedManifest),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 未超宽限：仍在表
+	s.CheckOffline(50 * time.Millisecond)
+	if _, ok := s.plugins[resp.GetInstanceId()]; !ok {
+		t.Fatal("unbound tunnel registration should survive within grace period")
+	}
+
+	// 推进时间超过 2×timeout：应被回收并推 deregister 事件
+	events, unsub := s.Subscribe()
+	defer unsub()
+	s.mu.Lock()
+	s.plugins[resp.GetInstanceId()].LastHeartbeat = time.Now().Add(-time.Second)
+	s.mu.Unlock()
+	s.CheckOffline(50 * time.Millisecond)
+	if _, ok := s.plugins[resp.GetInstanceId()]; ok {
+		t.Fatal("unbound tunnel registration should be reaped after grace period")
+	}
+	waitEvent(t, events, PluginEventDeregister)
+}
+
+// TestTunnelBoundDeadClientOffline 兜底路径：绑定后断开钩子若丢失，
+// CheckOffline 也应通过 tunnelClientClosed 把实例判离线。
+func TestTunnelBoundDeadClientOffline(t *testing.T) {
+	s := NewRegistryServer(10)
+	defer s.Close()
+
+	resp, err := s.Register(ownerCtx("alice"), &pb.RegisterRequest{
+		Tunnel:   true,
+		Manifest: []byte(sharedManifest),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(ownerCtx("alice"))
+	p := newTunnelHubPipe(ctx)
+	go func() { _ = s.tunnelHub.Connect(hubEnd{p}) }()
+	waitTunnelBound(t, s, resp.GetInstanceId())
+
+	events, unsub := s.Subscribe()
+	defer unsub()
+	p.close()
+	// 不依赖断开钩子（钩子本身也会触发，这里断言最终一致：判离线即可）
+	waitEvent(t, events, PluginEventOffline)
+	s.CheckOffline(time.Second)
+	if _, _, ok := s.FindByNameFor("alice", "shared-decoder"); ok {
+		t.Fatal("tunnel plugin with dead session should be offline")
+	}
+	cancel()
+}
+
+// TestHeartbeatIgnoredForTunnel 验证隧道实例收到心跳不复活：
+// 会话已死的离线实例收到 Heartbeat 不会回到在线。
+func TestHeartbeatIgnoredForTunnel(t *testing.T) {
+	s := NewRegistryServer(10)
+	defer s.Close()
+
+	resp, err := s.Register(ownerCtx("alice"), &pb.RegisterRequest{
+		Tunnel:   true,
+		Manifest: []byte(sharedManifest),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(ownerCtx("alice"))
+	p := newTunnelHubPipe(ctx)
+	go func() { _ = s.tunnelHub.Connect(hubEnd{p}) }()
+	waitTunnelBound(t, s, resp.GetInstanceId())
+	p.close()
+	// 等断开钩子判离线
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.RLock()
+		offline := !s.plugins[resp.GetInstanceId()].Online.Load()
+		s.mu.RUnlock()
+		if offline {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("plugin not marked offline after tunnel close")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if _, err := s.Heartbeat(context.Background(), &pb.HeartbeatRequest{InstanceId: resp.GetInstanceId()}); err != nil {
+		t.Fatalf("heartbeat should be acked (ignored), got %v", err)
+	}
+	if _, _, ok := s.FindByNameFor("alice", "shared-decoder"); ok {
+		t.Fatal("heartbeat must not resurrect a tunnel instance with a dead session")
+	}
+	cancel()
+}
+
+// TestCloseQuiescesTunnelHooks 验证 Close 后迟到的 Connect 钩子不会重新
+// 填充 tunnelPending（注册表已关闭，绑定/入队为 no-op）。
+func TestCloseQuiescesTunnelHooks(t *testing.T) {
+	s := NewRegistryServer(10)
+	s.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := newTunnelHubPipe(ctx)
+	go func() { _ = s.tunnelHub.Connect(hubEnd{p}) }()
+	time.Sleep(100 * time.Millisecond)
+
+	s.mu.RLock()
+	pending := len(s.tunnelPending[""])
+	s.mu.RUnlock()
+	if pending != 0 {
+		t.Fatalf("hooks must be no-op after Close, got %d pending clients", pending)
+	}
+}
+
+// TestConcurrentRegisterAndLookup 压力验证 owner 作用域查找与注册并发安全
+// （resolvePluginKey 曾在无锁状态下读 byName，go test -race / 手动压力可复现）。
+func TestConcurrentRegisterAndLookup(t *testing.T) {
+	s := NewRegistryServer(10)
+	defer s.Close()
+
+	done := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		go func(n int) {
+			defer func() { done <- struct{}{} }()
+			owner := string(rune('a' + n%4))
+			for j := 0; j < 50; j++ {
+				_, _ = s.Register(ownerCtx(owner), &pb.RegisterRequest{
+					SocketPath: "unix:/nonexistent/decoder.sock",
+					Manifest:   []byte(sharedManifest),
+				})
+				_, _, _ = s.FindByNameFor(owner, "shared-decoder")
+				_, _, _ = s.Find("tcp")
+				_, _ = s.GetPluginManifestFor(owner, "shared-decoder")
+				s.List()
+			}
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		<-done
+	}
+}

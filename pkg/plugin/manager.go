@@ -91,10 +91,11 @@ type PluginEvent struct {
 // 也不再维护 watcher/restart 逻辑。
 type RegistryServer struct {
 	pb.UnimplementedPluginRegistryServer
-	mu     sync.RWMutex
-	plugins map[string]*RegisteredPlugin // key: instance_id
-	byName map[string]string            // key: pluginKey(owner, name) → instance_id
-	nextID atomic.Int64
+	mu           sync.RWMutex
+	closed       bool // Close() 置位；置位后 Register/隧道钩子拒绝新工作
+	plugins      map[string]*RegisteredPlugin // key: instance_id
+	byName       map[string]string            // key: pluginKey(owner, name) → instance_id
+	nextID       atomic.Int64
 	heartbeatSec int32
 
 	// tunnelHub 处理 PluginRegistry.Connect 反向隧道流（见 tunnel.go）。
@@ -102,8 +103,11 @@ type RegistryServer struct {
 	// 隧道建流/断开钩子回调 bindTunnelClient / tunnelDisconnected 完成绑定与下线。
 	tunnelHub *TunnelHub
 	// tunnelPending 记录「Connect 已建立但尚未绑定到任何 tunnel 注册」的
-	// 隧道客户端，按 owner 分桶、FIFO。见 Register 处的绑定时序说明。
+	// 隧道客户端，按 owner 分桶、FIFO（与 tunnelAwaiting 按到达顺序一一配对）。
 	tunnelPending map[string][]pb.DecoderClient
+	// tunnelAwaiting 记录「已 tunnel=true 注册但尚未绑定隧道」的实例 ID，
+	// 按 owner 分桶、FIFO；与 tunnelPending 保证 Connect↔Register 按到达顺序配对。
+	tunnelAwaiting map[string][]string
 
 	// 事件总线：插件注册/注销/上下线时向订阅者推送 PluginEvent。
 	// 订阅者通道带缓冲，emit 非阻塞（订阅者处理不过来则丢弃，避免阻塞注册表主路径）。
@@ -119,11 +123,12 @@ func NewRegistryServer(heartbeatSec int32) *RegistryServer {
 		heartbeatSec = 10
 	}
 	s := &RegistryServer{
-		plugins:       map[string]*RegisteredPlugin{},
-		byName:        map[string]string{},
-		heartbeatSec:  heartbeatSec,
-		listeners:     map[int64]chan PluginEvent{},
-		tunnelPending: map[string][]pb.DecoderClient{},
+		plugins:        map[string]*RegisteredPlugin{},
+		byName:         map[string]string{},
+		heartbeatSec:   heartbeatSec,
+		listeners:      map[int64]chan PluginEvent{},
+		tunnelPending:  map[string][]pb.DecoderClient{},
+		tunnelAwaiting: map[string][]string{},
 	}
 	// Connect 反向隧道：owner 从流上下文解析（gRPC auth 拦截器注入 Principal；
 	// 未接入认证时 OwnerFrom 返回 ""，即匿名/本地语义）。
@@ -138,6 +143,8 @@ func NewRegistryServer(heartbeatSec int32) *RegistryServer {
 // pluginKey 生成注册表 byName 的内部键。
 // owner 为空（匿名/本地单机）时键就是裸 manifest name，行为与改造前一致；
 // 非空 owner 的键为 "owner/name"，使不同属主的同名插件互不覆盖、各自路由。
+// 注意：owner 内含 "/" 会使键产生歧义——owner 由认证体系（token→Principal）
+// 生成、不来自用户自由输入，约定 owner 不得包含 "/"；manifest name 同理。
 func pluginKey(owner, name string) string {
 	if owner == "" {
 		return name
@@ -145,19 +152,16 @@ func pluginKey(owner, name string) string {
 	return owner + "/" + name
 }
 
-// resolvePluginKey 把调用方给的 name 解析成 byName 键。
-// name 已含 "/" 时按完整键查找；否则先尝试 owner 作用域键，再退化裸 name
+// pluginKeyCandidates 返回按优先级排列的候选 byName 键（纯函数，不触碰共享状态）。
+// name 已含 "/" 时唯一候选为完整键；否则先 owner 作用域键、再退化裸 name
 // （使有主调用方仍能看到匿名注册的本地/系统插件）。
-// 单 owner（或匿名）语境下解析结果与改造前的 FindByName 完全一致。
-func (s *RegistryServer) resolvePluginKey(owner, name string) string {
+// 单 owner（或匿名）语境下候选序列与改造前的 FindByName 语义一致。
+// 候选键的最终校验（存在性 + 属主隔离）在持锁的查找路径内完成。
+func pluginKeyCandidates(owner, name string) []string {
 	if strings.Contains(name, "/") || owner == "" {
-		return name
+		return []string{name}
 	}
-	key := pluginKey(owner, name)
-	if _, ok := s.byName[key]; ok {
-		return key
-	}
-	return name
+	return []string{pluginKey(owner, name), name}
 }
 
 // Subscribe 订阅插件注册表状态变化事件。
@@ -269,6 +273,10 @@ func (s *RegistryServer) Register(ctx context.Context, req *pb.RegisterRequest) 
 	nameKey := pluginKey(owner, m.Name)
 	bound := false
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("registry is closed")
+	}
 	// 若同名插件已注册（同 owner 作用域内），关闭旧连接（崩溃后重启场景）
 	if oldID, ok := s.byName[nameKey]; ok {
 		if old, ok := s.plugins[oldID]; ok {
@@ -276,13 +284,21 @@ func (s *RegistryServer) Register(ctx context.Context, req *pb.RegisterRequest) 
 				_ = old.Conn.Close()
 			}
 			delete(s.plugins, oldID)
+			removeAwaitingLocked(s, owner, oldID)
 		}
 	}
 	s.plugins[instanceID] = rp
 	s.byName[nameKey] = instanceID
+	boundID := ""
+	boundName := ""
 	if tunnel {
-		// 尝试立即绑定该 owner 的 pending 隧道（Connect 先到的场景）
-		bound = s.bindPendingTunnelLocked(owner, rp)
+		// 入 awaiting FIFO；若该 owner 已有 pending 隧道（Connect 先到），
+		// 按到达顺序配对绑定（可能绑到更早 await 的实例，见 bindNextTunnelLocked）。
+		s.tunnelAwaiting[owner] = append(s.tunnelAwaiting[owner], instanceID)
+		if id, name, ok := s.bindNextTunnelLocked(owner); ok {
+			bound = id == instanceID
+			boundID, boundName = id, name
+		}
 	}
 	s.mu.Unlock()
 
@@ -299,8 +315,8 @@ func (s *RegistryServer) Register(ctx context.Context, req *pb.RegisterRequest) 
 	if bound {
 		s.emit(PluginEvent{
 			Type:       PluginEventOnline,
-			InstanceID: instanceID,
-			Name:       m.Name,
+			InstanceID: boundID,
+			Name:       boundName,
 			Online:     true,
 			Timestamp:  time.Now(),
 		})
@@ -338,10 +354,16 @@ func (s *RegistryServer) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest
 		return nil, fmt.Errorf("unknown instance_id: %s", req.InstanceId)
 	}
 	wasOnline := rp.Online.Load()
-	rp.LastHeartbeat = time.Now()
-	rp.Online.Store(true)
 	name := rp.Manifest.Name
 	instanceID := req.InstanceId
+	if rp.Tunnel {
+		// 隧道插件的存活跟随 Connect 流：忽略心跳，避免断开的隧道实例
+		// 被残留心跳「复活」回在线状态。
+		s.mu.Unlock()
+		return &pb.HeartbeatResponse{}, nil
+	}
+	rp.LastHeartbeat = time.Now()
+	rp.Online.Store(true)
 	s.mu.Unlock()
 
 	if !wasOnline {
@@ -372,6 +394,7 @@ func (s *RegistryServer) Deregister(ctx context.Context, req *pb.DeregisterReque
 	}
 	delete(s.plugins, instanceID)
 	delete(s.byName, pluginKey(rp.Owner, name))
+	removeAwaitingLocked(s, rp.Owner, instanceID)
 	s.mu.Unlock()
 
 	slog.Info("plugin deregistered", "instance_id", instanceID, "name", name)
@@ -389,14 +412,41 @@ func (s *RegistryServer) Deregister(ctx context.Context, req *pb.DeregisterReque
 
 // CheckOffline 扫描注册表，将心跳超时的插件标记下线。
 // 应由外部定时调用（如每秒）。
+// 隧道插件不参与心跳超时（无心跳，存活跟随 Connect 流），但：
+//   - 已绑定的隧道插件若其 Connect 会话已关闭（断开钩子丢失的兜底）→ 判离线；
+//   - 一直未绑定隧道的注册（插件崩溃在 Connect 前/从未 Connect）超过
+//     2×timeout 宽限 → 从注册表移除（SDK 重启后会重新 Register）。
 func (s *RegistryServer) CheckOffline(timeout time.Duration) {
 	s.mu.Lock()
 	now := time.Now()
 	var transitions []PluginEvent
+	var reaped []PluginEvent
 	for id, rp := range s.plugins {
-		// 隧道插件的存活跟随 Connect 流（tunnelDisconnected 处理下线），
-		// 不参与心跳超时判定——隧道模式没有心跳，按超时判会误杀。
 		if rp.Tunnel {
+			// 兜底：断开钩子丢失时，检测已死 Connect 会话并判离线
+			if rp.Client != nil && rp.Online.Load() && tunnelClientClosed(rp.Client) {
+				rp.Online.Store(false)
+				transitions = append(transitions, PluginEvent{
+					Type:       PluginEventOffline,
+					InstanceID: id,
+					Name:       rp.Manifest.Name,
+					Online:     false,
+					Timestamp:  now,
+				})
+			}
+			// 从未绑定的注册超过宽限期则回收
+			if rp.Client == nil && now.Sub(rp.LastHeartbeat) > 2*timeout {
+				delete(s.plugins, id)
+				delete(s.byName, pluginKey(rp.Owner, rp.Manifest.Name))
+				removeAwaitingLocked(s, rp.Owner, id)
+				reaped = append(reaped, PluginEvent{
+					Type:       PluginEventDeregister,
+					InstanceID: id,
+					Name:       rp.Manifest.Name,
+					Online:     false,
+					Timestamp:  now,
+				})
+			}
 			continue
 		}
 		if now.Sub(rp.LastHeartbeat) > timeout && rp.Online.Load() {
@@ -414,6 +464,10 @@ func (s *RegistryServer) CheckOffline(timeout time.Duration) {
 
 	for _, ev := range transitions {
 		slog.Warn("plugin heartbeat timeout, marking offline", "instance_id", ev.InstanceID, "name", ev.Name)
+		s.emit(ev)
+	}
+	for _, ev := range reaped {
+		slog.Warn("unbound tunnel registration reaped", "instance_id", ev.InstanceID, "name", ev.Name)
 		s.emit(ev)
 	}
 }
@@ -468,7 +522,7 @@ func (s *RegistryServer) FindFor(owner, protocolHint string) (pb.DecoderClient, 
 // 返回 DecoderClient、schema registry 和是否找到。插件离线或不存在时返回 nil, nil, false。
 // 等价于 FindByNameFor("", name)：键为裸 name，仅匹配匿名注册——与改造前行为一致。
 func (s *RegistryServer) FindByName(name string) (pb.DecoderClient, *schema.Registry, bool) {
-	return s.findByKey("", name)
+	return s.findByKey("", []string{name})
 }
 
 // FindByNameFor 是 owner 作用域版的 FindByName：
@@ -478,27 +532,31 @@ func (s *RegistryServer) FindByName(name string) (pb.DecoderClient, *schema.Regi
 // owner 为空时只按裸 name 查（匿名/本地语境，行为与改造前完全一致）。
 // 解析顺序：先名精确、后退化——调用方（capture_task）的顺序由调用方保持。
 func (s *RegistryServer) FindByNameFor(owner, name string) (pb.DecoderClient, *schema.Registry, bool) {
-	return s.findByKey(owner, s.resolvePluginKey(owner, name))
+	return s.findByKey(owner, pluginKeyCandidates(owner, name))
 }
 
-// findByKey 按 byName 键查找在线插件；隧道插件绑定前（Client nil）不可见。
-// callerOwner 用于隔离校验：即使按完整键（owner/name）寻址，也只能访问
-// 自己的或匿名（系统）的插件。
-func (s *RegistryServer) findByKey(callerOwner, key string) (pb.DecoderClient, *schema.Registry, bool) {
+// findByKey 依序尝试候选键查找在线插件（全部候选检查在 RLock 内完成，
+// 避免与 Register/Deregister 的 map 写并发）；隧道插件绑定前（Client nil）
+// 不可见。callerOwner 用于隔离校验：即使按完整键（owner/name）寻址，
+// 也只能访问自己的或匿名（系统）的插件。
+func (s *RegistryServer) findByKey(callerOwner string, keys []string) (pb.DecoderClient, *schema.Registry, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	id, ok := s.byName[key]
-	if !ok {
-		return nil, nil, false
+	for _, key := range keys {
+		id, ok := s.byName[key]
+		if !ok {
+			continue
+		}
+		rp, ok := s.plugins[id]
+		if !ok || !rp.Online.Load() || rp.Client == nil {
+			return nil, nil, false
+		}
+		if rp.Owner != "" && rp.Owner != callerOwner {
+			return nil, nil, false
+		}
+		return rp.Client, rp.SchemaRegistry(), true
 	}
-	rp, ok := s.plugins[id]
-	if !ok || !rp.Online.Load() || rp.Client == nil {
-		return nil, nil, false
-	}
-	if rp.Owner != "" && rp.Owner != callerOwner {
-		return nil, nil, false
-	}
-	return rp.Client, rp.SchemaRegistry(), true
+	return nil, nil, false
 }
 
 func (s *RegistryServer) GetPluginManifest(name string) ([]byte, error) {
@@ -506,23 +564,25 @@ func (s *RegistryServer) GetPluginManifest(name string) ([]byte, error) {
 }
 
 // GetPluginManifestFor 是 owner 作用域版的 GetPluginManifest，
-// 键解析规则同 FindByNameFor。
+// 候选键解析与隔离校验同 findByKey（锁内完成）。
 func (s *RegistryServer) GetPluginManifestFor(owner, name string) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	key := s.resolvePluginKey(owner, name)
-	ids, ok := s.byName[key]
-	if !ok {
-		return nil, fmt.Errorf("plugin %q not found", name)
+	for _, key := range pluginKeyCandidates(owner, name) {
+		ids, ok := s.byName[key]
+		if !ok {
+			continue
+		}
+		rp, ok := s.plugins[ids]
+		if !ok {
+			return nil, fmt.Errorf("plugin %q instance not found", name)
+		}
+		if rp.Owner != "" && rp.Owner != owner {
+			return nil, fmt.Errorf("plugin %q not found", name)
+		}
+		return yaml.Marshal(rp.Manifest)
 	}
-	rp, ok := s.plugins[ids]
-	if !ok {
-		return nil, fmt.Errorf("plugin %q instance not found", name)
-	}
-	if rp.Owner != "" && rp.Owner != owner {
-		return nil, fmt.Errorf("plugin %q not found", name)
-	}
-	return yaml.Marshal(rp.Manifest)
+	return nil, fmt.Errorf("plugin %q not found", name)
 }
 
 // NameByClient 返回给定 DecoderClient 对应的插件 manifest name。
@@ -607,10 +667,13 @@ func (s *RegistryServer) WatchOffline(timeout time.Duration) context.CancelFunc 
 	return cancel
 }
 
-// Close 关闭所有插件连接。
+// Close 关闭所有插件连接。置位 closed 后，隧道钩子不再绑定/清理
+// （防止 Close 之后迟到的 Connect 钩子重新填充 tunnelPending），
+// Register 也拒绝新注册。
 func (s *RegistryServer) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.closed = true
 	for id, rp := range s.plugins {
 		if rp.Conn != nil {
 			_ = rp.Conn.Close()
@@ -619,6 +682,7 @@ func (s *RegistryServer) Close() error {
 	}
 	s.byName = map[string]string{}
 	s.tunnelPending = map[string][]pb.DecoderClient{}
+	s.tunnelAwaiting = map[string][]string{}
 	return nil
 }
 
@@ -626,125 +690,15 @@ func (s *RegistryServer) Close() error {
 // TunnelHub（见 tunnel.go）。隧道建流/断开钩子回调 RegistryServer 的
 // bindTunnelClient / tunnelDisconnected 完成「隧道 ↔ tunnel 注册」的绑定与下线。
 func (s *RegistryServer) Connect(stream pb.PluginRegistry_ConnectServer) error {
+	s.mu.RLock()
+	closed := s.closed
+	s.mu.RUnlock()
+	if closed {
+		return fmt.Errorf("registry is closed")
+	}
 	return s.tunnelHub.Connect(stream)
 }
 
-// bindPendingTunnelLocked 在持有 s.mu 时把 owner 的 FIFO pending 隧道 client
-// 绑定到等待中的实例 rp；无可绑定 client 时返回 false。
-func (s *RegistryServer) bindPendingTunnelLocked(owner string, rp *RegisteredPlugin) bool {
-	pending := s.tunnelPending[owner]
-	for i, c := range pending {
-		if tunnelClientClosed(c) {
-			continue
-		}
-		rp.Client = c
-		rp.LastHeartbeat = time.Now()
-		rp.Online.Store(true)
-		s.tunnelPending[owner] = append(pending[:i], pending[i+1:]...)
-		return true
-	}
-	return false
-}
-
-// bindTunnelClient 是 TunnelHub 的建流钩子：owner 从流上下文解析（auth.OwnerFrom）。
-// 优先绑定该 owner 下「已 Register(tunnel=true) 但等待隧道」的实例（Register 先到）；
-// 否则把 client 挂进 tunnelPending[owner] FIFO，等 Register 到达时认领（Connect 先到）。
-// 绑定成功时实例置在线并推送 online 事件。
-func (s *RegistryServer) bindTunnelClient(owner string, client pb.DecoderClient) {
-	var bound *RegisteredPlugin
-	var boundID string
-	s.mu.Lock()
-	// 先清理该 owner 下已死亡的 pending client（对应 Connect 已断但未绑定）
-	pending := s.tunnelPending[owner][:0]
-	for _, c := range s.tunnelPending[owner] {
-		if !tunnelClientClosed(c) {
-			pending = append(pending, c)
-		}
-	}
-	s.tunnelPending[owner] = pending
-
-	for id, rp := range s.plugins {
-		if rp.Tunnel && rp.Owner == owner && rp.Client == nil {
-			rp.Client = client
-			rp.LastHeartbeat = time.Now()
-			rp.Online.Store(true)
-			bound = rp
-			boundID = id
-			break
-		}
-	}
-	if bound == nil {
-		s.tunnelPending[owner] = append(s.tunnelPending[owner], client)
-	}
-	s.mu.Unlock()
-
-	if bound != nil {
-		slog.Info("tunnel bound to registered plugin", "owner", owner, "instance_id", boundID,
-			"name", bound.Manifest.Name)
-		s.emit(PluginEvent{
-			Type:       PluginEventOnline,
-			InstanceID: boundID,
-			Name:       bound.Manifest.Name,
-			Online:     true,
-			Timestamp:  time.Now(),
-		})
-	} else {
-		slog.Info("tunnel connect pending registration", "owner", owner)
-	}
-}
-
-// tunnelDisconnected 是 TunnelHub 的断开钩子：把该 owner 下绑定到此条
-// （已死）Connect 会话的隧道插件标记离线并推送 offline 事件，同时清理
-// pending 中已死的 client。插件重连后会重新 Register（替换旧实例）并绑定新隧道。
-// 说明：TunnelHub 的断开钩子只带 owner 不带会话句柄，这里用「绑定 client 的
-// 会话是否已关闭」来区分同 owner 多条隧道里真正断开的那条。
-func (s *RegistryServer) tunnelDisconnected(owner string) {
-	type offline struct {
-		id, name string
-	}
-	var offs []offline
-	s.mu.Lock()
-	for id, rp := range s.plugins {
-		if rp.Tunnel && rp.Owner == owner && rp.Client != nil && tunnelClientClosed(rp.Client) && rp.Online.Load() {
-			rp.Online.Store(false)
-			offs = append(offs, offline{id: id, name: rp.Manifest.Name})
-		}
-	}
-	pending := s.tunnelPending[owner][:0]
-	for _, c := range s.tunnelPending[owner] {
-		if !tunnelClientClosed(c) {
-			pending = append(pending, c)
-		}
-	}
-	s.tunnelPending[owner] = pending
-	s.mu.Unlock()
-
-	for _, o := range offs {
-		slog.Warn("tunnel disconnected, marking plugin offline", "owner", owner, "instance_id", o.id, "name", o.name)
-		s.emit(PluginEvent{
-			Type:       PluginEventOffline,
-			InstanceID: o.id,
-			Name:       o.name,
-			Online:     false,
-			Timestamp:  time.Now(),
-		})
-	}
-}
-
-// tunnelClientClosed 判断隧道 client 背后的 Connect 会话是否已关闭。
-// manager.go 与 tunnel.go 同包，这里直接检查 tunnelSession 的 closed 通道。
-func tunnelClientClosed(c pb.DecoderClient) bool {
-	tc, ok := c.(*tunnelClient)
-	if !ok {
-		return false
-	}
-	select {
-	case <-tc.sess.closed:
-		return true
-	default:
-		return false
-	}
-}
 
 // dialTarget 解析插件上报的 Decode 地址并建立 net.Conn。
 // 支持 host:port（TCP，跨机器）、unix:/path、npipe:\\.\pipe\name、以及裸路径（视为 Unix socket）。

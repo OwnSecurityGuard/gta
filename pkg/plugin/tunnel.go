@@ -523,3 +523,157 @@ func (t *tunnelStreamClient) RecvMsg(m interface{}) error {
 	}
 	return fmt.Errorf("tunnel: RecvMsg unsupported type %T", m)
 }
+
+// ---------- RegistryServer 侧的隧道绑定/下线钩子 ----------
+//
+// 这段胶水放在 tunnel.go（与 manager.go 同包）以保持 manager.go 聚焦注册表本体。
+// 绑定模型（T4，见 RegistryServer.Register 注释）：
+//   - Register(tunnel=true) 与 Connect 是两个独立 RPC，到达顺序不保证；
+//   - 两侧各自入 per-owner FIFO（tunnelAwaiting 放实例 ID、tunnelPending 放
+//     DecoderClient），按到达顺序一一配对（同一插件进程一次 Connect 对应一次
+//     tunnel 注册）；
+//   - 绑定成功实例置在线；断开时只标记「绑定 client 的会话已死」的实例离线
+//     （断开钩子只带 owner，用会话存活状态区分同 owner 的多条隧道）。
+
+// bindNextTunnelLocked 在持有 s.mu 时按 FIFO 取该 owner 最早的 await 实例，
+// 与 pending 队列中最早存活的 client 配对绑定（Register 先到、pending 已有
+// client 时的认领路径）；无可配对项时返回 ok=false（队列保持原样）。
+func (s *RegistryServer) bindNextTunnelLocked(owner string) (id, name string, ok bool) {
+	// 丢弃已死亡的 pending client（对应 Connect 已断但未绑定）
+	pending := pruneTunnelPendingLocked(s.tunnelPending[owner])
+	s.tunnelPending[owner] = pending
+	if len(pending) == 0 {
+		return "", "", false
+	}
+	id, name, ok = bindClientToAwaitingLocked(s, owner, pending[0])
+	if ok {
+		s.tunnelPending[owner] = pending[1:]
+	}
+	return id, name, ok
+}
+
+// bindClientToAwaitingLocked 把给定 client 绑定到 owner awaiting FIFO 最早的
+// 未绑定实例（Connect 钩子路径：client 尚未入 pending 队列）。绑定时清理
+// FIFO 中已被回收/替换/已绑定的死 ID。无可绑定实例时返回 ok=false（client
+// 由调用方挂入 pending 队列）。
+func bindClientToAwaitingLocked(s *RegistryServer, owner string, client pb.DecoderClient) (id, name string, ok bool) {
+	awaiting := s.tunnelAwaiting[owner]
+	for len(awaiting) > 0 {
+		front := awaiting[0]
+		awaiting = awaiting[1:]
+		rp, exists := s.plugins[front]
+		if !exists || rp.Client != nil {
+			continue // 已被回收/替换或已绑定，跳过
+		}
+		s.tunnelAwaiting[owner] = awaiting
+		rp.Client = client
+		rp.LastHeartbeat = time.Now()
+		rp.Online.Store(true)
+		slog.Info("tunnel bound to registered plugin", "owner", owner, "instance_id", front, "name", rp.Manifest.Name)
+		return front, rp.Manifest.Name, true
+	}
+	s.tunnelAwaiting[owner] = awaiting
+	return "", "", false
+}
+
+// pruneTunnelPendingLocked 过滤掉 Connect 会话已关闭的 pending client。
+func pruneTunnelPendingLocked(pending []pb.DecoderClient) []pb.DecoderClient {
+	out := pending[:0]
+	for _, c := range pending {
+		if !tunnelClientClosed(c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// removeAwaitingLocked 在持有 s.mu 时把实例 ID 从 owner 的 awaiting FIFO 移除
+// （实例被替换/注销/回收时调用，防止 FIFO 里留死 ID）。
+func removeAwaitingLocked(s *RegistryServer, owner, instanceID string) {
+	awaiting := s.tunnelAwaiting[owner]
+	for i, id := range awaiting {
+		if id == instanceID {
+			s.tunnelAwaiting[owner] = append(awaiting[:i], awaiting[i+1:]...)
+			return
+		}
+	}
+}
+
+// bindTunnelClient 是 TunnelHub 的建流钩子：owner 从流上下文解析（auth.OwnerFrom）。
+// 优先绑定该 owner awaiting FIFO 最早的实例（Register 先到）；否则把 client 挂进
+// tunnelPending[owner] FIFO 等 Register 认领（Connect 先到）。绑定成功推 online 事件。
+// 注册表 Close 后为 no-op（防止迟到的建流钩子重新填充 pending 队列）。
+func (s *RegistryServer) bindTunnelClient(owner string, client pb.DecoderClient) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	boundID, boundName, ok := bindClientToAwaitingLocked(s, owner, client)
+	if !ok {
+		// 无等待实例：清理死亡 client 后挂入 pending 队列等 Register 认领
+		s.tunnelPending[owner] = append(pruneTunnelPendingLocked(s.tunnelPending[owner]), client)
+		slog.Info("tunnel connect pending registration", "owner", owner)
+	}
+	s.mu.Unlock()
+
+	if ok {
+		s.emit(PluginEvent{
+			Type:       PluginEventOnline,
+			InstanceID: boundID,
+			Name:       boundName,
+			Online:     true,
+			Timestamp:  time.Now(),
+		})
+	}
+}
+
+// tunnelDisconnected 是 TunnelHub 的断开钩子：把该 owner 下绑定到此条
+// （已死）Connect 会话的隧道插件标记离线并推送 offline 事件，同时清理
+// pending 中已死的 client。插件重连后会重新 Register（替换旧实例）并绑定新隧道。
+// 说明：TunnelHub 的断开钩子只带 owner 不带会话句柄，这里用「绑定 client 的
+// 会话是否已关闭」来区分同 owner 多条隧道里真正断开的那条。
+// 注册表 Close 后为 no-op。
+func (s *RegistryServer) tunnelDisconnected(owner string) {
+	type offline struct {
+		id, name string
+	}
+	var offs []offline
+	s.mu.Lock()
+	if !s.closed {
+		for id, rp := range s.plugins {
+			if rp.Tunnel && rp.Owner == owner && rp.Client != nil && tunnelClientClosed(rp.Client) && rp.Online.Load() {
+				rp.Online.Store(false)
+				offs = append(offs, offline{id: id, name: rp.Manifest.Name})
+			}
+		}
+		s.tunnelPending[owner] = pruneTunnelPendingLocked(s.tunnelPending[owner])
+	}
+	s.mu.Unlock()
+
+	for _, o := range offs {
+		slog.Warn("tunnel disconnected, marking plugin offline", "owner", owner, "instance_id", o.id, "name", o.name)
+		s.emit(PluginEvent{
+			Type:       PluginEventOffline,
+			InstanceID: o.id,
+			Name:       o.name,
+			Online:     false,
+			Timestamp:  time.Now(),
+		})
+	}
+}
+
+// tunnelClientClosed 判断隧道 client 背后的 Connect 会话是否已关闭。
+// tunnelClient 与 tunnelSession 都在本包，这里直接检查 closed 通道。
+func tunnelClientClosed(c pb.DecoderClient) bool {
+	tc, ok := c.(*tunnelClient)
+	if !ok {
+		return false
+	}
+	select {
+	case <-tc.sess.closed:
+		return true
+	default:
+		return false
+	}
+}

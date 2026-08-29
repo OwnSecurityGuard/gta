@@ -242,10 +242,9 @@ export function PluginPanel() {
             onDeregister={() => setConfirmTarget(p)}
             deregistering={deregister.isPending && confirmTarget?.instance_id === p.instance_id}
             onTest={() => handleTestClick(p.name)}
-            // "local" 对应后端 pkg/auth.AnonymousOwner（匿名模式系统插件命名空间）：
-            // 匿名模式下单机用户不需要归属徽标，保持与团队化之前 UI 一致，故 owner 为 local/缺失时不显示。
+            // 匿名模式插件 owner 为空串（pipeline 仅在 token 模式挂鉴权拦截器），天然无徽标；token 模式下 own 显示「我」、他人显示用户名。
             ownerBadge={
-              p.owner && p.owner !== "local"
+              p.owner
                 ? identity && p.owner === identity.owner
                   ? "我"
                   : p.owner
@@ -891,7 +890,7 @@ function PluginCard({
           )}
           <Badge
             variant={plugin.online ? "outline" : "secondary"}
-            className={plugin.online ? "border-success/30 bg-success/10 text-success" : ""}
+            className={`shrink-0 ${plugin.online ? "border-success/30 bg-success/10 text-success" : ""}`}
           >
             {plugin.online ? (
               <>

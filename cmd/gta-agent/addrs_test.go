@@ -15,6 +15,10 @@ func TestDeriveAddrs(t *testing.T) {
 		{"overrides win", "pipe.example.com", "r:1", "i:2", "r:1", "i:2", false},
 		{"no input errors", "", "", "", "", "", true},
 		{"bad port", "host:abc", "", "", "", "", true},
+		{"port 65535 leaves no ingest port", "host:65535", "", "", "", "", true},
+		{"port 0 invalid", "host:0", "", "", "", "", true},
+		{"garbage with colons errors", "a:b:c", "", "", "", "", true},
+		{"bare ipv6 host", "::1", "", "", "[::1]:9091", "[::1]:9092", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

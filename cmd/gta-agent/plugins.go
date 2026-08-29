@@ -43,11 +43,21 @@ type pluginSupervisor struct {
 	dir          string
 	registryAddr string
 	token        string
-	bk           *backoff
 
 	mu   sync.Mutex
 	pids map[string]int // plugin name -> 当前 pid（0 表示未运行）
 }
+
+// stableRunThreshold 是插件进程连续存活多久后视为稳定运行，
+// 下次崩溃前重启退避归位（与 ingest 重连同策略）。
+const stableRunThreshold = 30 * time.Second
+
+// pluginLogMaxBytes 是单个插件日志文件的大小上限，超过后下次启动从头截断。
+const pluginLogMaxBytes = 8 << 20
+
+// gracefulStopTimeout 是插件进程优雅退出（SIGINT/Interrupt）的等待时长，
+// 超时后强杀（Kill）。
+const gracefulStopTimeout = 3 * time.Second
 
 func (s *pluginSupervisor) runningCount() int {
 	s.mu.Lock()
@@ -70,8 +80,9 @@ func (s *pluginSupervisor) setPID(name string, pid int) {
 	s.pids[name] = pid
 }
 
-// run 阻塞直到 ctx 取消。返回发现并拉起的插件数。
-func (s *pluginSupervisor) run(ctx context.Context) int {
+// run 发现插件并为每个插件启动一个 supervise goroutine；
+// 各 goroutine 的收尾通过 wg 跟踪（agent 停机时 join）。返回发现的插件数。
+func (s *pluginSupervisor) run(ctx context.Context, wg *sync.WaitGroup) int {
 	plugins, err := plugindev.ListPlugins(s.dir)
 	if err != nil {
 		slog.Warn("plugin discovery failed", "dir", s.dir, "error", err)
@@ -83,7 +94,11 @@ func (s *pluginSupervisor) run(ctx context.Context) int {
 	}
 	for _, p := range plugins {
 		slog.Info("hosting local plugin", "name", p.Name, "binary", p.Binary)
-		go s.supervise(ctx, p)
+		wg.Add(1)
+		go func(p *plugindev.DiscoveredPlugin) {
+			defer wg.Done()
+			s.supervise(ctx, p)
+		}(p)
 	}
 	return len(plugins)
 }
@@ -92,9 +107,15 @@ func (s *pluginSupervisor) run(ctx context.Context) int {
 func (s *pluginSupervisor) supervise(ctx context.Context, p *plugindev.DiscoveredPlugin) {
 	bk := newBackoff()
 	for ctx.Err() == nil {
+		started := time.Now()
 		startErr := s.startAndWait(ctx, p)
 		if ctx.Err() != nil {
 			return
+		}
+		// 上一次运行足够长说明稳定过，退避归位（避免长期运行后
+		// 偶发崩溃也要承受 30s 重启延迟）。
+		if time.Since(started) > stableRunThreshold {
+			bk.Reset()
 		}
 		wait := bk.Next()
 		slog.Warn("plugin exited, restarting", "plugin", p.Name, "error", startErr, "backoff", wait)
@@ -106,15 +127,27 @@ func (s *pluginSupervisor) supervise(ctx context.Context, p *plugindev.Discovere
 	}
 }
 
-// startAndWait 启动一次插件进程并阻塞等待其退出；返回启动/退出错误（可为 nil）。
-// stdout/stderr 追加写入 <dir>/<name>.agent.log。
-func (s *pluginSupervisor) startAndWait(ctx context.Context, p *plugindev.DiscoveredPlugin) error {
+// openPluginLog 打开插件日志文件（追加写）；超过大小上限时从头截断，
+// 避免无限增长。
+func (s *pluginSupervisor) openPluginLog(p *plugindev.DiscoveredPlugin) (*os.File, string) {
 	logPath := filepath.Join(p.Dir, p.Name+".agent.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		logFile = nil
-		slog.Warn("cannot open plugin log file, output will be discarded", "path", logPath, "error", err)
+	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > pluginLogMaxBytes {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+		slog.Info("plugin log file exceeds size cap, truncating", "path", logPath, "size", fi.Size())
 	}
+	logFile, err := os.OpenFile(logPath, flags, 0o644)
+	if err != nil {
+		slog.Warn("cannot open plugin log file, output will be discarded", "path", logPath, "error", err)
+		return nil, logPath
+	}
+	return logFile, logPath
+}
+
+// startAndWait 启动一次插件进程并阻塞等待其退出；返回启动/退出错误（可为 nil）。
+// stdout/stderr 写入 <dir>/<name>.agent.log（超上限时截断）。
+func (s *pluginSupervisor) startAndWait(ctx context.Context, p *plugindev.DiscoveredPlugin) error {
+	logFile, logPath := s.openPluginLog(p)
 
 	cmd := exec.Command(p.Binary)
 	cmd.Dir = p.Dir
@@ -141,11 +174,8 @@ func (s *pluginSupervisor) startAndWait(ctx context.Context, p *plugindev.Discov
 	select {
 	case waitErr = <-waitCh:
 	case <-ctx.Done():
-		// agent 停机：先杀插件再等收尾。
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		waitErr = <-waitCh
+		// agent 停机：先尝试优雅中断，超时强杀，再等收尾，避免孤儿进程。
+		waitErr = stopPlugin(cmd, waitCh)
 	}
 	if logFile != nil {
 		_ = logFile.Close()
@@ -161,4 +191,21 @@ func (s *pluginSupervisor) startAndWait(ctx context.Context, p *plugindev.Discov
 		return waitErr // 正常崩溃路径，交给 supervise 重启
 	}
 	return waitErr
+}
+
+// stopPlugin 停机路径：向插件进程发送 Interrupt（Windows 不支持时静默退回
+// 强杀），等待 gracefulStopTimeout 后仍存活则 Kill；返回 Wait 结果
+// （waitCh 恰好被消费一次）。
+func stopPlugin(cmd *exec.Cmd, waitCh <-chan error) error {
+	if cmd.Process != nil {
+		if err := cmd.Process.Signal(os.Interrupt); err == nil {
+			select {
+			case err := <-waitCh:
+				return err
+			case <-time.After(gracefulStopTimeout):
+			}
+		}
+		_ = cmd.Process.Kill()
+	}
+	return <-waitCh
 }

@@ -19,6 +19,6 @@ type captureConfig struct {
 
 // runCapture 在未带 -tags pcap 编译时不可用：返回明确错误。
 // 插件托管不受影响。
-func runCapture(ctx context.Context, cfg captureConfig, out chan<- *proto.RawPacket) error {
+func runCapture(ctx context.Context, cfg captureConfig, out chan<- *proto.RawPacket, ended chan<- error) error {
 	return errors.New("capture unavailable: this binary was built without -tags pcap; rebuild with `go build -tags pcap ./cmd/gta-agent`")
 }

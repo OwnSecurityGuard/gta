@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -93,7 +94,8 @@ func TestSpawnEnvAnonymous(t *testing.T) {
 func startSupervisor(t *testing.T, sup *pluginSupervisor, expect int) context.CancelFunc {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	if n := sup.run(ctx); n != expect {
+	var wg sync.WaitGroup
+	if n := sup.run(ctx, &wg); n != expect {
 		cancel()
 		t.Fatalf("expected %d plugins, got %d", expect, n)
 	}
@@ -114,7 +116,7 @@ func TestSpawnEnvPropagationFull(t *testing.T) {
 	outPath := filepath.Join(t.TempDir(), "env.txt")
 	buildFakePlugin(t, dir, "demo", outPath, "stay")
 
-	sup := &pluginSupervisor{dir: dir, registryAddr: "10.1.2.3:9091", token: "gta_test", bk: newBackoff()}
+	sup := &pluginSupervisor{dir: dir, registryAddr: "10.1.2.3:9091", token: "gta_test"}
 	stop := startSupervisor(t, sup, 1)
 	defer stop()
 
@@ -135,7 +137,7 @@ func TestSuperviseRestartsAfterCrash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sup := &pluginSupervisor{dir: dir, registryAddr: "h:9091", token: "", bk: newBackoff()}
+	sup := &pluginSupervisor{dir: dir, registryAddr: "h:9091", token: ""}
 	stop := startSupervisor(t, sup, 1)
 	defer stop()
 
@@ -152,7 +154,7 @@ func TestShutdownStopsPlugin(t *testing.T) {
 	outPath := filepath.Join(t.TempDir(), "env.txt")
 	buildFakePlugin(t, dir, "sticky", outPath, "stay")
 
-	sup := &pluginSupervisor{dir: dir, registryAddr: "h:9091", token: "", bk: newBackoff()}
+	sup := &pluginSupervisor{dir: dir, registryAddr: "h:9091", token: ""}
 	stop := startSupervisor(t, sup, 1)
 	// 等插件真正起来再停机。
 	waitForFileContent(t, outPath, "registry=", 10*time.Second)

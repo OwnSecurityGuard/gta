@@ -51,8 +51,11 @@ type captureTask struct {
 
 	// 依赖（注入，不持有所有权）
 	registry *plugin.RegistryServer
-	rules    []*analyze.CompiledRule
-	logger   *slog.Logger // 带 session_id 等上下文字段的 logger
+	// owner 是会话发起者的属主（来自 StartSession RPC 的 auth 上下文；
+	// 未接入认证时为空串 = 匿名/本地语义），用于 owner 作用域的插件路由。
+	owner  string
+	rules  []*analyze.CompiledRule
+	logger *slog.Logger // 带 session_id 等上下文字段的 logger
 
 	// Protocol Behavior Resolver（可选）：protocolCfg 非空时在 Start 时构建。
 	protocolCfg     *protocolconfig.File
@@ -447,22 +450,25 @@ func (t *captureTask) SetSessionPlugin(ctx context.Context, plugin string) (stri
 
 // resolveDecoderClient 解析本次会话应使用的 DecoderClient 与 schema registry。
 // 路由规则（GAP 2 修复）：
-//   - 指定插件名（t.plugin != ""）：优先 FindByName 精确路由，名查不到时退化按协议 hint（Find），
+//   - 指定插件名（t.plugin != ""）：优先 FindByNameFor 精确路由（owner 作用域，
+//     t.owner 为空时与旧 FindByName 行为一致），名查不到时退化按协议 hint（FindFor），
 //     使 A 项目会话绑 A 插件、B 项目会话绑 B 插件，多项目并行互不干扰。
 //   - 未指定插件名：沿用原行为，按 "tcp" 协议 hint 取第一个在线插件（兼容默认抓包场景）。
+//
+// 解析顺序（名精确 → 协议退化）保持不变。
 func (t *captureTask) resolveDecoderClient() (pb.DecoderClient, *schema.Registry, bool) {
 	plugin := t.getPlugin()
 	if plugin != "" {
-		if c, sr, ok := t.registry.FindByName(plugin); ok {
+		if c, sr, ok := t.registry.FindByNameFor(t.owner, plugin); ok {
 			return c, sr, true
 		}
-		if c, sr, ok := t.registry.Find(plugin); ok {
+		if c, sr, ok := t.registry.FindFor(t.owner, plugin); ok {
 			// 退化兼容：把 plugin 字段当作协议 hint
 			return c, sr, true
 		}
 		return nil, nil, false
 	}
-	return t.registry.Find("tcp")
+	return t.registry.FindFor(t.owner, "tcp")
 }
 
 // decoderAction 给定一次 registry.Find 的结果与当前 dispatcher 状态，

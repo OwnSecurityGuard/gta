@@ -12,6 +12,7 @@ import (
 	"github.com/google/gopacket/pcap"
 
 	"gta/pkg/analyze"
+	"gta/pkg/auth"
 	"gta/pkg/capture"
 	"gta/pkg/config"
 	"gta/pkg/internalipc"
@@ -171,6 +172,7 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 		start:       startTime,
 		reresolve:   make(chan struct{}, 1),
 		registry:    s.registry,
+		owner:       auth.OwnerFrom(ctx),
 		rules:       s.rules,
 		protocolCfg: s.protocolCfg,
 		logger:      s.logger.With("session_id", sessionID),

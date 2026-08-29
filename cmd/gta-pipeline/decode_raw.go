@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"time"
 
+	"gta/pkg/auth"
 	"gta/pkg/decode"
 	"gta/pkg/event"
 	"gta/pkg/internalipc/capturecontrol"
@@ -132,9 +133,9 @@ func (s *pipelineService) DecodeRawPackets(ctx context.Context, req capturecontr
 	dbPath := meta.DBPath
 
 	// 3. 检查插件可用：优先按名精确路由（FindByName），退化按协议 hint（Find）。
-	client, schemaReg, ok := s.registry.FindByName(req.Plugin)
+	client, schemaReg, ok := s.registry.FindByNameFor(auth.OwnerFrom(ctx), req.Plugin)
 	if !ok {
-		client, schemaReg, ok = s.registry.Find(req.Plugin)
+		client, schemaReg, ok = s.registry.FindFor(auth.OwnerFrom(ctx), req.Plugin)
 	}
 	if !ok {
 		return capturecontrol.DecodeRawPacketsResult{}, fmt.Errorf("plugin %s not found or not a decoder", req.Plugin)
@@ -276,9 +277,9 @@ func (s *pipelineService) TestPlugin(ctx context.Context, req capturecontrol.Tes
 	dbPath := meta.DBPath
 
 	// 检查插件可用：优先按名精确路由（FindByName），退化按协议 hint（Find）。
-	client, schemaReg, ok := s.registry.FindByName(req.Plugin)
+	client, schemaReg, ok := s.registry.FindByNameFor(auth.OwnerFrom(ctx), req.Plugin)
 	if !ok {
-		client, schemaReg, ok = s.registry.Find(req.Plugin)
+		client, schemaReg, ok = s.registry.FindFor(auth.OwnerFrom(ctx), req.Plugin)
 	}
 	if !ok {
 		return capturecontrol.TestPluginResult{}, fmt.Errorf("plugin %s not found or not a decoder", req.Plugin)

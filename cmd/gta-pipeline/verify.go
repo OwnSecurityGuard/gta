@@ -11,6 +11,7 @@ import (
 	sdkcontract "github.com/OwnSecurityGuard/gta-plugin-sdk/contract"
 	sdkevent "github.com/OwnSecurityGuard/gta-plugin-sdk/event"
 
+	"gta/pkg/auth"
 	"gta/pkg/decode"
 	"gta/pkg/event"
 	"gta/pkg/internalipc/capturecontrol"
@@ -50,9 +51,9 @@ func (s *pipelineService) Verify(ctx context.Context, req capturecontrol.VerifyR
 		return capturecontrol.VerifyResult{}, fmt.Errorf("session %s not found or has no db_path", req.SessionID)
 	}
 
-	client, schemaReg, ok := s.registry.FindByName(req.Plugin)
+	client, schemaReg, ok := s.registry.FindByNameFor(auth.OwnerFrom(ctx), req.Plugin)
 	if !ok {
-		client, schemaReg, ok = s.registry.Find(req.Plugin)
+		client, schemaReg, ok = s.registry.FindFor(auth.OwnerFrom(ctx), req.Plugin)
 	}
 	if !ok {
 		return capturecontrol.VerifyResult{}, fmt.Errorf("plugin %s not found or not a decoder", req.Plugin)
@@ -73,7 +74,7 @@ func (s *pipelineService) Verify(ctx context.Context, req capturecontrol.VerifyR
 	// 语义契约阶段（Semantic Contract v1）：声明期 Check + 运行期逐事件 CheckEvent。
 	// manifest 拿不到时降级为纯传输层校验（不阻断 verify），只记 warn。
 	var manifest *sdk.Manifest
-	if raw, merr := s.registry.GetPluginManifest(req.Plugin); merr == nil && len(raw) > 0 {
+	if raw, merr := s.registry.GetPluginManifestFor(auth.OwnerFrom(ctx), req.Plugin); merr == nil && len(raw) > 0 {
 		if m, perr := plugin.ParseManifest(raw); perr == nil {
 			manifest = m
 		} else {

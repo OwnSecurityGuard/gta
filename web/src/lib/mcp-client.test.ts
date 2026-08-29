@@ -90,6 +90,18 @@ describe("callTool", () => {
     expect(getAuthError()).toBe(true);
   });
 
+  it("保存新 token 后旧凭证的迟到 401 不再置位横幅", async () => {
+    setToken("gta_old");
+    let resolveFetch!: (v: unknown) => void;
+    vi.stubGlobal("fetch", (_url: unknown, _init: unknown) =>
+      new Promise((resolve) => { resolveFetch = resolve; }));
+    const pending = mcpClient.callTool("list_all_sessions");
+    setToken("gta_new"); // 请求在途时用户保存了新 token
+    resolveFetch(jsonResponse({}, 401));
+    await expect(pending).rejects.toBeInstanceOf(AuthError);
+    expect(getAuthError()).toBe(false);
+  });
+
   it("从响应头同步身份回显", async () => {
     vi.stubGlobal("fetch", async () =>
       rpcOk({ ok: true }, { "X-GTA-Owner": "bob", "X-GTA-Admin": "true" }),

@@ -1,5 +1,5 @@
 import type { JsonRpcRequest, JsonRpcResponse, McpToolResult } from "@/types/mcp";
-import { authHeaders, notifyAuthError, setIdentity } from "@/lib/auth";
+import { authHeaders, getToken, notifyAuthError, setIdentity } from "@/lib/auth";
 
 /** 自增 ID 生成器 */
 let nextId = 1;
@@ -62,6 +62,8 @@ export class McpClient {
       },
     };
 
+    // 记下发请求时用的 token：在途期间 token 可能被更换，401 归属判断要用。
+    const usedToken = getToken();
     const response = await fetch(this.baseUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -69,9 +71,12 @@ export class McpClient {
     });
 
     if (response.status === 401) {
-      notifyAuthError();
-      // 凭证已失效，旧身份不可信：立即清掉，等下一次成功响应头重新回显。
-      setIdentity(null);
+      // 在途请求可能来自已更换的旧凭证：仅当 401 属于当前 token 时才置位横幅，
+      // 否则保存新 token 后会被旧请求的迟到 401 重新点亮且无法自愈。
+      if (usedToken === getToken()) {
+        setIdentity(null);
+        notifyAuthError();
+      }
       throw new AuthError();
     }
     if (!response.ok) {
@@ -125,6 +130,8 @@ export class McpClient {
       },
     };
 
+    // 记下发请求时用的 token：在途期间 token 可能被更换，401 归属判断要用。
+    const usedToken = getToken();
     const response = await fetch(this.baseUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -132,9 +139,12 @@ export class McpClient {
     });
 
     if (response.status === 401) {
-      notifyAuthError();
-      // 凭证已失效，旧身份不可信：立即清掉，等下一次成功响应头重新回显。
-      setIdentity(null);
+      // 在途请求可能来自已更换的旧凭证：仅当 401 属于当前 token 时才置位横幅，
+      // 否则保存新 token 后会被旧请求的迟到 401 重新点亮且无法自愈。
+      if (usedToken === getToken()) {
+        setIdentity(null);
+        notifyAuthError();
+      }
       throw new AuthError();
     }
     if (!response.ok) {

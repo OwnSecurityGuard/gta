@@ -16,6 +16,9 @@ import (
 
 	pluginpb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
+	"gta/pkg/auth"
+	"gta/pkg/capture/agent"
+	"gta/pkg/capture/agent/proto"
 	"gta/pkg/config"
 	"gta/pkg/internalipc"
 	"gta/pkg/internalipc/capturecontrol"
@@ -36,6 +39,7 @@ func main() {
 	// 默认走 TCP 端口（:9091 注册, :9888 控制），兼容 Windows / 跨机器。
 	controlAddr := flag.String("control-addr", ":9888", "CaptureControl gRPC 监听地址（默认 :9888）")
 	registryAddr := flag.String("registry-addr", ":9091", "PluginRegistry gRPC 监听地址（默认 :9091）")
+	agentIngestAddr := flag.String("agent-ingest-addr", ":9092", "AgentIngest gRPC 监听地址（gta-agent 推送原始帧入口，默认 :9092；传空字符串禁用）")
 	debug := flag.Bool("debug", false, "enable debug logging")
 	logFormat := flag.String("log-format", "json", "log format: json | text")
 	logFile := flag.String("log-file", "", "log file path (default: <workdir>/logs/gta-pipeline.log)")
@@ -127,6 +131,40 @@ func main() {
 
 	engine := newPipelineService(absWorkDir, controlStore, registry, rules, protocolCfg, *registryAddr)
 
+	// AgentIngest gRPC server：gta-agent 推送本机原始帧的入口（团队协作模式）。
+	// 默认 :9092；-agent-ingest-addr 传空字符串禁用。鉴权复用 pkg/auth：
+	// GTA_AUTH_TOKENS 未配置时为匿名模式，owner 统一为 "local"（auth.AnonymousOwner），
+	// 与本地单机创建的会话归属一致。会话归属校验用 ControlStore 查 sessions.owner，
+	// owner 不匹配的 batch 以 PermissionDenied 拒绝。
+	var agentIngestGrpc *grpc.Server
+	if *agentIngestAddr != "" {
+		authResolver, err := auth.LoadFromEnv()
+		if err != nil {
+			slog.Error("load auth tokens", "error", err)
+			os.Exit(1)
+		}
+		agentHub := agent.NewHub()
+		engine.SetAgentHub(agentHub)
+
+		agentLis, err := internalipc.ListenAddr(*agentIngestAddr)
+		if err != nil {
+			slog.Error("listen agent ingest", "error", err)
+			os.Exit(1)
+		}
+		defer agentLis.Close()
+		agentIngestGrpc = grpc.NewServer(
+			grpc.ChainStreamInterceptor(auth.StreamInterceptor(authResolver)),
+		)
+		proto.RegisterAgentIngestServer(agentIngestGrpc,
+			agent.NewIngestServer(agentHub, controlStoreSessionOwners{store: controlStore}))
+		go func() {
+			if err := agentIngestGrpc.Serve(agentLis); err != nil {
+				slog.Error("serve agent ingest", "error", err)
+			}
+		}()
+		slog.Info("agent ingest listening", "addr", agentLis.Addr())
+	}
+
 	// CaptureControl gRPC server：供 gta-mcp / gta-trace 调用。
 	// 默认 :8088（TCP），可通过 -control-addr 覆盖。
 	var listener net.Listener
@@ -167,6 +205,9 @@ func main() {
 		engine.StopAll(shutdownCtx)
 		grpcSrv.GracefulStop()
 		registryGrpc.GracefulStop()
+		if agentIngestGrpc != nil {
+			agentIngestGrpc.GracefulStop()
+		}
 	}()
 
 	// 插件应使用的 registry 端点，即 -registry-addr 的值（默认 :9091）。
@@ -182,4 +223,18 @@ func main() {
 		slog.Error("serve", "error", err)
 		os.Exit(1)
 	}
+}
+
+// controlStoreSessionOwners 用 ControlStore 实现 agent.SessionOwnerChecker：
+// 查 sessions.owner 做会话归属校验，避免 pkg/capture 反向依赖 pkg/store。
+type controlStoreSessionOwners struct {
+	store *store.ControlStore
+}
+
+func (o controlStoreSessionOwners) SessionOwner(sessionID string) (string, bool) {
+	meta, err := o.store.GetSession(context.Background(), sessionID)
+	if err != nil || meta == nil {
+		return "", false
+	}
+	return meta.Owner, true
 }

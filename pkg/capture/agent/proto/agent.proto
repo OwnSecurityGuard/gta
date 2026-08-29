@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package gta.agent;
+
+option go_package = "gta/pkg/capture/agent/proto";
+
+// AgentIngest 由 gta-pipeline 的 agent capture source 侧提供（gRPC server，默认 :9092）。
+// 团队成员本机的 gta-agent 抓取本机流量后作为 client 连接并推送原始完整帧。
+//
+// 与 mobile source 不同：这里保留完整帧（raw）与链路层类型（link_type），
+// 插件在本地开发与在团队服务端跑的行为完全一致（不做 LinkTypeProxyPayload 退化）。
+service AgentIngest {
+  // Push 客户端流式推送 PacketBatch；流结束返回汇总统计。
+  // agent 重连期间的包允许丢失（服务端按无订阅者/慢消费者计数丢弃，不缓存补发）。
+  rpc Push(stream PacketBatch) returns (PushAck);
+}
+
+// PacketBatch 是一批来自同一会话同一网卡的原始包。
+message PacketBatch {
+  string session_id = 1;             // 目标抓包会话
+  string iface = 2;                  // agent 侧抓包网卡名（仅记录用）
+  repeated RawPacket packets = 3;
+}
+
+// RawPacket 是一个完整原始帧（含链路层头），与 pcap 抓到的帧等价。
+message RawPacket {
+  string id = 1;                     // agent 侧生成（UUIDv7）；为空时 pipeline 会补 ID
+  int64 timestamp_ns = 2;            // Unix 纳秒时间戳；0 表示使用服务端接收时刻
+  uint32 link_type = 3;              // gopacket layers.LinkType 数值，原样保留
+  bytes raw = 4;                     // 完整原始帧
+  string src = 5;                    // "ip:port"（可选，pipeline 解析失败不阻塞）
+  string dst = 6;
+  string protocol = 7;               // 如 "tcp"；为空由解码器自行判断
+  map<string, string> metadata = 8;  // 附加元数据（可选）
+}
+
+// PushAck 是流结束时的汇总统计。
+message PushAck {
+  uint64 batches = 1;      // 已接收 batch 数
+  uint64 packets = 2;      // 已接收包数
+  uint64 delivered = 3;    // 成功投递给 capture pipeline 的包数
+  uint64 dropped = 4;      // 因无订阅者或慢消费者丢弃的包数
+  uint64 rejected = 5;     // 因会话归属校验拒绝的 batch 数
+}

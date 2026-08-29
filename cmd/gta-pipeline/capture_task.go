@@ -13,6 +13,7 @@ import (
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
 	"gta/pkg/capture"
+	"gta/pkg/capture/agent"
 	"gta/pkg/capture/mobile"
 	"gta/pkg/capture/pcapfile"
 	"gta/pkg/capture/pcaplive"
@@ -41,7 +42,10 @@ type captureTask struct {
 	sourceName string
 	liveCfg    *capturecontrol.LiveConfig
 	mobileCfg  *capturecontrol.MobileConfig
-	start      time.Time
+	// agentHub 非 nil 时，本会话额外打开 agent capture source，
+	// 接收 gta-agent 经 AgentIngest server 推送的本机原始帧。
+	agentHub *agent.Hub
+	start    time.Time
 
 	// 解码插件绑定：创建时设定，运行中可经 SetSessionPlugin 热切换（pluginMu 保护）。
 	pluginMu sync.RWMutex
@@ -320,7 +324,7 @@ func (t *captureTask) run() {
 	engine = analyze.NewEngine(t.rules, t.logger)
 	baseline = state.NewBaselineManager(nil)
 
-	sources, err := openCaptureSources(t.ctx, t.iface, t.port, t.pcapFile, t.liveCfg, t.mobileCfg)
+	sources, err := openCaptureSources(t.ctx, t.iface, t.port, t.pcapFile, t.liveCfg, t.mobileCfg, t.agentHub, t.sessionID)
 	if err != nil {
 		t.logger.Error("capture init failed", "error", err, "interface", t.iface, "port", t.port, "pcap_file", t.pcapFile)
 		return
@@ -490,11 +494,34 @@ func decoderAction(client, current pb.DecoderClient, haveDispatcher bool) string
 	return "build"
 }
 
-// openCaptureSources 根据配置打开一个或多个 capture source。
+// openCaptureSources 打开基础 source，并在 agentHub 非 nil 时追加 agent source。
+// agent source 消费 AgentIngest server 按 session_id 路由的 gta-agent 推送，
+// 与其它 source（live/mobile）并行 merge；文件回放会话同样允许 agent 推送。
+func openCaptureSources(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig, agentHub *agent.Hub, sessionID string) ([]capture.Source, error) {
+	sources, err := openCaptureSourcesBase(ctx, iface, port, pcapFile, live, mcfg)
+	if err != nil {
+		return nil, err
+	}
+	if agentHub != nil {
+		src, err := capture.Open(ctx, agent.SourceName, agent.Config{
+			Hub:       agentHub,
+			SessionID: sessionID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, src)
+	}
+	return sources, nil
+}
+
+// openCaptureSourcesBase 根据配置打开一个或多个 capture source。
 // 若 pcapFile 非空则回放文件；若 live.Device 非空则打开指定网卡；
 // 若 mobile 非空则启动移动代理抓包源（gRPC server，等待 gta-singbox-agent 推送）；
 // 否则打开所有可用网卡。live 中的 BPF/SnapLen/Promisc 透传给 pcap-live。
-func openCaptureSources(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig) ([]capture.Source, error) {
+// 若 agentHub 非 nil 且非文件回放，追加 agent source（消费 AgentIngest server
+// 按 session_id 路由的 gta-agent 推送）。
+func openCaptureSourcesBase(ctx context.Context, iface string, port int, pcapFile string, live *capturecontrol.LiveConfig, mcfg *capturecontrol.MobileConfig) ([]capture.Source, error) {
 	if pcapFile != "" {
 		src, err := capture.Open(ctx, "pcap-file", pcapfile.PcapFileConfig{Path: pcapFile})
 		if err != nil {

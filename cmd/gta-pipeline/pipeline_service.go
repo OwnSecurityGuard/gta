@@ -14,6 +14,7 @@ import (
 	"gta/pkg/analyze"
 	"gta/pkg/auth"
 	"gta/pkg/capture"
+	"gta/pkg/capture/agent"
 	"gta/pkg/config"
 	"gta/pkg/internalipc"
 	"gta/pkg/internalipc/capturecontrol"
@@ -37,6 +38,10 @@ type pipelineService struct {
 	// registryAddr 是插件应连接的注册中心地址（即 -registry-addr 的值，如 :9091）。
 	// 通过 GetRegistryAddr 暴露给 gta-mcp，供其 / 插件启动时获知 GTA_REGISTRY_ADDR。
 	registryAddr string
+
+	// agentHub 非 nil 时，每个抓包会话额外打开 agent source，
+	// 接收 gta-agent 经 AgentIngest server 推送的本机原始帧（-agent-ingest-addr 启用时）。
+	agentHub *agent.Hub
 
 	mu    sync.RWMutex
 	tasks map[string]*captureTask
@@ -69,6 +74,10 @@ func newPipelineService(workDir string, controlStore *store.ControlStore, regist
 
 // 编译期断言：pipelineService 实现 capturecontrol.CaptureEngine 接口。
 var _ capturecontrol.CaptureEngine = (*pipelineService)(nil)
+
+// SetAgentHub 注入 agent 包路由中枢（main.go 在启用 -agent-ingest-addr 时调用）。
+// 必须在任何 StartSession 之前调用。
+func (s *pipelineService) SetAgentHub(h *agent.Hub) { s.agentHub = h }
 
 // addTask 注册 task 到 map（写锁）。
 func (s *pipelineService) addTask(t *captureTask) {
@@ -170,6 +179,7 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 		sourceName:  sourceName,
 		liveCfg:     liveCfg,
 		mobileCfg:   mobileCfg,
+		agentHub:    s.agentHub,
 		start:       startTime,
 		reresolve:   make(chan struct{}, 1),
 		registry:    s.registry,

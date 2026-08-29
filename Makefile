@@ -17,6 +17,9 @@ proto:
 	protoc --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		pkg/capture/mobile/proto/mobile.proto
+	protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		pkg/capture/agent/proto/agent.proto
 
 test:
 	go test -tags $(TAGS) ./...

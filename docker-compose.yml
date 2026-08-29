@@ -31,7 +31,10 @@ services:
       GTA_REGISTRY_ADDR: ${GTA_REGISTRY_ADDR:-:9091}
       GTA_AGENT_INGEST_ADDR: ${GTA_AGENT_INGEST_ADDR:-:9092}
     ports:
-      - "${GTA_CONTROL_PORT:-9888}:9888"    # CaptureControl gRPC（gta-mcp / 管理端连接）
+      # CaptureControl gRPC：唯一合法客户端是 compose 网络内的 gta-mcp（owner 字段
+      # 在该端口上可被直连者伪造，见 cmd/gta-pipeline/main.go 信任边界注释），
+      # 因此默认只回环映射；确需从宿主机外访问再改。
+      - "127.0.0.1:${GTA_CONTROL_PORT:-9888}:9888"
       - "${GTA_REGISTRY_PORT:-9091}:9091"   # PluginRegistry gRPC（插件注册）
       - "${GTA_AGENT_INGEST_PORT:-9092}:9092" # AgentIngest gRPC（gta-agent 推流）
     volumes:

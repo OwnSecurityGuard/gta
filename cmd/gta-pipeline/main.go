@@ -151,6 +151,15 @@ func main() {
 		}
 	}
 
+	// authResolver：GTA_AUTH_TOKENS 驱动的 Bearer 鉴权，供 PluginRegistry 与
+	// AgentIngest 两个 gRPC server 共用。未配置 token 时为匿名模式（拦截器放行、
+	// 不注入 Principal），本地单机用法行为不变。
+	authResolver, err := auth.LoadFromEnv()
+	if err != nil {
+		slog.Error("load auth tokens", "error", err)
+		os.Exit(1)
+	}
+
 	// RegistryServer：被动接受插件注册，插件进程由外部编排（systemd/脚本）独立启动。
 	registry := plugin.NewRegistryServer(10)
 	defer registry.Close()
@@ -166,7 +175,13 @@ func main() {
 	// 实际监听地址回写（:0 动态端口时外部从此文件读取真实地址，同机可跑多套）。
 	config.WriteAddrFile(absWorkDir, "registry", registryLis.Addr().String())
 	defer registryLis.Close()
-	registryGrpc := grpc.NewServer()
+	// 鉴权：metadata `authorization: Bearer <token>` → Principal。owner 随 ctx
+	// 进入 Register/Connect（TunnelHub），决定插件键 owner/name 与会话归属。
+	// 匿名模式（未配 token）不注入身份，插件键退化为裸 name（回归底线）。
+	registryGrpc := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(auth.UnaryInterceptor(authResolver)),
+		grpc.ChainStreamInterceptor(auth.StreamInterceptor(authResolver)),
+	)
 	pluginpb.RegisterPluginRegistryServer(registryGrpc, registry)
 
 	// 心跳检查：每秒扫描注册表，30 秒未心跳的插件移除。
@@ -190,11 +205,6 @@ func main() {
 	// owner 不匹配的 batch 以 PermissionDenied 拒绝。
 	var agentIngestGrpc *grpc.Server
 	if *agentIngestAddr != "" {
-		authResolver, err := auth.LoadFromEnv()
-		if err != nil {
-			slog.Error("load auth tokens", "error", err)
-			os.Exit(1)
-		}
 		agentHub := agent.NewHub()
 		engine.SetAgentHub(agentHub)
 

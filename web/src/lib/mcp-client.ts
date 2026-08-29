@@ -70,6 +70,8 @@ export class McpClient {
 
     if (response.status === 401) {
       notifyAuthError();
+      // 凭证已失效，旧身份不可信：立即清掉，等下一次成功响应头重新回显。
+      setIdentity(null);
       throw new AuthError();
     }
     if (!response.ok) {
@@ -81,7 +83,8 @@ export class McpClient {
 
     if ("error" in rpcRes) {
       const msg = String(rpcRes.error.message ?? "");
-      if (/unauthorized|401/i.test(msg)) {
+      // \b 防止误伤：如 "4014"、":40180" 这类含 401 子串的无关错误消息。
+      if (/\bunauthorized\b|\b401\b/i.test(msg)) {
         notifyAuthError();
         throw new AuthError(msg);
       }
@@ -130,6 +133,8 @@ export class McpClient {
 
     if (response.status === 401) {
       notifyAuthError();
+      // 凭证已失效，旧身份不可信：立即清掉，等下一次成功响应头重新回显。
+      setIdentity(null);
       throw new AuthError();
     }
     if (!response.ok) {

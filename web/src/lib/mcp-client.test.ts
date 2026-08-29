@@ -30,13 +30,20 @@ function jsonResponse(
   };
 }
 
-/** 包一层 MCP 双层 JSON：result.content[0].text 内是业务 JSON。 */
-function rpcOk(payload: Record<string, unknown>) {
-  return jsonResponse({
-    jsonrpc: "2.0",
-    id: 1,
-    result: { content: [{ type: "text", text: JSON.stringify(payload) }] },
-  });
+/** 包一层 MCP 双层 JSON：result.content[0].text 内是业务 JSON；headers 为身份回显头。 */
+function rpcOk(
+  payload: Record<string, unknown>,
+  headers: Record<string, string> = {},
+) {
+  return jsonResponse(
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      result: { content: [{ type: "text", text: JSON.stringify(payload) }] },
+    },
+    200,
+    headers,
+  );
 }
 
 let fetchCalls: { url: string; init: RequestInit }[] = [];
@@ -85,20 +92,28 @@ describe("callTool", () => {
 
   it("从响应头同步身份回显", async () => {
     vi.stubGlobal("fetch", async () =>
-      jsonResponse(
-        {
-          jsonrpc: "2.0",
-          id: 1,
-          result: {
-            content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
-          },
-        },
-        200,
-        { "X-GTA-Owner": "bob", "X-GTA-Admin": "true" },
-      ),
+      rpcOk({ ok: true }, { "X-GTA-Owner": "bob", "X-GTA-Admin": "true" }),
     );
     await mcpClient.callTool("list_all_sessions");
     expect(getIdentity()).toEqual({ owner: "bob", isAdmin: true });
+  });
+
+  it("响应头只有 X-GTA-Owner 无 X-GTA-Admin → isAdmin 为 false", async () => {
+    vi.stubGlobal("fetch", async () => rpcOk({ ok: true }, { "X-GTA-Owner": "bob" }));
+    await mcpClient.callTool("list_all_sessions");
+    expect(getIdentity()).toEqual({ owner: "bob", isAdmin: false });
+  });
+
+  it("成功响应无 X-GTA-Owner 时清掉旧身份", async () => {
+    setIdentity({ owner: "old", isAdmin: false });
+    await mcpClient.callTool("list_all_sessions"); // 默认桩不带任何回显头
+    expect(getIdentity()).toBeNull();
+  });
+
+  it("网络错误（fetch reject）不置位全局 401 标志", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    await expect(mcpClient.callTool("list_all_sessions")).rejects.toThrow();
+    expect(getAuthError()).toBe(false);
   });
 
   it("JSON-RPC error 含 unauthorized 时抛 AuthError", async () => {
@@ -114,5 +129,22 @@ describe("callTool", () => {
     await expect(mcpClient.callTool("list_all_sessions")).rejects.toBeInstanceOf(
       AuthError,
     );
+  });
+});
+
+describe("initialize", () => {
+  it("有 token 时请求带 Authorization: Bearer", async () => {
+    setToken("gta_aaa");
+    await mcpClient.initialize();
+    const header = (fetchCalls[0]!.init.headers as Record<string, string>)[
+      "Authorization"
+    ];
+    expect(header).toBe("Bearer gta_aaa");
+  });
+
+  it("HTTP 401 抛 AuthError 并置位全局 401 状态", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse({}, 401));
+    await expect(mcpClient.initialize()).rejects.toBeInstanceOf(AuthError);
+    expect(getAuthError()).toBe(true);
   });
 });

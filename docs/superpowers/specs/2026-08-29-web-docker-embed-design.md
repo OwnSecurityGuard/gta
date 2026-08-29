@@ -39,12 +39,12 @@
 
 ### 2. 构建链
 
-- `web/vite.config.ts`：`build.outDir` 改为 `../cmd/gta-mcp/webui` 并显式 `emptyOutDir: true`（outDir 在 root 之外，vite 默认会警告；产物目录被清空重建不影响 git——目录内 tracked 的只有 `.gitkeep`，需在 emptyOutDir 后由构建脚本恢复，见下）。
-- `.gitignore`：加 `cmd/gta-mcp/webui/*` 与 `!cmd/gta-mcp/webui/.gitkeep`（构建产物不进 git；`web/dist` 原有忽略规则保留亦可）。
-- **产物构建不直接写 webui/**：vite 产物先出在 `web/dist`（保持 vite 默认习惯、gitignore 已覆盖），由 `web-build` 脚本把 `web/dist` 内容同步进 `cmd/gta-mcp/webui/`（清除旧产物后复制，并确保 `.gitkeep` 仍在）。避免 vite 清空 outDir 时误删 tracked 的 `.gitkeep`，也让"构建产物污染 git 工作区"不可能发生。
-- Makefile：新增 `web-build` target（`cd web && npm ci && npm run build` + 同步产物到 `cmd/gta-mcp/webui/`）；`release-matrix` 依赖 `web-build`（前置执行）。
-- `Dockerfile`：新增 node 构建阶段（`node:22-bookworm-slim`，`npm ci && npm run build`），产物 `COPY --from` 进 Go builder 阶段的 `cmd/gta-mcp/webui/` 后再编译（embed 进二进制，runtime 阶段零新增文件）。新增 `ARG VITE_ENABLE_RAW_DEBUG=0` 传给 node 阶段。
-- `.dockerignore`：移除对 `web/` 的整目录排除，改为排除 `web/node_modules`、`web/dist`（node 阶段自建依赖与产物）。
+- `web/vite.config.ts` **不改**：产物照常出在 `web/dist`（vite 默认、gitignore 已覆盖），避免 vite 清空 outDir 时误删 tracked 文件。
+- `.gitignore`：加 `cmd/gta-mcp/webui/*` 与 `!cmd/gta-mcp/webui/.gitkeep`（构建产物不进 git；`web/dist/` 原有忽略规则保留）。
+- **产物同步**：vite 产物出在 `web/dist`，由 `make web-build` 把 `web/dist` 内容同步进 `cmd/gta-mcp/webui/`（清除旧产物后复制，保留 `.gitkeep`）。"构建产物污染 git 工作区"因此不可能发生，重复构建也不会在 embed 目录里积累陈旧 hash 产物。
+- Makefile：新增 `web-build` target（`cd web && npm ci && npm run build` + 同步产物到 `cmd/gta-mcp/webui/`）；`release-matrix` 以 `web-build` 为前置依赖（CI release job 需要 node，见 Task 4/CI 说明）。
+- `Dockerfile`：新增 node 构建阶段（`node:22-bookworm-slim`，`npm ci && npm run build`），产物 `COPY --from` 进 Go builder 阶段的 `cmd/gta-mcp/webui/` 后再编译（embed 进二进制，runtime 阶段零新增文件）。新增 `ARG VITE_ENABLE_RAW_DEBUG=0` 传给 node 阶段；npm registry 默认走 npmmirror（与现有 GOPROXY 默认 goproxy.cn 的境内网络取向一致，可用 build arg 覆盖）。
+- `.dockerignore`：移除对 `web/` 的整目录排除，改为排除 `web/node_modules/`、`web/dist/`（node 阶段需要 web 源码进上下文，但依赖与产物在阶段内自建）。
 
 ### 3. compose / .env
 
@@ -63,5 +63,5 @@
 ## 相关文件
 
 - 新增：`cmd/gta-mcp/webui/.gitkeep`、`cmd/gta-mcp/webui.go`（embed + 静态 handler + 未构建兜底）
-- 修改：`cmd/gta-mcp/main.go`（路由挂载）、`web/vite.config.ts`、`.gitignore`、`.dockerignore`、`Dockerfile`、`Makefile`、`docker-compose.yml`、`.env.example`、`docs/team-deployment.md`、`docs/member-onboarding.md`
+- 修改：`cmd/gta-mcp/main.go`（路由挂载）、`.gitignore`、`.dockerignore`、`Dockerfile`、`Makefile`、`docker-compose.yml`、`.env.example`、`.github/workflows/ci.yml`（release job 装 node）、`docs/team-deployment.md`、`docs/member-onboarding.md`
 - 测试：`cmd/gta-mcp/webui_test.go`

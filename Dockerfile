@@ -78,5 +78,7 @@ EXPOSE 9888 9091 9092 8781
 
 # 默认跑 pipeline；gta-mcp 用法见 docker-compose.yml（覆盖 entrypoint）。
 # -spawn-agent=false：容器内不拉起 gta-singbox-agent（手机代理流量不经容器）。
+# 非 root 运行：useradd --create-home 已建 /data 并归 gta 所有（T15 评审修复）。
+USER gta
 ENTRYPOINT ["/usr/local/bin/gta-pipeline"]
 CMD ["-spawn-agent=false"]

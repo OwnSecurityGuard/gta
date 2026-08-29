@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/gopacket/pcap"
-
 	"gta/pkg/analyze"
 	"gta/pkg/auth"
 	"gta/pkg/capture"
@@ -298,17 +296,10 @@ func (s *pipelineService) ListSessions(ctx context.Context) ([]capturecontrol.Se
 	return out, nil
 }
 
-// ListInterfaces 列出可用网卡名称。
+// ListInterfaces 列出可用网卡名称（实时抓包能力按 -tags pcap 门控，
+// 见 pcap_live_pcap.go / pcap_live_nopcap.go）。
 func (s *pipelineService) ListInterfaces(ctx context.Context) ([]string, error) {
-	devs, err := pcap.FindAllDevs()
-	if err != nil {
-		return nil, fmt.Errorf("list interfaces: %w", err)
-	}
-	names := make([]string, 0, len(devs))
-	for _, dev := range devs {
-		names = append(names, dev.Name)
-	}
-	return names, nil
+	return listInterfaces()
 }
 
 // finalizeTask 是 captureTask run 退出时的回调（自动结束或显式停止都会触发）。

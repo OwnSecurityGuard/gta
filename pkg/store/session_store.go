@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS plugin_debug_access (
 	if _, err := cs.db.Exec(auditSchema); err != nil {
 		return err
 	}
+	if _, err := cs.db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		return err
+	}
 	if _, err := cs.db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		return err
 	}

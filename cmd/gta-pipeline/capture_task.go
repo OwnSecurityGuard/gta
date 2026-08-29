@@ -8,15 +8,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/gopacket/pcap"
-
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
 	"gta/pkg/capture"
 	"gta/pkg/capture/agent"
 	"gta/pkg/capture/mobile"
 	"gta/pkg/capture/pcapfile"
-	"gta/pkg/capture/pcaplive"
 	"gta/pkg/decode"
 	"gta/pkg/event"
 	"gta/pkg/internalipc"
@@ -577,15 +574,17 @@ func openCaptureSourcesBase(ctx context.Context, iface string, port int, pcapFil
 		return []capture.Source{src}, nil
 	}
 
-	devs, err := pcap.FindAllDevs()
+	// 实时抓包能力（网卡枚举 + pcaplive source）按 -tags pcap 门控，
+	// 见 pcap_live_pcap.go / pcap_live_nopcap.go。
+	ifaces, err := listInterfaces()
 	if err != nil {
-		return nil, fmt.Errorf("list interfaces: %w", err)
+		return nil, err
 	}
 	var sources []capture.Source
-	for _, dev := range devs {
-		src, err := openLiveSource(ctx, dev.Name, port, bpf, snapLen, promisc)
+	for _, dev := range ifaces {
+		src, err := openLiveSource(ctx, dev, port, bpf, snapLen, promisc)
 		if err != nil {
-			slog.Warn("skip capture interface", "name", dev.Name, "error", err)
+			slog.Warn("skip capture interface", "name", dev, "error", err)
 			continue
 		}
 		sources = append(sources, src)
@@ -594,23 +593,6 @@ func openCaptureSourcesBase(ctx context.Context, iface string, port int, pcapFil
 		return nil, fmt.Errorf("no capture interfaces available")
 	}
 	return sources, nil
-}
-
-// openLiveSource 打开实时网卡抓包 source。
-// bpf 为空时默认 "tcp port <port>"；snapLen 为 0 时默认 1600。
-func openLiveSource(ctx context.Context, iface string, port int, bpf string, snapLen int32, promisc bool) (capture.Source, error) {
-	if bpf == "" {
-		bpf = fmt.Sprintf("tcp port %d", port)
-	}
-	if snapLen == 0 {
-		snapLen = 1600
-	}
-	return capture.Open(ctx, "pcap-live", pcaplive.PcapLiveConfig{
-		Device:  iface,
-		BPF:     bpf,
-		SnapLen: snapLen,
-		Promisc: promisc,
-	})
 }
 
 // closeCaptureSources 关闭所有 source，忽略错误。

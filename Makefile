@@ -22,12 +22,14 @@ LDFLAGS := -s -w \
 # 交叉编译矩阵（T14 release 产物）
 #
 # 说明：pcap 采集层是 cgo 依赖（github.com/google/gopacket/pcap），交叉编译
-# 无法携带目标平台的 libpcap，因此 release 矩阵统一 CGO_ENABLED=0：
-#   - 二进制可编译、可启动，pcap 文件源（pcapgo，纯 Go）仍可用；
-#   - 实时网卡抓包（pcaplive）在无 cgo 二进制上不可用；
-#   - 需要"能本机抓包"的二进制时用对应平台的原生工具链加 -tags pcap 编译
-#     （Linux 服务端请用 Docker 镜像，见 Dockerfile，内含 libpcap）。
+# 无法携带目标平台的 libpcap，因此 release 矩阵统一 CGO_ENABLED=0，且**不带**
+# -tags pcap：
+#   - cmd/gta-agent 与 cmd/gta-pipeline 的实时抓包（gopacket/pcap、pcaplive）
+#     均按 pcap / !pcap 构建标签门控，无标签构建可编译，运行时给出明确错误；
+#   - pcap 文件源（pcapgo，纯 Go）与 agent 推流（gRPC）不受影响；
+#   - 需要"能本机抓包"的服务端产物用 Docker 镜像（见 Dockerfile，带 libpcap）。
 # windows/amd64 产物带 .exe 后缀，其余不带。
+# 本 target 只用 POSIX sh 语法（$$ 转义 + for/if），无 GNU make 扩展。
 # ============================================================================
 RELEASE_PLATFORMS := windows/amd64 linux/amd64 linux/arm64 darwin/arm64
 RELEASE_CMDS := gta-pipeline gta-mcp gta-agent
@@ -101,7 +103,7 @@ release-matrix:
 		for cmd in $(RELEASE_CMDS); do \
 			echo "==> CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build ./cmd/$$cmd"; \
 			CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
-				go build -tags $(TAGS) -ldflags '$(LDFLAGS)' \
+				go build -ldflags '$(LDFLAGS)' \
 				-o bin/release/$$cmd-$$os-$$arch$$ext ./cmd/$$cmd; \
 		done; \
 	done; \

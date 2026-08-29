@@ -1,5 +1,11 @@
 # docker-compose.yml（T15）——团队服务端：gta-pipeline + gta-mcp，共用同一镜像与 /data 卷。
 #
+# 共享存储说明：两个服务挂同一 /data 卷，共享同一份 control.sqlite 与会话库。
+# 这是有意设计：pipeline 是事件/会话元数据的唯一写入方（Runtime Plane），mcp
+# 主要读 + 少量会话管理写。SQLite 以 WAL + busy_timeout=5000 打开（见
+# pkg/store/sqlite.go、pkg/store/session_store.go），跨进程读写安全并发。
+# 仍建议单实例部署 pipeline 与 mcp 各一个，不要横向扩容多副本。
+#
 # 用法：
 #   cp .env.example .env   # 至少设置 GTA_AUTH_TOKENS
 #   docker compose up -d

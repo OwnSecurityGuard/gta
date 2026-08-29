@@ -2894,7 +2894,9 @@ func main() {
 	// （与扫码页展示的信息一致），不含任何会话/抓包数据，故挂载在鉴权链之外。
 	root := http.NewServeMux()
 	root.HandleFunc("/singbox/profile", capture.handleSingboxProfile)
-	root.Handle("/", authed)
+	// Web UI 静态资源（免鉴权）兜在 "/" 上：命中嵌入文件才返回静态，其余请求
+	// （含 /mcp 等 API 与未知路径）原样进入鉴权链，语义与集成前一致。
+	root.Handle("/", serveWebOrAPI(mustWebUIFS(), authed))
 	handler := http.Handler(root)
 
 	customServer := &http.Server{

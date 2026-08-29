@@ -10,13 +10,24 @@ import (
 	"log/slog"
 	"os"
 
+	"gta/pkg/logging"
 	"gta/pkg/plugindev/server"
 )
 
 func main() {
 	addr := flag.String("addr", envOr("GTA_PLUGINDEV_ADDR", ":8089"), "PluginDev gRPC listen address (host:port, unix:/path, npipe:\\.\\pipe\\name)")
 	pluginsDir := flag.String("plugins-dir", envOr("GTA_PLUGINS_DIR", "./plugins"), "root plugins directory the service is scoped to")
+	// 日志（pkg/logging 统一初始化，T17）：默认仅 stderr，与历史行为一致；
+	// 配置 -log-file 后启用落盘 + 轮转，默认与 stderr 双写（GTA_LOG_STDERR_DISABLED=1 可关）。
+	logFile := flag.String("log-file", envOr("GTA_PLUGINDEV_LOG_FILE", ""), "log file path; empty = stderr only (rotating when set, dual-write to stderr by default)")
+	logFormat := flag.String("log-format", envOr("GTA_PLUGINDEV_LOG_FORMAT", "text"), "log output format: text | json")
 	flag.Parse()
+
+	logCfg := logging.DefaultConfig()
+	logCfg.Format = logging.Format(*logFormat)
+	logCfg.FilePath = *logFile
+	logCfg = logging.FromEnv(logCfg)
+	logging.MustInit(logCfg)
 
 	slog.Info("starting gta-plugin-dev", "addr", *addr, "plugins_dir", *pluginsDir)
 	srv := server.New(*pluginsDir)

@@ -39,6 +39,12 @@ type Config struct {
 	MaxAge     int        // 旧日志保留天数；默认 30
 	Compress   bool       // 是否压缩旧日志文件（gzip）
 	AddSource  bool       // 是否在日志中添加源码位置（文件:行号）
+	// DisableStderr 关闭 stderr 侧输出：配置了 FilePath 时仅写文件。
+	// 典型场景：容器 / systemd 环境下避免文件+stderr 双份日志。仅配置 FilePath 时生效。
+	DisableStderr bool
+	// DisableFile 忽略 FilePath，仅输出到 stderr。
+	// 典型场景：容器环境日志交由采集器处理，不需要落盘。
+	DisableFile bool
 }
 
 // DefaultConfig 返回适合生产环境的默认配置。
@@ -58,6 +64,11 @@ func DefaultConfig() Config {
 
 // levelVar 是进程级共享的动态日志级别，允许运行时通过 SetLevel 调整。
 var levelVar = new(slog.LevelVar)
+
+// lastRotating 记录 Init 最近创建的 rotatingWriter（文件句柄）。
+// 仅服务于测试的清理（Windows 上句柄未关闭会锁住临时目录）；
+// 生产进程生命周期与日志文件一致，无需主动关闭。
+var lastRotating *rotatingWriter
 
 // Init 根据配置初始化全局 slog logger，返回创建的 logger 实例。
 // 若配置了 FilePath，日志会同时写入文件和 stderr（双写）。
@@ -86,15 +97,24 @@ func Init(cfg Config) (*slog.Logger, error) {
 		ReplaceAttr: replaceAttr,
 	}
 
+	// 双写策略（默认行为不变：FilePath 非空 → 文件 + stderr 双写）：
+	//   - DisableStderr=true → 仅写文件；
+	//   - DisableFile=true   → 忽略 FilePath，仅写 stderr；
+	//   - 两者都设置 → 仅 stderr（DisableFile 优先，保证永远有输出）。
+	useFile := cfg.FilePath != "" && !cfg.DisableFile
 	var w io.Writer = os.Stderr
-
-	if cfg.FilePath != "" {
+	if useFile {
 		if err := os.MkdirAll(filepath.Dir(cfg.FilePath), 0o755); err != nil {
 			return nil, fmt.Errorf("create log directory: %w", err)
 		}
 		fw := newRotatingWriter(cfg.FilePath, cfg.MaxSize, cfg.MaxBackups, cfg.MaxAge, cfg.Compress)
-		// 双写：同时输出到文件和 stderr，便于开发调试
-		w = io.MultiWriter(fw, os.Stderr)
+		lastRotating = fw // 供测试关闭句柄（Windows 上未关闭会锁住文件）。
+		if cfg.DisableStderr {
+			w = fw
+		} else {
+			// 双写：同时输出到文件和 stderr，便于开发调试
+			w = io.MultiWriter(fw, os.Stderr)
+		}
 	}
 
 	var handler slog.Handler
@@ -108,6 +128,26 @@ func Init(cfg Config) (*slog.Logger, error) {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 	return logger, nil
+}
+
+// 环境变量开关名（T17）：容器部署时无需改代码/加 flag 即可关闭文件或 stderr 侧输出。
+// 取值按 strconv.ParseBool 解析（"1"/"true"/...），未设置或解析失败均视为 false。
+const (
+	EnvFileDisabled   = "GTA_LOG_FILE_DISABLED"   // =true 时忽略 FilePath，仅 stderr
+	EnvStderrDisabled = "GTA_LOG_STDERR_DISABLED" // =true 时仅写文件，不再双写 stderr
+)
+
+// FromEnv 用 GTA_LOG_FILE_DISABLED / GTA_LOG_STDERR_DISABLED 环境变量
+// 覆盖 cfg 的 DisableFile / DisableStderr，返回调整后的副本。
+// 其余字段不受影响；未设置相关环境变量时返回值与 cfg 等价（默认行为不变）。
+func FromEnv(cfg Config) Config {
+	if v, err := strconv.ParseBool(os.Getenv(EnvFileDisabled)); err == nil && v {
+		cfg.DisableFile = true
+	}
+	if v, err := strconv.ParseBool(os.Getenv(EnvStderrDisabled)); err == nil && v {
+		cfg.DisableStderr = true
+	}
+	return cfg
 }
 
 // MustInit 与 Init 相同，但在出错时 panic。仅供 main 函数使用。

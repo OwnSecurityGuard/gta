@@ -105,6 +105,8 @@ func main() {
 		*logFile = filepath.Join(absWorkDir, "logs", "gta-pipeline.log")
 	}
 	logCfg.FilePath = *logFile
+	// T17：GTA_LOG_FILE_DISABLED / GTA_LOG_STDERR_DISABLED 可关闭文件落盘或 stderr 双写（容器部署用）。
+	logCfg = logging.FromEnv(logCfg)
 	logging.MustInit(logCfg)
 
 	if *controlPath == "" {

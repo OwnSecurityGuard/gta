@@ -177,11 +177,15 @@ func main() {
 	defer registryLis.Close()
 	// 鉴权：metadata `authorization: Bearer <token>` → Principal。owner 随 ctx
 	// 进入 Register/Connect（TunnelHub），决定插件键 owner/name 与会话归属。
-	// 匿名模式（未配 token）不注入身份，插件键退化为裸 name（回归底线）。
-	registryGrpc := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(auth.UnaryInterceptor(authResolver)),
-		grpc.ChainStreamInterceptor(auth.StreamInterceptor(authResolver)),
-	)
+	// 仅在配置了 token 时挂拦截器：匿名模式注入的 "local" owner 会让插件键
+	// 变成 local/name，破坏空 owner=裸 name 的单机回归语义（见 pluginKey）。
+	registryGrpc := grpc.NewServer()
+	if authResolver.Required() {
+		registryGrpc = grpc.NewServer(
+			grpc.ChainUnaryInterceptor(auth.UnaryInterceptor(authResolver)),
+			grpc.ChainStreamInterceptor(auth.StreamInterceptor(authResolver)),
+		)
+	}
 	pluginpb.RegisterPluginRegistryServer(registryGrpc, registry)
 
 	// 心跳检查：每秒扫描注册表，30 秒未心跳的插件移除。

@@ -133,10 +133,12 @@ func TestListAllSessionsLiveOnlyAdminSeesAll(t *testing.T) {
 	}
 }
 
-// TestListAllSessionsLiveOnlyAnonymousUnchanged 匿名模式回归底线：
+// TestListAllSessionsLiveOnlyAnonymousUnchanged 匿名模式回归底线（双向锁定）：
 // 无 Principal 的 ctx（ownerFilterFromCtx 返回 SessionOwnerFilter 零值，
 // Matches 即 meta.Owner == 空串）下，controlStore 中 owner 为空串的会话经
-// live-only 兜底仍出现在输出——与修复前行为一致。
+// live-only 兜底仍出现在输出——与修复前行为一致；而具名 owner（bob）的
+// 会话不得泄露给匿名调用方（收紧后的新行为，与 authorizeSession 防泄露
+// 规则在其他访问路径上的既有语义一致）。
 func TestListAllSessionsLiveOnlyAnonymousUnchanged(t *testing.T) {
 	workDir := t.TempDir()
 	cs, err := store.NewControlStore(filepath.Join(workDir, "control.sqlite"))
@@ -153,9 +155,17 @@ func TestListAllSessionsLiveOnlyAnonymousUnchanged(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// bob 的会话：零值 filter（只看 owner 为空串）不得看到。
+	if err := cs.CreateSession(ctx, store.SessionMeta{
+		Owner: "bob", SessionID: "bob-live-anon", Status: "running",
+		DBPath: filepath.Join(workDir, "sessions", "bob-live-anon", "capture.sqlite"),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	fc := &fakeCaptureClient{liveSessions: &pb.ListCaptureSessionsResponse{Sessions: []*pb.CaptureSessionSummary{
 		{SessionId: "anon-live-1", State: "running", Port: 9004, Plugin: "http", Interface: "eth0"},
+		{SessionId: "bob-live-anon", State: "running", Port: 9005, Plugin: "dns", Interface: "eth1"},
 	}}}
 	m := &mcpCapture{sessionMgr: newSessionManager(workDir), controlStore: cs, pipelineClient: fc}
 
@@ -165,7 +175,10 @@ func TestListAllSessionsLiveOnlyAnonymousUnchanged(t *testing.T) {
 	}
 	text := res.Content[0].(mcp.TextContent).Text
 	if !containsSessionID(text, "anon-live-1") {
-		t.Fatalf("匿名调用方经 live-only 兜底仍应看到 owner='' 的会话: %s", text)
+		t.Fatalf("匿名调用方经 live-only 兜底仍应看到 owner 为空串的会话: %s", text)
+	}
+	if containsSessionID(text, "bob-live-anon") {
+		t.Fatalf("匿名调用方不得经 live-only 兜底看到 bob 的会话: %s", text)
 	}
 }
 

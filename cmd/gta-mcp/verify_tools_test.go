@@ -24,6 +24,8 @@ type fakeCaptureClient struct {
 	dbDir          string
 	listPluginsReq *pb.ListPluginsRequest
 	manifestReq    *pb.GetPluginManifestRequest
+	// liveSessions 预设 ListCaptureSessions 的返回值（nil = 无 live 会话）。
+	liveSessions *pb.ListCaptureSessionsResponse
 }
 
 func (f *fakeCaptureClient) Verify(ctx context.Context, in *pb.VerifyRequest, _ ...grpc.CallOption) (*pb.VerifyResponse, error) {

@@ -2241,6 +2241,13 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 		if seen[id] {
 			continue
 		}
+		// live 兜底同样不能把他人会话透给非 admin 调用方：ListCaptureSessions
+		// 的请求没有 owner 字段，pipeline 返回的是所有会话摘要，这里若不加
+		// 校验，alice 会经兜底循环看到 bob 运行中会话的 session_id/port/db_path。
+		// 可见性规则与 authorizeSession（controlStore→metadata.json 兜底）保持一致。
+		if err := m.authorizeSession(ctx, id); err != nil {
+			continue
+		}
 		status, _ := live["state"].(string)
 		port, _ := live["port"].(int32)
 		plugin, _ := live["plugin"].(string)

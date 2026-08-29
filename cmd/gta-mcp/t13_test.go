@@ -230,9 +230,10 @@ func TestGetDBPathControlStoreOwnerFilter(t *testing.T) {
 	}
 
 	bob := auth.WithPrincipal(context.Background(), &auth.Principal{Owner: "bob"})
-	// 不可见按未找到处理（store 约定，不泄露存在性）：返回空 db_path。
-	if got, err := m.getDBPath(bob, "sc1"); err != nil || got != "" {
-		t.Fatalf("bob getDBPath on alice's session = %q, %v; want empty", got, err)
+	// controlStore 中存在但不可见 → 明确拒绝（不泄露 db_path，语义同
+	// TestGetDBPathControlStoreRecordNoFSFallback）。
+	if got, err := m.getDBPath(bob, "sc1"); err == nil {
+		t.Fatalf("bob getDBPath on alice's session = %q, want deny error", got)
 	}
 }
 

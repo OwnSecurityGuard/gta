@@ -474,9 +474,6 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 	if source == "agent" {
 		agentSource = true
 	}
-	if source == "mobile" {
-		source = "proxy" // 归一化别名
-	}
 	listenAddr := req.GetString("listen_addr", "")
 	frameStyle := req.GetString("frame_style", "")
 	prefixLen, _ := req.RequireInt("prefix_len")

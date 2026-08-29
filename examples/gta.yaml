@@ -22,6 +22,8 @@ mcp:
   allowed_origins: ""
 pipeline:
   # CaptureControl gRPC 监听地址（gta-mcp 的 -pipeline-addr 应指向这里）。
+  # 注意：若设为 ":0" 动态分配，gta-mcp 无法自动发现端口——需人工读取
+  # <workdir>/addr.control.json 中回写的实际地址，再作为 -pipeline-addr 传入。
   control_addr: ":9888"
   # PluginRegistry gRPC 监听地址（插件用 GTA_REGISTRY_ADDR 注册）。
   registry_addr: ":9091"

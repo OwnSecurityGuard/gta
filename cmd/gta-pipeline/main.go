@@ -55,15 +55,16 @@ func main() {
 	agentBin := flag.String("agent-bin", "", "path to gta-singbox-agent binary (default: <workdir>/bin/gta-singbox-agent[.exe])")
 	flag.Parse()
 
+	flagSet := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
 	// 加载统一配置并按优先级合并（flag 显式 > 环境变量 > 文件 > 默认值）。
 	// 环境变量兜底已在 config.Load 内应用；cfg 字段为空表示"未配置"。
-	cfg, err := config.Load(*cfgPath)
+	// -config 显式指定的路径不存在时硬错误（防止拼错路径静默退回默认配置）。
+	cfg, err := config.Load(*cfgPath, flagSet["config"])
 	if err != nil {
 		slog.Error("load config", "path", *cfgPath, "error", err)
 		os.Exit(1)
 	}
-	flagSet := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
 	// eff 返回某设置项的最终值：flag 显式传入 > 配置（文件/环境变量）> flag 默认值。
 	eff := func(name, flagVal, cfgVal, def string) string {
 		if flagSet[name] {

@@ -2474,14 +2474,15 @@ func main() {
 	allowedOrigins := flag.String("allowed-origins", os.Getenv("GTA_MCP_ALLOWED_ORIGINS"), "CORS 允许的跨域 Origin（逗号分隔，如 http://localhost:5173,https://gta.example.com）；留空不返回 CORS 头（同源用法不受影响）")
 	flag.Parse()
 
+	flagSet := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
 	// 加载统一配置并按优先级合并（flag 显式 > 环境变量 > 文件 > 默认值）。
-	cfg, err := config.Load(*cfgPath)
+	// -config 显式指定的路径不存在时硬错误（防止拼错路径静默退回默认配置）。
+	cfg, err := config.Load(*cfgPath, flagSet["config"])
 	if err != nil {
 		slog.Error("load config", "path", *cfgPath, "error", err)
 		os.Exit(1)
 	}
-	flagSet := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
 	if !flagSet["addr"] && cfg.MCP.Addr != "" {
 		*addr = cfg.MCP.Addr
 	}

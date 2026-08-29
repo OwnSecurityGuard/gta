@@ -60,20 +60,25 @@ type Config struct {
 	Proxy    ProxyOverrides       `yaml:"proxy"`
 }
 
-// Load 读取统一配置文件（gta.yaml，可选）。path 为空或文件不存在时返回仅含
-// 环境变量兜底值（其余为零值，由调用方按默认值补齐）的 Config。
-func Load(path string) (Config, error) {
+// Load 读取统一配置文件（gta.yaml，可选）。path 为空或（未显式指定时）文件不存在，
+// 返回仅含环境变量兜底值（其余为零值，由调用方按默认值补齐）的 Config。
+//
+// explicit 表示 path 是否来自用户显式指定（如 -config flag）：显式指定的路径
+// 若文件不存在必须硬错误（用户拼错路径不应静默退回默认配置）；只有调用方
+// 未指定配置文件（path 为空或 explicit=false）时，缺失才视为"无配置"。
+func Load(path string, explicit bool) (Config, error) {
 	var cfg Config
 	path = strings.TrimSpace(path)
 	if path != "" {
 		b, err := os.ReadFile(path)
-		if err != nil && !os.IsNotExist(err) {
-			return cfg, fmt.Errorf("read config %s: %w", path, err)
-		}
-		if err == nil {
-			if err := yaml.Unmarshal(b, &cfg); err != nil {
-				return cfg, fmt.Errorf("parse config %s: %w", path, err)
+		if err != nil {
+			if os.IsNotExist(err) && !explicit {
+				slog.Debug("config file not found, using defaults", "path", path)
+			} else {
+				return cfg, fmt.Errorf("read config %s: %w", path, err)
 			}
+		} else if err := yaml.Unmarshal(b, &cfg); err != nil {
+			return cfg, fmt.Errorf("parse config %s: %w", path, err)
 		}
 	}
 	cfg.applyEnvFallback()
@@ -167,13 +172,26 @@ func WriteAddrFile(workDir, name, addr string) {
 		slog.Warn("create workdir for addr file", "path", workDir, "error", err)
 		return
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	// 用 CreateTemp 而非固定 .tmp 名：同机多实例共享 workdir 时避免互相覆盖临时文件。
+	tmp, err := os.CreateTemp(workDir, "addr."+name+".*.tmp")
+	if err != nil {
+		slog.Warn("create addr file temp", "path", path, "error", err)
+		return
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
 		slog.Warn("write addr file", "path", path, "error", err)
 		return
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		slog.Warn("write addr file", "path", path, "error", err)
+		return
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
 		slog.Warn("commit addr file", "path", path, "error", err)
 		return
 	}

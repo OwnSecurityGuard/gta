@@ -9,13 +9,20 @@ import (
 )
 
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
-	cfg, err := Load(filepath.Join(t.TempDir(), "nope.yaml"))
+	cfg, err := Load(filepath.Join(t.TempDir(), "nope.yaml"), false)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.WorkDir != "" || cfg.MCP.Addr != "" || cfg.Pipeline.ControlAddr != "" ||
 		cfg.Pipeline.RegistryAddr != "" || cfg.Pipeline.AgentIngestAddr != "" || cfg.Proxy.ServerAddr != "" {
 		t.Fatalf("expected zero config for missing file, got %+v", cfg)
+	}
+}
+
+// 显式指定（如 -config）的配置文件不存在必须硬错误，不能静默退回默认配置。
+func TestLoadExplicitMissingPathErrors(t *testing.T) {
+	if _, err := Load(filepath.Join(t.TempDir(), "nope.yaml"), true); err == nil {
+		t.Fatal("expected error for explicitly-requested missing config")
 	}
 }
 
@@ -35,7 +42,7 @@ proxy:
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := Load(path, true)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -47,7 +54,7 @@ proxy:
 	// 未在文件中配置的字段由环境变量兜底。
 	t.Setenv("GTA_AGENT_INGEST_ADDR", ":9094")
 	t.Setenv("GTA_MCP_ALLOWED_ORIGINS", "http://a.example.com")
-	cfg, err = Load(path)
+	cfg, err = Load(path, true)
 	if err != nil {
 		t.Fatalf("Load with env: %v", err)
 	}
@@ -63,7 +70,7 @@ func TestEnvOverridesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GTA_REGISTRY_ADDR", ":9199")
-	cfg, err := Load(path)
+	cfg, err := Load(path, true)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -77,7 +84,7 @@ func TestLoadInvalidYAML(t *testing.T) {
 	if err := os.WriteFile(path, []byte("mcp: [broken"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err == nil {
+	if _, err := Load(path, true); err == nil {
 		t.Fatal("expected parse error")
 	}
 }

@@ -42,6 +42,7 @@ jobs:
       - name: Generate go.work (interim, do not commit go.work)
         run: |
           cat > go.work <<'EOF'
+          // go 版本须与 go.mod 的 go 指令保持一致（当前 1.25.5）；升级 go.mod 时同步此处。
           go 1.25.5
 
           use (

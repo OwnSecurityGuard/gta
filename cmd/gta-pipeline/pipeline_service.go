@@ -56,6 +56,11 @@ type pipelineService struct {
 	spawnAgent     bool
 	agentBin       string
 	agentProc      *agentProcess
+
+	// proxyServerAddrOverride 是 T11 注入的 server_addr 兜底值（gta.yaml
+	// proxy.server_addr / GTA_PROXY_SERVER_ADDR）。proxy.json 未指定 server_addr
+	// 时生效；为空表示无覆盖（沿用 DefaultProxyServerConfig 默认值）。
+	proxyServerAddrOverride string
 }
 
 // newPipelineService 构造 pipelineService，不启动任何会话。

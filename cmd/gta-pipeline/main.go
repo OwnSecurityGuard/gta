@@ -32,7 +32,14 @@ import (
 )
 
 func main() {
-	workDir := flag.String("workdir", ".", "working directory")
+	// 统一配置（T10）：-config 指向 gta.yaml（可选）。每个设置项的优先级：
+	// flag（显式传入） > 环境变量 GTA_* > gta.yaml > 默认值（即各 flag 默认值）。
+	// 不传 -config 且未设置环境变量时，行为与历史版本完全一致。
+	cfgPath := flag.String("config", "", "统一配置文件 gta.yaml 路径（可选；优先级 flag > 环境变量 GTA_* > 配置文件 > 默认值）")
+	// 工作目录解析规则（T10）：显式 -workdir > GTA_HOME > gta.yaml workdir >
+	// CWD 既有数据探测（存在 control.sqlite/sessions/runs 时沿用 CWD，避免破坏
+	// 老用户数据发现）> ~/.gta。GTA_HOME 显式设置时始终优先于 ~/.gta。
+	workDir := flag.String("workdir", ".", "working directory（显式传参优先；否则 GTA_HOME > gta.yaml workdir > CWD 既有数据沿用 > ~/.gta）")
 	rulesPath := flag.String("rules", "", "rules.yaml path")
 	protocolPath := flag.String("protocol", "", "protocol.yaml path (Protocol Behavior Resolver)")
 	controlPath := flag.String("control", "", "control.sqlite path (default: <workdir>/control.sqlite)")
@@ -48,7 +55,37 @@ func main() {
 	agentBin := flag.String("agent-bin", "", "path to gta-singbox-agent binary (default: <workdir>/bin/gta-singbox-agent[.exe])")
 	flag.Parse()
 
-	absWorkDir, _ := filepath.Abs(*workDir)
+	// 加载统一配置并按优先级合并（flag 显式 > 环境变量 > 文件 > 默认值）。
+	// 环境变量兜底已在 config.Load 内应用；cfg 字段为空表示"未配置"。
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		slog.Error("load config", "path", *cfgPath, "error", err)
+		os.Exit(1)
+	}
+	flagSet := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
+	// eff 返回某设置项的最终值：flag 显式传入 > 配置（文件/环境变量）> flag 默认值。
+	eff := func(name, flagVal, cfgVal, def string) string {
+		if flagSet[name] {
+			return flagVal
+		}
+		if cfgVal != "" {
+			return cfgVal
+		}
+		return def
+	}
+	controlAddrFlag := *controlAddr
+	registryAddrFlag := *registryAddr
+	agentIngestAddrFlag := *agentIngestAddr
+	*controlAddr = eff("control-addr", controlAddrFlag, cfg.Pipeline.ControlAddr, config.DefaultControlAddr)
+	*registryAddr = eff("registry-addr", registryAddrFlag, cfg.Pipeline.RegistryAddr, config.DefaultRegistryAddr)
+	*agentIngestAddr = eff("agent-ingest-addr", agentIngestAddrFlag, cfg.Pipeline.AgentIngestAddr, config.DefaultAgentIngestAddr)
+
+	absWorkDir, err := config.ResolveWorkDir(*workDir, flagSet["workdir"], cfg.WorkDir)
+	if err != nil {
+		slog.Error("resolve workdir", "error", err)
+		os.Exit(1)
+	}
 
 	// 统一日志初始化：文件落盘 + stderr 双写 + 按大小轮转
 	logCfg := logging.DefaultConfig()
@@ -116,6 +153,8 @@ func main() {
 		slog.Error("listen registry", "error", err)
 		os.Exit(1)
 	}
+	// 实际监听地址回写（:0 动态端口时外部从此文件读取真实地址，同机可跑多套）。
+	config.WriteAddrFile(absWorkDir, "registry", registryLis.Addr().String())
 	defer registryLis.Close()
 	registryGrpc := grpc.NewServer()
 	pluginpb.RegisterPluginRegistryServer(registryGrpc, registry)
@@ -130,6 +169,9 @@ func main() {
 	}()
 
 	engine := newPipelineService(absWorkDir, controlStore, registry, rules, protocolCfg, *registryAddr)
+	// T11：gta.yaml 的 proxy.server_addr（含 GTA_PROXY_SERVER_ADDR 兜底）作为
+	// proxy.json 未指定 server_addr 时的兜底值。
+	engine.proxyServerAddrOverride = cfg.Proxy.ServerAddr
 
 	// AgentIngest gRPC server：gta-agent 推送本机原始帧的入口（团队协作模式）。
 	// 默认 :9092；-agent-ingest-addr 传空字符串禁用。鉴权复用 pkg/auth：
@@ -151,6 +193,7 @@ func main() {
 			slog.Error("listen agent ingest", "error", err)
 			os.Exit(1)
 		}
+		config.WriteAddrFile(absWorkDir, "agent-ingest", agentLis.Addr().String())
 		defer agentLis.Close()
 		agentIngestGrpc = grpc.NewServer(
 			grpc.ChainStreamInterceptor(auth.StreamInterceptor(authResolver)),
@@ -179,6 +222,7 @@ func main() {
 		slog.Error("listen", "error", err)
 		os.Exit(1)
 	}
+	config.WriteAddrFile(absWorkDir, "control", listener.Addr().String())
 	defer listener.Close()
 
 	grpcSrv := grpc.NewServer()
@@ -228,8 +272,12 @@ func main() {
 		}
 	}()
 
-	// 插件应使用的 registry 端点，即 -registry-addr 的值（默认 :9091）。
+	// 插件应使用的 registry 端点：默认取 -registry-addr 的值（默认 :9091）；
+	// 配置为 ":0" 动态端口时改用监听器解析出的实际地址（否则插件无法连接）。
 	regEndpoint := *registryAddr
+	if _, port, perr := net.SplitHostPort(*registryAddr); perr == nil && port == "0" {
+		regEndpoint = registryLis.Addr().String()
+	}
 
 	slog.Info("gta-pipeline starting",
 		"workdir", absWorkDir,

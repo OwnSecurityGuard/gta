@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -2457,10 +2458,14 @@ func resolvePluginsDir(input string) (string, error) {
 }
 
 func main() {
-	addr := flag.String("addr", ":8781", "SSE server address")
+	// 统一配置（T10）：-config 指向 gta.yaml（可选）。优先级 flag > 环境变量 GTA_* > 配置文件 > 默认值。
+	cfgPath := flag.String("config", "", "统一配置文件 gta.yaml 路径（可选；优先级 flag > 环境变量 GTA_* > 配置文件 > 默认值）")
+	addr := flag.String("addr", ":8781", "SSE server address（支持 :0 动态分配，实际地址回写 <workdir>/addr.mcp.json）")
 	iface := flag.String("iface", "", "capture interface; empty means all available interfaces")
 	pluginsDir := flag.String("plugins-dir", "plugins", "plugins directory")
-	workDir := flag.String("work-dir", ".", "working directory for session databases")
+	// 工作目录解析规则（T10）：显式 -work-dir > GTA_HOME > gta.yaml workdir >
+	// CWD 既有数据探测（存在 control.sqlite/sessions/runs 时沿用 CWD）> ~/.gta。
+	workDir := flag.String("work-dir", ".", "working directory for session databases（显式传参优先；否则 GTA_HOME > gta.yaml workdir > CWD 既有数据沿用 > ~/.gta）")
 	pipelineAddr := flag.String("pipeline-addr", ":9888", "gta-pipeline gRPC 地址（默认 :9888）")
 	debug := flag.Bool("debug", false, "enable debug logging")
 	enableRawDebug := flag.Bool("enable-raw-debug", os.Getenv("GTA_MCP_ENABLE_RAW_DEBUG") == "1", "暴露原始包调试工具（list_raw_packets / decode_raw_packets），仅限插件开发调试；默认关闭")
@@ -2469,8 +2474,36 @@ func main() {
 	allowedOrigins := flag.String("allowed-origins", os.Getenv("GTA_MCP_ALLOWED_ORIGINS"), "CORS 允许的跨域 Origin（逗号分隔，如 http://localhost:5173,https://gta.example.com）；留空不返回 CORS 头（同源用法不受影响）")
 	flag.Parse()
 
+	// 加载统一配置并按优先级合并（flag 显式 > 环境变量 > 文件 > 默认值）。
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		slog.Error("load config", "path", *cfgPath, "error", err)
+		os.Exit(1)
+	}
+	flagSet := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
+	if !flagSet["addr"] && cfg.MCP.Addr != "" {
+		*addr = cfg.MCP.Addr
+	}
+	// pipeline-addr 是要连接的 pipeline CaptureControl gRPC 地址，与 pipeline 的
+	// control_addr 是同一个配置点（gta.yaml pipeline.control_addr / GTA_CONTROL_ADDR）。
+	if !flagSet["pipeline-addr"] && cfg.Pipeline.ControlAddr != "" {
+		*pipelineAddr = cfg.Pipeline.ControlAddr
+	}
+	// allowed-origins 的 flag 默认值本身就读 GTA_MCP_ALLOWED_ORIGINS（环境变量已兜底），
+	// 这里只在 flag 未显式传入且环境变量为空时用配置文件值补齐。
+	if !flagSet["allowed-origins"] && *allowedOrigins == "" && cfg.MCP.AllowedOrigins != "" {
+		*allowedOrigins = cfg.MCP.AllowedOrigins
+	}
+
+	// 工作目录：显式 flag > GTA_HOME > gta.yaml workdir > CWD 既有数据沿用 > ~/.gta。
+	absWorkDir, err := config.ResolveWorkDir(*workDir, flagSet["work-dir"], cfg.WorkDir)
+	if err != nil {
+		slog.Error("resolve workdir", "error", err)
+		os.Exit(1)
+	}
+
 	// 统一日志初始化：文件落盘 + stderr 双写 + 按大小轮转
-	absWorkDir, _ := filepath.Abs(*workDir)
 	logCfg := logging.DefaultConfig()
 	if *debug {
 		logCfg.Level = slog.LevelDebug
@@ -2847,8 +2880,16 @@ func main() {
 		Addr:    *addr,
 		Handler: handler,
 	}
-	slog.Info("mcp server listening", "addr", *addr, "endpoints", []string{"/sse", "/message", "/mcp"}, "raw_debug_enabled", capture.enableRawDebug, "auth_enabled", resolver.Required(), "allowed_origins", *allowedOrigins)
-	if err := customServer.ListenAndServe(); err != nil {
+	// 用 net.Listen 以便拿到实际监听地址（:0 动态分配时回写 <workdir>/addr.mcp.json，
+	// 同机可跑多套实例）。
+	lis, err := net.Listen("tcp", *addr)
+	if err != nil {
+		slog.Error("listen", "addr", *addr, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("mcp server listening", "addr", lis.Addr().String(), "endpoints", []string{"/sse", "/message", "/mcp"}, "raw_debug_enabled", capture.enableRawDebug, "auth_enabled", resolver.Required(), "allowed_origins", *allowedOrigins)
+	config.WriteAddrFile(absWorkDir, "mcp", lis.Addr().String())
+	if err := customServer.Serve(lis); err != nil && err != http.ErrServerClosed {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
 	}

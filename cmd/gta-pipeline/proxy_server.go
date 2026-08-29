@@ -122,7 +122,9 @@ func (s *pipelineService) StartAlwaysOnProxy(spawnAgent bool, agentBin string) {
 	s.spawnAgent = spawnAgent
 	s.agentBin = agentBin
 
-	cfg, err := config.LoadProxyServerConfig(s.proxyPath)
+	// T11：proxy.json 未指定 server_addr 时，回退到统一配置（gta.yaml
+	// proxy.server_addr / GTA_PROXY_SERVER_ADDR），最后才是硬编码默认值。
+	cfg, err := config.LoadProxyServerConfigWithDefault(s.proxyPath, s.proxyServerAddrOverride)
 	if err != nil {
 		s.logger.Warn("load proxy config failed, using defaults", "error", err)
 	} else {

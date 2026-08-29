@@ -38,11 +38,21 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 	})
 }
 
+// requiredResolver 是带 Required() 的 auth.Resolver：报告是否配置了 token
+//（与 auth.StaticResolver.Required 语义一致）。
+type requiredResolver interface {
+	auth.Resolver
+	Required() bool
+}
+
 // authMiddleware 按需接入 Bearer 鉴权。resolver 未配置任何 token（匿名模式）
 // 时直接透传、不注入身份——单机用法与 T12 之前完全一致（ctx 中无 Principal，
 // owner 语义为匿名）；配置了 token 后未携带/携带无效凭证的请求返回 401。
 func authMiddleware(resolver auth.Resolver, next http.Handler) http.Handler {
-	if r, ok := resolver.(*auth.StaticResolver); !ok || !r.Required() {
+	if resolver == nil {
+		return next
+	}
+	if rc, ok := resolver.(requiredResolver); ok && !rc.Required() {
 		return next
 	}
 	return auth.Middleware(resolver, next)

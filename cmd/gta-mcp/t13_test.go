@@ -332,3 +332,82 @@ func TestAuthMiddlewareAnonymousModeUnchanged(t *testing.T) {
 		t.Error("anonymous mode must not inject a Principal (T12 前行为回归底线)")
 	}
 }
+
+// admin token（":admin" 后缀）经完整 HTTP 中间件链后，handler 收到 IsAdmin 身份。
+func TestAuthMiddlewareAdminToken(t *testing.T) {
+	resolver, err := auth.ParseTokens("root=gta_root:admin,alice=gta_alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotAdmin bool
+	var gotOwner string
+	base := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p, ok := auth.PrincipalFrom(r.Context()); ok {
+			gotAdmin, gotOwner = p.IsAdmin, p.Owner
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	h := buildHTTPHandler(nil, resolver, base)
+
+	for _, tc := range []struct {
+		token     string
+		wantAdmin bool
+		wantOwner string
+	}{
+		{"gta_root", true, "root"},
+		{"gta_alice", false, "alice"},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/mcp", nil)
+		req.Header.Set("Authorization", "Bearer "+tc.token)
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || gotOwner != tc.wantOwner || gotAdmin != tc.wantAdmin {
+			t.Errorf("token %q = %d owner=%q admin=%v; want 200/%s/%v",
+				tc.token, rec.Code, gotOwner, gotAdmin, tc.wantOwner, tc.wantAdmin)
+		}
+	}
+}
+
+// 评审修复回归：controlStore 有他人会话记录、本地无 metadata.json（os.Stat
+// 合成路径）时，匿名调用方不得通过 getDBPath 拿到他人会话的 db_path。
+func TestGetDBPathControlStoreRecordNoFSFallback(t *testing.T) {
+	workDir := t.TempDir()
+	cs, err := store.NewControlStore(filepath.Join(workDir, "control.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	m := &mcpCapture{sessionMgr: newSessionManager(workDir), controlStore: cs}
+
+	dbPath := filepath.Join(workDir, "sessions", "alice-s1", "capture.sqlite")
+	// 伪造 alice 会话的 capture.sqlite 文件存在（无 metadata.json），
+	// 复现 os.Stat 合成 Owner="" 元数据的泄露路径。
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dbPath, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := cs.CreateSession(ctx, store.SessionMeta{
+		Owner: "alice", SessionID: "alice-s1", Status: "stopped", DBPath: dbPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 匿名调用方：拒绝（不得经合成路径拿到 db_path）
+	if got, err := m.getDBPath(context.Background(), "alice-s1"); err == nil && got != "" {
+		t.Fatalf("anonymous getDBPath leaked db_path %q", got)
+	}
+	// bob：拒绝
+	bob := auth.WithPrincipal(context.Background(), &auth.Principal{Owner: "bob"})
+	if got, err := m.getDBPath(bob, "alice-s1"); err == nil && got != "" {
+		t.Fatalf("bob getDBPath leaked db_path %q", got)
+	}
+	// alice 本人：可见
+	alice := auth.WithPrincipal(context.Background(), &auth.Principal{Owner: "alice"})
+	if got, err := m.getDBPath(alice, "alice-s1"); err != nil || got != dbPath {
+		t.Fatalf("alice getDBPath = %q, %v; want %q", got, err, dbPath)
+	}
+}

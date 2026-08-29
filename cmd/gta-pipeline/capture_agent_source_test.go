@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/auth"
 	"gta/pkg/capture/agent"
 	"gta/pkg/internalipc/capturecontrol"
@@ -78,5 +79,48 @@ func TestPipelineService_StartSessionEmptySource(t *testing.T) {
 	s, _, _ := newTestPipelineService(t)
 	if _, err := s.StartSession(context.Background(), capturecontrol.StartSessionRequest{Plugin: "tcp"}); err == nil {
 		t.Fatal("empty source should fail")
+	}
+}
+
+// GetPluginManifest owner 作用域：admin 可查任意 owner 的插件，
+// 其他 owner 的插件不可见（评审补充用例）。
+func TestPipelineService_GetPluginManifestAdmin(t *testing.T) {
+	s, _, _ := newTestPipelineService(t)
+
+	manifest := `api_version: gta.decoder/v2
+name: alice-plugin
+protocol: test_proto
+type: decoder
+capabilities:
+  decode: true
+  schema: true
+schemas:
+  - id: test.player.v1
+    version: 1
+    strict: true
+    fields:
+      hp: { type: uint32 }
+`
+	if _, err := s.registry.Register(
+		auth.WithPrincipal(context.Background(), &auth.Principal{Owner: "alice"}),
+		&pb.RegisterRequest{SocketPath: "unix:/nonexistent/decoder.sock", Manifest: []byte(manifest)},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// alice 自己：可见
+	if _, err := s.GetPluginManifest(
+		auth.WithPrincipal(context.Background(), &auth.Principal{Owner: "alice"}), "alice-plugin"); err != nil {
+		t.Fatalf("owner lookup should succeed: %v", err)
+	}
+	// bob：不可见
+	if _, err := s.GetPluginManifest(
+		auth.WithPrincipal(context.Background(), &auth.Principal{Owner: "bob"}), "alice-plugin"); err == nil {
+		t.Fatal("bob should not see alice's plugin manifest")
+	}
+	// admin：可见
+	if _, err := s.GetPluginManifest(
+		auth.WithPrincipal(context.Background(), &auth.Principal{Owner: "root", IsAdmin: true}), "alice-plugin"); err != nil {
+		t.Fatalf("admin lookup should succeed: %v", err)
 	}
 }

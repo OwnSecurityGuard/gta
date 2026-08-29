@@ -460,19 +460,19 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 	}
 
 	// 抓包来源：nic（网卡，默认）| proxy（移动代理 gta-singbox-agent 推送）| agent（gta-agent 推流）
+	// "mobile" 是 proxy 的历史别名。
 	source := req.GetString("source", "nic")
+	if source == "mobile" {
+		source = "proxy"
+	}
 	agentSource := false
 	switch source {
-	case "", "nic", "proxy", "mobile", "agent":
+	case "", "nic", "proxy", "agent":
 	default:
 		return errorResult(fmt.Errorf("unsupported source %q (allowed: nic|proxy|agent)", source)), nil
 	}
-	if source == "mobile" {
-		source = "proxy" // 归一化别名
-	}
 	if source == "agent" {
 		agentSource = true
-		source = "agent"
 	}
 	if source == "mobile" {
 		source = "proxy" // 归一化别名
@@ -2083,19 +2083,28 @@ func (m *mcpCapture) openReader(ctx context.Context, sessionID string) (captureR
 	return m.readerOpener(dbPath)
 }
 
-// authorizeSession 校验调用方对指定会话的可见性（metadata.json + controlStore 双源）。
+// authorizeSession 校验调用方对指定会话的可见性（controlStore + metadata.json 双源）。
 // 规则与 store.SessionOwnerFilter.Matches 一致：admin 全可见；否则仅 owner 匹配的会话。
-// 会话两个数据源都查不到时放行——让后续 db_path 解析自然走 "not found" 路径，不泄露存在性。
+// 防泄露规则：controlStore 中存在该会话但调用方不可见时直接拒绝，绝不回退到
+// 文件系统路径（metadata.json 缺失时 readSessionMetadata 会按 os.Stat 合成
+// Owner="" 的元数据，若回退将把他人会话的 db_path 泄露给匿名调用方）。
+// 仅当 controlStore 完全查不到该会话（workDir 漂移等）时才走 metadata.json 兜底。
 func (m *mcpCapture) authorizeSession(ctx context.Context, sessionID string) error {
 	f := ownerFilterFromCtx(ctx)
 	if f.AllOwners {
 		return nil
 	}
-	// 1. controlStore（含 owner 过滤，查到即已通过校验）
+	// 1. controlStore：按 owner 过滤，命中即通过；
+	//    会话存在但不可见 → 拒绝（不回退，见函数注释）。
 	if m.controlStore != nil && sessionID != "" {
-		if meta, err := m.controlStore.GetSessionFor(ctx, sessionID, f); err == nil && meta != nil {
+		meta, err := m.controlStore.GetSessionFor(ctx, sessionID, f)
+		if err == nil && meta != nil {
 			return nil
 		}
+		if _, errAll := m.controlStore.GetSession(ctx, sessionID); errAll == nil {
+			return fmt.Errorf("session %s not found or not owned by you", sessionID)
+		}
+		// controlStore 无此会话记录 → 文件系统兜底
 	}
 	// 2. sessionMgr metadata.json（本地文件，需自行比对 Owner）
 	if meta, err := m.sessionMgr.readSessionMetadata(sessionID, f.Owner); err == nil && meta != nil {
@@ -2817,8 +2826,6 @@ func main() {
 	mux.Handle("/message", sseServer.MessageHandler())
 	mux.Handle("/mcp", httpServer)
 	mux.HandleFunc("/events/plugins", capture.handleEventsSSE)
-	// 手机 sing-box 客户端远程 profile 配置端点（扫码导入用）。
-	mux.HandleFunc("/singbox/profile", capture.handleSingboxProfile)
 
 	// CORS：仅放行 -allowed-origins 中的 Origin（T12 之前是 *，任意站点都能
 	// 跨域调用 MCP 工具）。未配置任何 origin 时不返回 CORS 头，同源用法不受影响。
@@ -2829,7 +2836,15 @@ func main() {
 		slog.Error("load auth tokens failed", "error", err)
 		os.Exit(1)
 	}
-	handler := buildHTTPHandler(strings.Split(*allowedOrigins, ","), resolver, mux)
+	authed := buildHTTPHandler(strings.Split(*allowedOrigins, ","), resolver, mux)
+
+	// /singbox/profile 鉴权豁免：手机 sing-box 客户端扫码导入 profile 时无法携带
+	// Bearer 头（SFA 不支持自定义请求头）。该端点只输出代理监听端口/地址配置
+	// （与扫码页展示的信息一致），不含任何会话/抓包数据，故挂载在鉴权链之外。
+	root := http.NewServeMux()
+	root.HandleFunc("/singbox/profile", capture.handleSingboxProfile)
+	root.Handle("/", authed)
+	handler := http.Handler(root)
 
 	customServer := &http.Server{
 		Addr:    *addr,

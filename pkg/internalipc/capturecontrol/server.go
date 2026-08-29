@@ -433,6 +433,12 @@ func (s *Server) TestPlugin(ctx context.Context, req *pb.TestPluginRequest) (*pb
 // withRequestOwner 把 MCP 透传来的调用方身份（owner/all_owners）注入 ctx，
 // 使 engine 侧能经 auth.OwnerFrom/auth.PrincipalFrom 做 owner 作用域过滤。
 // 两者均为空表示匿名/本地语境，不注入（engine 侧 OwnerFrom 返回 ""，行为不变）。
+//
+// 信任边界：owner/all_owners 是 RPC 请求字段，不由 gRPC 层校验——本 server
+// 假定 CaptureControl 监听在 localhost、唯一客户端是同机的 gta-mcp（管道内
+// 已有 HTTP Bearer 鉴权）。任何能直接连上该端口的进程都可伪造身份；若要把
+// 监听开放到非回环地址，必须先接入与 HTTP 侧同级的 gRPC Bearer 拦截器
+// （pkg/auth.UnaryInterceptor）。
 func withRequestOwner(ctx context.Context, owner string, allOwners bool) context.Context {
 	if owner == "" && !allOwners {
 		return ctx

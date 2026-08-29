@@ -167,6 +167,12 @@ func main() {
 
 	// CaptureControl gRPC server：供 gta-mcp / gta-trace 调用。
 	// 默认 :8088（TCP），可通过 -control-addr 覆盖。
+	//
+	// 信任边界：本 server 的鉴权语义假设唯一客户端是同机 gta-mcp（其 HTTP 层
+	// 已做 Bearer 鉴权）。StartCapture/ListPlugins 等请求里的 owner/all_owners
+	// 字段不做 gRPC 层校验——能直连本端口的进程可伪造任意身份。当前默认绑到
+	// 全接口（":9888"），把控制面暴露到局域网属于已知风险；收紧为回环监听或
+	// 接入 pkg/auth.UnaryInterceptor 是后续加固项（见 T12/T13 评审记录）。
 	var listener net.Listener
 	listener, err = internalipc.ListenAddr(*controlAddr)
 	if err != nil {

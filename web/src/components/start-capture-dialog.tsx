@@ -14,8 +14,9 @@ interface StartCaptureDialogProps {
   onRunLinked?: (runId: string, sessionId: string) => void;
 }
 
-/** 开始抓包对话框：网卡抓包（移动代理抓包为常驻服务，见「代理服务器配置」页）。 */
+/** 开始抓包对话框：本机网卡抓包 / 远程 agent 推流（移动代理抓包为常驻服务，见「代理服务器配置」页）。 */
 export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: StartCaptureDialogProps) {
+  const [source, setSource] = useState<"nic" | "agent">("nic");
   const [port, setPort] = useState("8080");
   const [plugin, setPlugin] = useState("");
   const [started, setStarted] = useState(false);
@@ -37,12 +38,13 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
 
   function handleStart() {
     const p = parseInt(port, 10);
-    if (!p || p <= 0) return;
+    // 仅本机网卡抓包要求端口（BPF 过滤用）；远程 agent 由 agent 侧自行过滤，端口可留空。
+    if (source === "nic" && (!p || p <= 0)) return;
     start.mutate(
       {
-        port: p,
+        port: p > 0 ? p : 0,
         plugin: plugin || undefined,
-        source: "nic",
+        source,
       },
       {
         onSuccess: (data) => {
@@ -50,6 +52,15 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
           if (sessionId) onStarted?.(sessionId);
           toast.success("抓包会话已启动", `端口 ${port}${plugin ? ` · 插件 ${plugin}` : ""}`);
           // 自动开启行为窗口，与本次抓包会话联动（start_capture 已写入 current.json）。
+          // 仅本机网卡抓包联动（有明确端口可生成 BPF 过滤）；agent 源的窗口由 agent 侧另行开启。
+          if (source !== "nic") {
+            setStarted(true);
+            setTimeout(() => {
+              setStarted(false);
+              onClose();
+            }, 800);
+            return;
+          }
           const dbPath = data?.db_path ?? "";
           const sessionDir = dbPath.replace(/[\\/][^\\/]+$/, "") || `session-${sessionId}`;
           begin.mutate(
@@ -88,8 +99,8 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
       open={open}
       onClose={onClose}
       icon={<Play className="h-5 w-5" />}
-      title="开始网卡抓包"
-      description="移动代理抓包为常驻服务，请在「代理服务器配置」中查看连接二维码；此处仅用于本机网卡抓包。"
+      title="开始抓包"
+      description="本机网卡抓包，或由远程 agent 推流；移动代理抓包为常驻服务，请在「代理服务器配置」中查看连接二维码。"
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
@@ -113,13 +124,46 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
     >
       <div className="space-y-3">
         <div>
+          <label className="text-sm font-medium">抓包源</label>
+          <div className="mt-1.5 flex items-center gap-1 rounded-lg bg-muted p-1">
+            {(
+              [
+                { id: "nic", label: "本机网卡" },
+                { id: "agent", label: "远程 agent" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={source === opt.id}
+                onClick={() => setSource(opt.id)}
+                className={
+                  "flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-[background-color,color] " +
+                  (source === opt.id
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground")
+                }
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {source === "agent" && (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              需在成员机运行 <code className="font-mono">gta-agent --server &lt;服务端&gt;:9091 --token &lt;令牌&gt;</code>
+              ，agent 会抓取本机流量并推流到此会话（端口可留空）。
+            </p>
+          )}
+        </div>
+        <div>
           <label className="text-sm font-medium">端口</label>
           <Input
             value={port}
             onChange={(e) => setPort(e.target.value)}
             aria-label="监听端口"
             inputMode="numeric"
-            placeholder="8080"
+            placeholder={source === "nic" ? "8080" : "可留空"}
             className="mt-1.5 font-mono"
           />
         </div>

@@ -266,11 +266,11 @@ export default function App() {
               size="sm"
               className="h-8"
               onClick={() => setStartOpen(true)}
-              title="开始网卡抓包"
-              aria-label="开始网卡抓包"
+              title="开始抓包（本机网卡 / 远程 agent）"
+              aria-label="开始抓包"
             >
               <Play className="h-4 w-4" />
-              网卡抓包
+              开始抓包
             </Button>
             {isSelectedRunning && (
               <Button
@@ -364,7 +364,7 @@ export default function App() {
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {/* 代理服务器配置弹窗 */}
       <ProxyConfigDialog open={proxyConfigOpen} onClose={() => setProxyConfigOpen(false)} />
-      {/* 开始网卡抓包弹窗 */}
+      {/* 开始抓包弹窗（本机网卡 / 远程 agent 源） */}
       <StartCaptureDialog
         open={startOpen}
         onClose={() => setStartOpen(false)}

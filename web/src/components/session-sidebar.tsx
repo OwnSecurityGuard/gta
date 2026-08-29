@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   useSessions,
@@ -336,12 +336,16 @@ export function SessionSidebar({
   const identity = useIdentity();
   const [ownerView, setOwnerView] = useState<"all" | "mine">("all");
 
+  // 身份丢失（切号/登出窗口）时回落到「全部」，避免上一位用户的「只看我的」与缓存错位。
+  useEffect(() => {
+    if (identity === null) setOwnerView("all");
+  }, [identity]);
+
   const sessions = data?.sessions ?? [];
 
-  // admin 可见态：身份头标记 admin，或列表里出现了非本人归属的会话（兜底）。
-  // 出现他人会话说明当前身份能跨 owner 查看（服务端已按身份过滤）。
+  // 出现他人归属的会话（且身份已回显）说明当前身份能跨 owner 查看（服务端已按身份过滤）。
   const foreignOwners = sessions.some(
-    (s) => !!s.owner && (!identity || s.owner !== identity.owner),
+    (s) => identity !== null && !!s.owner && s.owner !== identity.owner,
   );
   const showOwnerFilter = identity?.isAdmin === true || (identity !== null && foreignOwners);
 
@@ -381,7 +385,11 @@ export function SessionSidebar({
 
       {/* admin 视图筛选：默认「全部」 */}
       {showOwnerFilter && (
-        <div className="flex items-center gap-1 border-b px-4 py-2">
+        <div
+          className="flex items-center gap-1 border-b px-4 py-2"
+          role="group"
+          aria-label="会话视图筛选"
+        >
           <span className="mr-1 text-xs text-muted-foreground">视图</span>
           {(
             [

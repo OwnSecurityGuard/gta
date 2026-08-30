@@ -23,6 +23,21 @@ import (
 	"gta/pkg/version"
 )
 
+// embeddedAgentConfig 是下载形态 agent 经由 go:embed 烧进二进制的固化配置。
+// 其中 Server 取其 registry 端口（host:9091），ingest 由 deriveAddrs 自动取 port+1。
+// Iface 通常为空——目标机器网卡名无法预知，运行时自动探测默认网卡。
+type embeddedAgentConfig struct {
+	Server       string   `json:"server,omitempty"`        // 回连服务端 host:port（port 为 registry 端口）
+	RegistryAddr string   `json:"registry_addr,omitempty"` // 可选：显式覆盖 registry 地址
+	IngestAddr   string   `json:"ingest_addr,omitempty"`   // 可选：显式覆盖 ingest 推流地址
+	Token        string   `json:"token,omitempty"`         // 团队 token（gta_xxx）；空为匿名
+	SessionID    string   `json:"session,omitempty"`       // 目标抓包会话 id（服务端接收端关联）
+	Iface        string   `json:"iface,omitempty"`         // 预留：抓包网卡名（默认自动探测）
+	BPF          string   `json:"bpf,omitempty"`           // BPF 过滤表达式（端口已换算）
+	PluginDir    string   `json:"plugin_dir,omitempty"`    // 本地插件发现根目录
+	BindPlugins  []string `json:"plugin_names,omitempty"`  // 仅托管这些名字的本地插件（空=托管全部）
+}
+
 func main() {
 	var (
 		server        string
@@ -60,8 +75,39 @@ func main() {
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
+	// 固化配置（-tags embedded 下载形态）：任何命令行参数为空时以其作为默认值。
+	// 这样下载回来的 agent 无需填任何参数（含 token）即可回连、托管插件并抓包。
+	embedded, hasEmbedded := loadEmbeddedConfig()
+	if hasEmbedded && embedded != nil {
+		if server == "" {
+			server = embedded.Server
+		}
+		if registryAddr == "" {
+			registryAddr = embedded.RegistryAddr
+		}
+		if ingestAddr == "" {
+			ingestAddr = embedded.IngestAddr
+		}
+		if token == "" {
+			token = embedded.Token
+		}
+		if sessionID == "" {
+			sessionID = embedded.SessionID
+		}
+		if iface == "" {
+			iface = embedded.Iface
+		}
+		if bpf == "" {
+			bpf = embedded.BPF
+		}
+		if pluginDir == "" {
+			pluginDir = embedded.PluginDir
+		}
+	}
+
 	// 参数校验：非法值 fail-fast，避免静默错误行为。
-	if sessionID != "" && iface == "" {
+	// 固化模式下 session 自带、网卡可自动探测，故不再强制 --iface。
+	if sessionID != "" && iface == "" && !hasEmbedded {
 		slog.Error("--iface is required when --session is set (capture target)")
 		os.Exit(1)
 	}
@@ -95,12 +141,24 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// 1) 插件托管（无需抓包即可工作）。
-	sup := &pluginSupervisor{dir: pluginDir, registryAddr: registry, token: token}
+	// 1) 插件托管（无需抓包即可工作）。固化模式下仅托管白名单内的插件。
+	var bind []string
+	if hasEmbedded && embedded != nil {
+		bind = embedded.BindPlugins
+	}
+	sup := &pluginSupervisor{dir: pluginDir, registryAddr: registry, token: token, bind: bind}
 	sup.run(ctx, &wg)
+	slog.Info("plugin supervisor configured", "bind_plugins", bind)
 
-	// 2) 抓包推流（可选）。
-	if sessionID != "" && iface != "" {
+	// 2) 抓包推流（可选）。固化模式未固化网卡名时自动探测默认网卡。
+	if sessionID != "" {
+		if iface == "" {
+			iface, err = resolveDefaultIface()
+			if err != nil {
+				slog.Error("capture requires a network interface, but none could be resolved", "error", err)
+				os.Exit(1)
+			}
+		}
 		capCfg := captureConfig{Iface: iface, BPF: bpf, SnapLen: int32(snapLen), Promisc: promisc}
 		packets := make(chan *proto.RawPacket, 1024)
 		capEnded := make(chan error, 1)

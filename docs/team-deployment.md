@@ -85,6 +85,18 @@ HTTP 路由：`/sse`、`/message`、`/mcp`、`/events/plugins` 均在鉴权链�
 
 **监听地址回写**：各 gRPC/HTTP 服务实际监听地址会回写到 `<workdir>/addr.<name>.json`（如 `addr.mcp.json`、`addr.control.json`），方便多实例/动态端口场景读取。
 
+### 启动排障
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 构建卡在 `go mod download`，报 `proxy.golang.org ... connection refused` | builder 镜像默认 `GOPROXY` 是 proxy.golang.org，国内网络不可达 | 镜像已默认改用 `goproxy.cn`；如仍失败显式换源：`docker compose build --build-arg GOPROXY=https://goproxy.cn,direct` |
+| `mcp` 容器反复重启，日志 `flag provided but not defined: -spawn-agent` | compose 只覆盖了 `entrypoint` 未写 `command`，镜像 `CMD ["-spawn-agent=false"]` 被追加给了 `gta-mcp`（该 flag 属于 pipeline） | mcp 服务必须显式写 `command`（见 `docker-compose.yml`），不要留空 |
+| `mcp` 报 `open control store: unable to open database file (14)`，路径是 `/control.sqlite` | 工作目录没落到 `/data`，锚到了容器根目录，而进程以非 root 的 `gta` 用户运行 | 确认 `GTA_HOME=/data` 已传入且镜像 `WORKDIR /data` 生效；数据目录应是 `/data/control.sqlite` |
+
+排查第一步建议先分清是**构建失败**还是**容器 restart loop**：前者看 build 输出，后者直接
+`docker compose logs <服务名>`；`docker inspect <容器> --format '{{.Config.Cmd}}'` 能确认
+entrypoint 被覆盖后镜像 CMD 是否被意外继承。
+
 ## 4. 日志（可选）
 
 两个容器默认把日志同时写文件（`/data/logs/`，按大小轮转）和 stderr（docker logs）。容器内通常只留一路即可，用环境变量关闭另一路（T17）：

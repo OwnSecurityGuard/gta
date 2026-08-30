@@ -38,6 +38,7 @@ import type {
 import type { QueryCaptureTableResult } from "@/types/table-browser";
 import type { ListConnectionsResult, GetConnectionDetailResult, ListConnectionStreamsResult, ListConnectionFramesResult } from "@/types/connection";
 import type { GetProxyConfigResult, UpdateProxyConfigResult, ProxyConfigUpdateVars } from "@/types/proxy";
+import type { GetAgentDownloadOptionsResult } from "@/types/agent";
 
 /** 查询 session 列表 */
 export function useSessions() {
@@ -590,6 +591,17 @@ export function useConnectionFrames(
     enabled: !!sessionId && !!connId,
     placeholderData: keepPreviousData,
     refetchInterval: sessionId && connId ? 2000 : false,
+  });
+}
+
+// ===== 远程 Agent 下载 =====
+
+/** get_agent_download_options：返回下载 Agent 页面需要的服务端信息（可达 IP / registry+ingest 端口 / 平台）。 */
+export function useAgentDownloadOptions() {
+  return useQuery({
+    queryKey: ["agentDownloadOptions"],
+    queryFn: () => mcpClient.callTool<GetAgentDownloadOptionsResult>("get_agent_download_options"),
+    staleTime: 30_000, // 端口/平台变化不频繁，缓存 30s
   });
 }
 

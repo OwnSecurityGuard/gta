@@ -13,8 +13,9 @@ import { TableBrowser } from "@/components/table-browser";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { StartCaptureDialog } from "@/components/start-capture-dialog";
 import { ProxyConfigDialog } from "@/components/proxy-config-dialog";
+import { AgentDownloadDialog } from "@/components/agent-download-dialog";
 import { Button } from "@/components/ui/button";
-import { Sun, Moon, Settings, Play, Square, Cable, KeyRound } from "lucide-react";
+import { Sun, Moon, Settings, Play, Square, Cable, KeyRound, Download } from "lucide-react";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
 import { usePluginEventStream, useStopCapture, useSessions } from "@/hooks/use-mcp";
 import { useAuthError } from "@/hooks/use-auth";
@@ -65,6 +66,7 @@ export default function App() {
   const authError = useAuthError();
   const [startOpen, setStartOpen] = useState(false);
   const [proxyConfigOpen, setProxyConfigOpen] = useState(false);
+  const [agentDownloadOpen, setAgentDownloadOpen] = useState(false);
   const [isDark, setIsDark] = useState(() => {
     const stored = localStorage.getItem("gta-theme");
     if (stored) return stored === "dark";
@@ -265,6 +267,17 @@ export default function App() {
               variant="outline"
               size="sm"
               className="h-8"
+              onClick={() => setAgentDownloadOpen(true)}
+              title="下载远程 Agent（跨环境抓包上报，配置已烧入二进制免参数）"
+              aria-label="下载远程 Agent"
+            >
+              <Download className="h-4 w-4" />
+              下载 Agent
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
               onClick={() => setStartOpen(true)}
               title="开始抓包（本机网卡 / 远程 agent）"
               aria-label="开始抓包"
@@ -364,6 +377,8 @@ export default function App() {
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {/* 代理服务器配置弹窗 */}
       <ProxyConfigDialog open={proxyConfigOpen} onClose={() => setProxyConfigOpen(false)} />
+      {/* 下载远程 Agent 弹窗（跨环境抓包上报） */}
+      <AgentDownloadDialog open={agentDownloadOpen} onClose={() => setAgentDownloadOpen(false)} />
       {/* 开始抓包弹窗（本机网卡 / 远程 agent 源） */}
       <StartCaptureDialog
         open={startOpen}

@@ -42,6 +42,11 @@ vendor/
 dist/
 build/
 
+# docker compose 的本地环境文件（含 GTA_AUTH_TOKENS 真实密钥，绝不能入库）；
+# 只提交模板 .env.example。
+.env
+.env.*.local
+
 # Python
 __pycache__/
 *.py[cod]
@@ -66,6 +71,8 @@ web/.vite/
 sessions/
 runs/
 current.json
+# Runtime-generated address files (written by config.WriteAddrFile into workDir)
+addr.*.json
 
 # AI working memory (tool-internal, not project source)
 .workbuddy/
@@ -89,3 +96,4 @@ NUL
 
 # Local Go workspace (SDK local dev), do not commit
 go.work
+go.work.sum

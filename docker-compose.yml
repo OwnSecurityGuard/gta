@@ -24,7 +24,9 @@ services:
     restart: unless-stopped
     environment:
       GTA_HOME: /data
-      # 鉴权 token（必填）：逗号分隔多个 token，例如 gta_tok_alice,gta_tok_bob
+      # 鉴权 token 表（必填）：格式 owner=token，逗号分隔，
+      # 例如 alice=gta_tok_aaa:admin,bob=gta_tok_bbb（:admin 后缀授予管理员权限）。
+      # 裸 token 不带 owner 会被 ParseTokens 拒绝、容器起不来，见 .env.example。
       GTA_AUTH_TOKENS: ${GTA_AUTH_TOKENS:?GTA_AUTH_TOKENS is required (see .env.example)}
       # 监听地址：端口映射前保持容器内默认即可；一般无需覆盖
       GTA_CONTROL_ADDR: ${GTA_CONTROL_ADDR:-:9888}
@@ -48,6 +50,12 @@ services:
     depends_on:
       - pipeline
     entrypoint: ["/usr/local/bin/gta-mcp"]
+    # 必须显式清空 command：只覆盖 entrypoint 时，镜像 CMD（["-spawn-agent=false"]）
+    # 会被原样追加给 gta-mcp，而 gta-mcp 没有该 flag，容器会以
+    # "flag provided but not defined: -spawn-agent" 退出并陷入 restart loop。
+    # 监听地址等配置一律走下面的 GTA_* 环境变量；这里只需把插件目录指到共享卷
+    # （默认 "plugins" 是相对路径，会锚到容器 CWD，落盘不到 gta-data 卷上）。
+    command: ["-plugins-dir=/data/plugins"]
     environment:
       GTA_HOME: /data
       GTA_AUTH_TOKENS: ${GTA_AUTH_TOKENS:?GTA_AUTH_TOKENS is required (see .env.example)}

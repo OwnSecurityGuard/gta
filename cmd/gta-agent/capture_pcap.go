@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 
 	"gta/pkg/capture/agent/proto"
 
@@ -87,4 +88,109 @@ func notifyCaptureEnded(ended chan<- error, err error) {
 	case ended <- err:
 	default:
 	}
+}
+
+// resolveDefaultIface 挑选默认抓包网卡，供未固化网卡名的下载形态 agent 使用：
+//  1. UDP 出口网卡（Dial 探测不真正发包，最可靠）；
+//  2. 兜底取首个 Up + 非回环 + 绑定了 IPv4 的网卡。
+func resolveDefaultIface() (string, error) {
+	if ip := outboundLocalIP(); ip != "" {
+		if name := ifaceByIP(ip); name != "" {
+			return name, nil
+		}
+	}
+	if name := firstUpIface(); name != "" {
+		return name, nil
+	}
+	return "", fmt.Errorf("no usable network interface found; run with --iface to choose one")
+}
+
+// outboundLocalIP 用 UDP 拨号到公网地址探测本机出口网卡 IP（不真正发包）。
+func outboundLocalIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	if a, ok := conn.LocalAddr().(*net.UDPAddr); ok && a.IP != nil {
+		return a.IP.String()
+	}
+	return ""
+}
+
+// ifaceByIP 返回绑定了指定 IP 的网卡名。
+func ifaceByIP(ipStr string) string {
+	target := net.ParseIP(ipStr)
+	if target == nil {
+		return ""
+	}
+	for _, iface := range allIfaces() {
+		for _, a := range iface.Addrs {
+			if a.ip != nil && a.ip.Equal(target) {
+				return iface.name
+			}
+		}
+	}
+	return ""
+}
+
+// firstUpIface 返回首个处于 Up 状态、非回环且绑定了 IPv4 的网卡名。
+func firstUpIface() string {
+	for _, iface := range allIfaces() {
+		if iface.name == "" {
+			continue
+		}
+		for _, a := range iface.Addrs {
+			if a.ip != nil && a.ip.To4() != nil {
+				return iface.name
+			}
+		}
+	}
+	return ""
+}
+
+// ifaceAddr 是 ifaceByIP / firstUpIface 共用的网卡地址描述。
+type ifaceAddr struct {
+	ip net.IP
+}
+
+// ifaceEntry 描述一个候选网卡。
+type ifaceEntry struct {
+	name  string
+	Addrs []ifaceAddr
+}
+
+// allIfaces 遍历本机网卡，过滤掉未启用/回环项。
+func allIfaces() []ifaceEntry {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	out := []ifaceEntry{}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		entry := ifaceEntry{name: iface.Name}
+		for _, a := range addrs {
+			ipnet, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipnet.IP
+			if ip == nil {
+				continue
+			}
+			ip = ip.To4()
+			entry.Addrs = append(entry.Addrs, ifaceAddr{ip: ip})
+		}
+		if len(entry.Addrs) > 0 {
+			out = append(out, entry)
+		}
+	}
+	return out
 }

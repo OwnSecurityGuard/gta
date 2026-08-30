@@ -42,6 +42,11 @@ export default defineConfig({
         target: "http://localhost:8781",
         changeOrigin: true,
       },
+      // 远程 Agent 下载（/download/agent）：同源访问时需代理到 MCP 服务端，否则被 SPA 兜底拦截。
+      "/download": {
+        target: "http://localhost:8781",
+        changeOrigin: true,
+      },
     },
   },
 });

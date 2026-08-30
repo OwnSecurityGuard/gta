@@ -22,3 +22,8 @@ type captureConfig struct {
 func runCapture(ctx context.Context, cfg captureConfig, out chan<- *proto.RawPacket, ended chan<- error) error {
 	return errors.New("capture unavailable: this binary was built without -tags pcap; rebuild with `go build -tags pcap ./cmd/gta-agent`")
 }
+
+// resolveDefaultIface 在无 pcap 构建下不可用（无法抓包）。
+func resolveDefaultIface() (string, error) {
+	return "", errors.New("capture unavailable: no pcap support in this binary")
+}

@@ -134,6 +134,9 @@ type mcpCapture struct {
 	// 事件总线：插件注册/注销/上下线事件经 WatchPlugins 流汇聚后广播给 SSE 订阅者。
 	eventMu   sync.Mutex
 	eventSubs map[chan pluginEventJSON]struct{}
+
+	// buildMu 串行化下载 Agent 的服务端编译（go:embed 配置文件须独占写入源码目录）。
+	buildMu sync.Mutex
 }
 
 type sessionManager struct {
@@ -2547,7 +2550,11 @@ func main() {
 		server.WithToolCapabilities(true),
 	)
 
-	capture, err := newMCPCapture(*iface, resolvedPluginsDir, *workDir, *pipelineAddr, *addr, s, *enableRawDebug)
+	// 注意：这里必须传解析后的 absWorkDir，而不是 *workDir 原始值。
+	// *workDir 的 flag 默认值是 "."，直接传给 newMCPCapture 会让数据目录锚在进程
+	// CWD 上，从而完全绕过 GTA_HOME（容器里 CWD=/ 时表现为
+	// "open control store: unable to open database file (14)"）。
+	capture, err := newMCPCapture(*iface, resolvedPluginsDir, absWorkDir, *pipelineAddr, *addr, s, *enableRawDebug)
 	if err != nil {
 		slog.Error("init mcp capture", "error", err)
 		os.Exit(1)
@@ -2646,6 +2653,10 @@ func main() {
 	s.AddTool(mcp.NewTool("get_registry_addr",
 		mcp.WithDescription("Return the registry address the pipeline is currently listening on (its -registry-addr, e.g. :9091). Plugins MUST connect here by setting GTA_REGISTRY_ADDR at startup; this tool removes the guesswork of reading pipeline startup logs. Use it to learn where a freshly launched plugin should register, or to confirm activate_plugin's resolved address."),
 	), capture.handleGetRegistryAddr)
+
+	s.AddTool(mcp.NewTool("get_agent_download_options",
+		mcp.WithDescription("Return the info the 'Download Agent' page needs: the server's reachable host, registry/ingest ports, and the server platform. Users in other environments use this to fill in the back-connect address when downloading a pre-configured agent binary (port + decoder plugin are baked in; no runtime params needed)."),
+	), capture.handleGetAgentDownloadOptions)
 
 	s.AddTool(mcp.NewTool("get_capabilities",
 		mcp.WithDescription("Return a self-describing catalog of all MCP tools grouped by workflow (capture / query / behavior / plugin-dev / plugin-verify / plugin-runtime / raw-debug) plus recommended call chains. Call this FIRST when unsure which tool to use or how tools relate; it replaces reading the README."),
@@ -2877,6 +2888,8 @@ func main() {
 	mux.Handle("/message", sseServer.MessageHandler())
 	mux.Handle("/mcp", httpServer)
 	mux.HandleFunc("/events/plugins", capture.handleEventsSSE)
+	// 远程 Agent 下载：处于鉴权链内，访问者即接收会话 owner。
+	mux.HandleFunc("/download/agent", capture.handleAgentDownload)
 
 	// CORS：仅放行 -allowed-origins 中的 Origin（T12 之前是 *，任意站点都能
 	// 跨域调用 MCP 工具）。未配置任何 origin 时不返回 CORS 头，同源用法不受影响。

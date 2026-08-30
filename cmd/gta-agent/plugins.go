@@ -43,6 +43,7 @@ type pluginSupervisor struct {
 	dir          string
 	registryAddr string
 	token        string
+	bind         []string // 非空时仅托管这些名字的本地插件（下载形态固化白名单）
 
 	mu   sync.Mutex
 	pids map[string]int // plugin name -> 当前 pid（0 表示未运行）
@@ -93,6 +94,12 @@ func (s *pluginSupervisor) run(ctx context.Context, wg *sync.WaitGroup) int {
 		return 0
 	}
 	for _, p := range plugins {
+		// bind 为 nil 时不过滤（命令行形态托管全部本地插件）；
+		// bind 非 nil 时视为显式白名单——空列表 = 不托管任何插件（下载产物仅做抓包推流）。
+		if s.bind != nil && !containsPluginName(s.bind, p.Name) {
+			slog.Info("skip plugin not in bind list", "name", p.Name)
+			continue
+		}
 		slog.Info("hosting local plugin", "name", p.Name, "binary", p.Binary)
 		wg.Add(1)
 		go func(p *plugindev.DiscoveredPlugin) {
@@ -101,6 +108,16 @@ func (s *pluginSupervisor) run(ctx context.Context, wg *sync.WaitGroup) int {
 		}(p)
 	}
 	return len(plugins)
+}
+
+// containsPluginName 报告白名单中是否包含指定插件名。
+func containsPluginName(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 // supervise 单个插件的生命周期：启动→等待退出→退避后重启，直到 ctx 取消。

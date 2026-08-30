@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -51,6 +52,17 @@ type ProxyOverrides struct {
 	ServerAddr string `yaml:"server_addr"`
 }
 
+// SessionConfig 是会话数据保留策略（存储优化），由 gta-mcp 周期执行清理。
+type SessionConfig struct {
+	// RetentionDays 是会话保留天数：无写入活动超过该天数的会话被自动清理
+	//（含状态仍为 running 但长期无数据写入的残留会话）；0 表示不启用 TTL 清理。
+	// 对应环境变量 GTA_SESSION_RETENTION_DAYS。
+	RetentionDays int `yaml:"retention_days"`
+	// MaxSessions 是保留的最大会话数量：超出时从最旧的非 running 会话开始清理。
+	// 0 表示不限制数量。对应环境变量 GTA_MAX_SESSIONS。
+	MaxSessions int `yaml:"max_sessions"`
+}
+
 // Config 是 gta.yaml 的顶层结构（统一配置）。
 type Config struct {
 	// WorkDir 是工作目录。为空时按 ResolveWorkDir 的规则解析（GTA_HOME / 既有数据探测 / ~/.gta）。
@@ -58,6 +70,7 @@ type Config struct {
 	MCP      MCPServerConfig      `yaml:"mcp"`
 	Pipeline PipelineServerConfig `yaml:"pipeline"`
 	Proxy    ProxyOverrides       `yaml:"proxy"`
+	Sessions SessionConfig        `yaml:"sessions"`
 }
 
 // Load 读取统一配置文件（gta.yaml，可选）。path 为空或（未显式指定时）文件不存在，
@@ -96,6 +109,22 @@ func (c *Config) applyEnvFallback() {
 	c.Pipeline.RegistryAddr = firstNonEmpty(os.Getenv("GTA_REGISTRY_ADDR"), c.Pipeline.RegistryAddr)
 	c.Pipeline.AgentIngestAddr = firstNonEmpty(os.Getenv("GTA_AGENT_INGEST_ADDR"), c.Pipeline.AgentIngestAddr)
 	c.Proxy.ServerAddr = firstNonEmpty(os.Getenv("GTA_PROXY_SERVER_ADDR"), c.Proxy.ServerAddr)
+	c.Sessions.RetentionDays = envIntOr("GTA_SESSION_RETENTION_DAYS", c.Sessions.RetentionDays)
+	c.Sessions.MaxSessions = envIntOr("GTA_MAX_SESSIONS", c.Sessions.MaxSessions)
+}
+
+// envIntOr 读取整数环境变量：未设置或解析失败时返回 def。
+// 环境变量显式设为 "0" 视为有效值（用于关闭对应策略）。
+func envIntOr(name string, def int) int {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func firstNonEmpty(vals ...string) string {

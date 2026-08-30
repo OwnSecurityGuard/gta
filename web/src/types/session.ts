@@ -13,7 +13,6 @@ export interface SessionInfo {
   /** 抓包来源 nic | proxy（代理抓包时存在） */
   source: string;
   listen_addr: string;
-  frame_style: string;
   raw_packets: number;
   events: number;
   metrics: number;

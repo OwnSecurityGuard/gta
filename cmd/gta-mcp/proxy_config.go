@@ -57,20 +57,23 @@ func lanIP() string {
 }
 
 // proxyStateJSON 是返回给前端的状态快照（含 LAN IP 与二维码连接地址）。
+// 不含分帧字段：帧边界判定由绑定插件按连接自行处理（见 mobile.MobileConfig）。
 type proxyStateJSON struct {
-	ListenAddr     string `json:"listen_addr"`
-	ServerAddr     string `json:"server_addr"`
-	FrameStyle     string `json:"frame_style"`
-	PrefixLen      int32  `json:"prefix_len"`
-	LittleEndian   bool   `json:"little_endian"`
-	AgentRunning   bool   `json:"agent_running"`
-	AgentPID       int32  `json:"agent_pid"`
+	ListenAddr   string   `json:"listen_addr"`
+	ServerAddr   string   `json:"server_addr"`
+	AgentRunning bool     `json:"agent_running"`
+	AgentPID     int32    `json:"agent_pid"`
 	SessionRunning bool   `json:"session_running"`
-	SessionID      string `json:"session_id"`
-	ConfigPath     string `json:"config_path"`
-	Plugin         string `json:"plugin"`
-	IncludeHosts   []string `json:"include_hosts"`
-	IncludePorts   []int32  `json:"include_ports"`
+	SessionID    string   `json:"session_id"`
+	ConfigPath   string   `json:"config_path"`
+	Plugin       string   `json:"plugin"`
+	IncludeHosts []string `json:"include_hosts"`
+	IncludePorts []int32  `json:"include_ports"`
+	// 运行时活动（常驻 mobile 会话的实时连接状态），0 表示未接线/无数据。
+	ActiveConns  int64  `json:"active_conns"`
+	TotalConns   uint64 `json:"total_conns"`
+	LastDataUnix int64  `json:"last_data_unix"`
+	TotalBytes   uint64 `json:"total_bytes"`
 	// LANIP 是手机所在局域网内可达的代理地址；connect_addr 为二维码内容
 	// （手机代理软件填写的 HTTP CONNECT 代理地址）。
 	LANIP       string `json:"lan_ip"`
@@ -123,9 +126,6 @@ func (m *mcpCapture) stateToJSON(st *pb.ProxyConfigState) proxyStateJSON {
 	return proxyStateJSON{
 		ListenAddr:     st.GetListenAddr(),
 		ServerAddr:     st.GetServerAddr(),
-		FrameStyle:     st.GetFrameStyle(),
-		PrefixLen:      st.GetPrefixLen(),
-		LittleEndian:   st.GetLittleEndian(),
 		AgentRunning:   st.GetAgentRunning(),
 		AgentPID:       st.GetAgentPid(),
 		SessionRunning: st.GetSessionRunning(),
@@ -134,6 +134,10 @@ func (m *mcpCapture) stateToJSON(st *pb.ProxyConfigState) proxyStateJSON {
 		Plugin:         st.GetPlugin(),
 		IncludeHosts:   st.GetIncludeHosts(),
 		IncludePorts:   st.GetIncludePorts(),
+		ActiveConns:    st.GetActiveConns(),
+		TotalConns:     st.GetTotalConns(),
+		LastDataUnix:   st.GetLastDataUnix(),
+		TotalBytes:     st.GetTotalBytes(),
 		LANIP:          lan,
 		ConnectAddr:    connectAddr,
 		SingboxURI:     singboxURI,
@@ -164,9 +168,6 @@ func (m *mcpCapture) handleUpdateProxyServerConfig(ctx context.Context, req mcp.
 	}
 	listenAddr := req.GetString("listen_addr", "")
 	serverAddr := req.GetString("server_addr", "")
-	frameStyle := req.GetString("frame_style", "")
-	prefixLen, _ := req.RequireInt("prefix_len")
-	littleEndian := strings.EqualFold(req.GetString("little_endian", "false"), "true")
 	plugin := req.GetString("plugin", "")
 
 	// 区分"未传"（nil，不修改）与"传空数组"（空 slice，清空筛选）。
@@ -184,9 +185,6 @@ func (m *mcpCapture) handleUpdateProxyServerConfig(ctx context.Context, req mcp.
 	resp, err := m.pipelineClient.UpdateProxyConfig(ctx, &pb.UpdateProxyConfigRequest{
 		ListenAddr:   listenAddr,
 		ServerAddr:   serverAddr,
-		FrameStyle:   frameStyle,
-		PrefixLen:    int32(prefixLen),
-		LittleEndian: littleEndian,
 		Plugin:       plugin,
 		IncludeHosts: includeHosts,
 		IncludePorts: includePorts,
@@ -202,7 +200,7 @@ func (m *mcpCapture) handleUpdateProxyServerConfig(ctx context.Context, req mcp.
 	}, "", "  ")
 	slog.Info("update_proxy_server_config",
 		"ok", resp.GetOk(), "message", resp.GetMessage(),
-		"listen_addr", listenAddr, "server_addr", serverAddr, "frame_style", frameStyle,
+		"listen_addr", listenAddr, "server_addr", serverAddr,
 		"plugin", plugin, "include_hosts", includeHosts, "include_ports", includePorts)
 	return mcp.NewToolResultText(string(b)), nil
 }

@@ -20,6 +20,8 @@ services:
       args:
         VERSION: ${GTA_VERSION:-dev}
         GIT_COMMIT: ${GTA_GIT_COMMIT:-unknown}
+        # 前端「原始包」调试页开关（构建期注入 web/，默认关闭）
+        VITE_ENABLE_RAW_DEBUG: ${VITE_ENABLE_RAW_DEBUG:-0}
     image: gta-server:${GTA_VERSION:-latest}
     restart: unless-stopped
     environment:
@@ -66,7 +68,7 @@ services:
       # CORS 允许的 Origin（逗号分隔）；留空不返回 CORS 头（同源用法不受影响）
       GTA_MCP_ALLOWED_ORIGINS: ${GTA_MCP_ALLOWED_ORIGINS:-}
     ports:
-      - "${GTA_MCP_PORT:-8781}:8781" # MCP HTTP/SSE（客户端浏览器/工具连接）
+      - "${GTA_MCP_PORT:-8781}:8781" # MCP HTTP/SSE + Web UI（浏览器直接访问 http://<host>:8781）
     volumes:
       - gta-data:/data
 

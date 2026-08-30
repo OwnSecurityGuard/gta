@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"gta/pkg/capture"
+	"gta/pkg/capture/mobile"
 	"gta/pkg/config"
 	"gta/pkg/internalipc/capturecontrol"
 )
@@ -151,6 +152,7 @@ func (s *pipelineService) StopProxyServer(ctx context.Context) {
 		}
 		s.proxySessionID = ""
 	}
+	s.proxyActivity = nil
 	s.stopAgentLocked()
 }
 
@@ -164,7 +166,7 @@ func (s *pipelineService) GetProxyConfig(_ context.Context) (capturecontrol.Prox
 // UpdateProxyConfig 应用新的代理抓包服务器配置：
 //  1. 合并 + 校验 + 持久化到 proxy.json
 //  2. 热重启 agent（kill + respawn，新 listen/server/筛选生效）
-//  3. 重启常驻代理会话（新 server_addr/frame_style/prefix_len/plugin 生效）
+//  3. 重启常驻代理会话（新 server_addr/plugin 生效）
 func (s *pipelineService) UpdateProxyConfig(ctx context.Context, req capturecontrol.ProxyConfigUpdate) (capturecontrol.ProxyConfigState, error) {
 	s.proxyMu.Lock()
 	defer s.proxyMu.Unlock()
@@ -176,13 +178,6 @@ func (s *pipelineService) UpdateProxyConfig(ctx context.Context, req capturecont
 	if req.ServerAddr != "" {
 		next.ServerAddr = req.ServerAddr
 	}
-	if req.FrameStyle != "" {
-		next.FrameStyle = req.FrameStyle
-	}
-	if req.PrefixLen > 0 {
-		next.PrefixLen = int(req.PrefixLen)
-	}
-	next.LittleEndian = req.LittleEndian
 	if req.Plugin != "" {
 		next.Plugin = req.Plugin
 	}
@@ -232,22 +227,24 @@ func (s *pipelineService) startProxySessionLocked() error {
 	if s.proxySessionID != "" {
 		return nil
 	}
+	// 每个常驻会话周期创建新的活动追踪器：旧会话停止时引用作废，
+	// 新会话从零开始计数（避免残留旧会话的累计值误导状态展示）。
+	s.proxyActivity = mobile.NewActivity()
 	res, err := s.StartSession(context.Background(), capturecontrol.StartSessionRequest{
 		Plugin: s.proxyCfg.Plugin,
 		Mobile: &capturecontrol.MobileConfig{
-			ListenAddr:   s.proxyCfg.ServerAddr,
-			FrameStyle:   s.proxyCfg.FrameStyle,
-			PrefixLen:    s.proxyCfg.PrefixLen,
-			LittleEndian: s.proxyCfg.LittleEndian,
+			ListenAddr: s.proxyCfg.ServerAddr,
+			Activity:   s.proxyActivity,
 		},
 	})
 	if err != nil {
+		s.proxyActivity = nil
 		return err
 	}
 	s.proxySessionID = res.SessionID
 	s.logger.Info("always-on proxy session started",
 		"session_id", res.SessionID, "server_addr", s.proxyCfg.ServerAddr,
-		"frame_style", s.proxyCfg.FrameStyle, "plugin", s.proxyCfg.Plugin)
+		"plugin", s.proxyCfg.Plugin)
 	return nil
 }
 
@@ -269,9 +266,6 @@ func (s *pipelineService) buildProxyStateLocked() capturecontrol.ProxyConfigStat
 	st := capturecontrol.ProxyConfigState{
 		ListenAddr:   s.proxyCfg.ListenAddr,
 		ServerAddr:   s.proxyCfg.ServerAddr,
-		FrameStyle:   s.proxyCfg.FrameStyle,
-		PrefixLen:    int32(s.proxyCfg.PrefixLen),
-		LittleEndian: s.proxyCfg.LittleEndian,
 		ConfigPath:   s.proxyPath,
 		Plugin:       s.proxyCfg.Plugin,
 		IncludeHosts: s.proxyCfg.IncludeHosts,
@@ -286,6 +280,14 @@ func (s *pipelineService) buildProxyStateLocked() capturecontrol.ProxyConfigStat
 			st.SessionRunning = task.State() == capture.StateRunning
 			st.SessionID = s.proxySessionID
 		}
+	}
+	// 运行时活动快照：未接线（会话未启动/启动失败）时为全零。
+	if s.proxyActivity != nil {
+		act := s.proxyActivity.Snapshot()
+		st.ActiveConns = act.ActiveConns
+		st.TotalConns = act.TotalConns
+		st.LastDataUnix = act.LastDataUnix
+		st.TotalBytes = act.TotalBytes
 	}
 	return st
 }

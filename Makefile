@@ -1,4 +1,4 @@
-.PHONY: proto test build build-mcp build-pipeline build-plugin-dev build-agent build-examples run-mcp run-pipeline run-plugin-dev release release-matrix docs
+.PHONY: proto test build build-mcp build-pipeline build-plugin-dev build-agent build-examples run-mcp run-pipeline run-plugin-dev release release-matrix web-build docs
 
 TAGS := pcap
 
@@ -91,10 +91,22 @@ run-plugin-dev:
 docs:
 	go run ./scripts/gen_tool_table
 
+# web-build：构建前端并把产物同步进 gta-mcp 的 embed 目录（cmd/gta-mcp/webui/）。
+# vite 产物照常出在 web/dist（vite.config.ts 不改，避免 outDir 清空误删 tracked
+# 文件）；这里先清空 webui 旧产物再复制（保留 .gitkeep），重复构建不会积累
+# 陈旧 hash 产物。此后 go build ./cmd/gta-mcp 即内嵌最新前端。
+# 跑过一次后，未重新 web-build 也不会破坏构建：embed 里的旧产物照常可用。
+web-build:
+	cd web && npm ci && npm run build
+	rm -rf cmd/gta-mcp/webui/assets
+	rm -f cmd/gta-mcp/webui/index.html
+	cp -r web/dist/. cmd/gta-mcp/webui/
+
 # release-matrix：交叉编译全平台 release 产物到 bin/release/（T14）。
 # CI release job 在 tag push（v*）时调用；本地可用 make release-matrix 验证。
-# 版本注入见文件头部说明：make release-matrix VERSION=v0.5.0 GIT_COMMIT=abc1234
-release-matrix:
+# 版本注入见文件头部说明：make release-matrix VERSION=v0.5.0 GIT_COMMIT=abc
+# 前置依赖 web-build：release 的 gta-mcp 产物内嵌最新前端（需要本机 node）。
+release-matrix: web-build
 	set -e; \
 	mkdir -p bin/release; \
 	for platform in $(RELEASE_PLATFORMS); do \

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Ref } from "react";
 import { cn } from "@/lib/utils";
 import {
   useSessions,
@@ -6,10 +6,12 @@ import {
   useListPlugins,
   useSessionStatus,
   useDeleteSession,
+  useDeleteSessions,
 } from "@/hooks/use-mcp";
 import { useIdentity } from "@/hooks/use-auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -27,6 +29,7 @@ import {
   AlertTriangle,
   RotateCw,
   Trash2,
+  Search,
 } from "lucide-react";
 import type { SessionInfo } from "@/types/session";
 import type { SessionStatusResult } from "@/types/session-extra";
@@ -36,6 +39,8 @@ interface SessionSidebarProps {
   onSelectSession: (sessionId: string) => void;
   /** 会话被删除后回调（用于清空选中态，避免后续查询打到已删除的会话） */
   onDeleted?: (sessionId: string) => void;
+  /** 由父组件传入，用于 Ctrl/Cmd+K 快捷键聚焦搜索框 */
+  searchInputRef?: Ref<HTMLInputElement>;
 }
 
 /** 格式化数字，加千分位 */
@@ -100,9 +105,38 @@ function basename(p: string): string {
   return parts[parts.length - 1] ?? p;
 }
 
+/** 计算会话来源展示标签（列表渲染与搜索过滤共用）。 */
+function sourceLabelOf(session: SessionInfo): string {
+  const isFileReplay = !!session.pcap_file;
+  if (session.source === "agent") return "远程 Agent";
+  if (session.source === "proxy") {
+    return `Mobile Proxy${session.listen_addr ? ` · ${session.listen_addr}` : ""}`;
+  }
+  if (isFileReplay) return basename(session.pcap_file);
+  return session.interface || "(auto)";
+}
+
+/** 生成用于搜索匹配的关键词文本。 */
+function sessionMatchText(session: SessionInfo): string {
+  return [
+    session.session_id,
+    sourceLabelOf(session),
+    session.source,
+    session.plugin,
+    session.interface,
+    session.owner ?? "",
+    session.pcap_file ?? "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function SessionItem({
   session,
   isSelected,
+  selected,
+  onToggleSelect,
   onClick,
   onSwitch,
   onDeleted,
@@ -111,6 +145,10 @@ function SessionItem({
 }: {
   session: SessionInfo;
   isSelected: boolean;
+  /** 批量删除选中态 */
+  selected?: boolean;
+  /** 切换批量删除选中（未传入则行内不渲染 checkbox） */
+  onToggleSelect?: () => void;
   onClick: () => void;
   onSwitch?: (session: SessionInfo) => void;
   onDeleted?: (sessionId: string) => void;
@@ -136,13 +174,7 @@ function SessionItem({
   const isFileReplay = !!session.pcap_file;
   const isProxy = session.source === "proxy";
   const isAgent = session.source === "agent";
-  const sourceLabel = isAgent
-    ? "远程 Agent"
-    : isProxy
-      ? `Mobile Proxy${session.listen_addr ? ` · ${session.listen_addr}` : ""}`
-      : isFileReplay
-        ? basename(session.pcap_file)
-        : session.interface || "(auto)";
+  const sourceLabel = sourceLabelOf(session);
 
   // 结束时间：同日省略日期
   const stoppedDisplay = hasStopped
@@ -172,6 +204,16 @@ function SessionItem({
       {/* 头部：状态点 + 开始时间 + 归属徽标 + Badge */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
+          {onToggleSelect && (
+            <input
+              type="checkbox"
+              checked={!!selected}
+              onChange={onToggleSelect}
+              onClick={(e) => e.stopPropagation()}
+              aria-label={`选择会话 ${session.session_id}（批量删除）`}
+              className="h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-input accent-primary"
+            />
+          )}
           <span
             className={cn(
               "inline-block h-2 w-2 rounded-full shrink-0",
@@ -328,6 +370,7 @@ export function SessionSidebar({
   selectedSessionId,
   onSelectSession,
   onDeleted,
+  searchInputRef,
 }: SessionSidebarProps) {
   const { data, isLoading, isError, error, refetch } = useSessions();
   // 仅对当前选中会话拉取 get_session_status（5s 轮询），使其统计与状态点保持“实时”。
@@ -335,6 +378,11 @@ export function SessionSidebar({
   const [switchTarget, setSwitchTarget] = useState<SessionInfo | null>(null);
   const identity = useIdentity();
   const [ownerView, setOwnerView] = useState<"all" | "mine">("all");
+  // 会话搜索与批量删除选中态
+  const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchConfirmOpen, setBatchConfirmOpen] = useState(false);
+  const deleteSessions = useDeleteSessions();
 
   // 身份丢失（切号/登出窗口）时回落到「全部」，避免上一位用户的「只看我的」与缓存错位。
   useEffect(() => {
@@ -363,6 +411,58 @@ export function SessionSidebar({
       ? sortedSessions.filter((s) => !s.owner || s.owner === identity.owner)
       : sortedSessions;
 
+  // 关键词搜索（大小写不敏感，匹配 session_id / 来源 / 插件 / 网卡 / owner / 文件名）。
+  const query = search.trim().toLowerCase();
+  const filteredSessions = query
+    ? visibleSessions.filter((s) => sessionMatchText(s).includes(query))
+    : visibleSessions;
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const allVisibleSelected =
+    filteredSessions.length > 0 && filteredSessions.every((s) => selectedIds.has(s.session_id));
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const s of filteredSessions) next.delete(s.session_id);
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const s of filteredSessions) next.add(s.session_id);
+        return next;
+      });
+    }
+  }
+
+  function handleBatchDelete() {
+    const ids = Array.from(selectedIds);
+    deleteSessions.mutate(ids, {
+      onSuccess: (res) => {
+        for (const id of ids) onDeleted?.(id);
+        setSelectedIds(new Set());
+        setBatchConfirmOpen(false);
+        toast.success(
+          "批量删除完成",
+          res.failed > 0 ? `成功 ${res.total - res.failed} / 失败 ${res.failed}` : `已删除 ${res.total} 个会话`,
+        );
+      },
+      onError: (err) => {
+        toast.error("批量删除失败", err.message);
+      },
+    });
+  }
+
   const ownerBadgeOf = (s: SessionInfo): string | undefined => {
     if (!s.owner) return undefined;
     return identity && s.owner === identity.owner ? "我" : s.owner;
@@ -382,6 +482,46 @@ export function SessionSidebar({
           </span>
         )}
       </div>
+
+      {/* 搜索 + 批量删除工具栏 */}
+      {sessions.length > 0 && (
+        <div className="space-y-2 border-b px-4 py-2.5">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              ref={searchInputRef}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="搜索会话"
+              placeholder="搜索会话 ID / 来源 / 插件 / 网卡"
+              className="pl-9"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={toggleSelectAll}
+                disabled={filteredSessions.length === 0}
+                className="h-3.5 w-3.5 rounded border-input accent-primary"
+                aria-label="全选可见会话"
+              />
+              {selectedIds.size > 0 ? `已选 ${selectedIds.size} 项` : "全选"}
+            </label>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 text-xs"
+              disabled={selectedIds.size === 0 || deleteSessions.isPending}
+              onClick={() => setBatchConfirmOpen(true)}
+            >
+              <Trash2 className="h-3 w-3 mr-1" />
+              批量删除{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* admin 视图筛选：默认「全部」 */}
       {showOwnerFilter && (
@@ -447,20 +587,22 @@ export function SessionSidebar({
           />
         )}
 
-        {!isLoading && !isError && sessions.length > 0 && visibleSessions.length === 0 && (
+        {!isLoading && !isError && sessions.length > 0 && filteredSessions.length === 0 && (
           <EmptyState
             icon={<Inbox className="h-5 w-5" />}
-            title="该视图下暂无会话"
-            hint="当前为「只看我的」视图，切换回「全部」查看团队其他成员的会话。"
+            title="无匹配会话"
+            hint="调整搜索关键词，或切换顶部的视图筛选与「全选」范围。"
           />
         )}
 
         <div className="space-y-2">
-          {visibleSessions.map((session) => (
+          {filteredSessions.map((session) => (
             <SessionItem
               key={session.session_id}
               session={session}
               isSelected={session.session_id === selectedSessionId}
+              selected={selectedIds.has(session.session_id)}
+              onToggleSelect={() => toggleSelect(session.session_id)}
               onClick={() => onSelectSession(session.session_id)}
               onSwitch={setSwitchTarget}
               onDeleted={onDeleted}
@@ -475,6 +617,38 @@ export function SessionSidebar({
 
       {switchTarget && (
         <SwitchPluginDialog session={switchTarget} onClose={() => setSwitchTarget(null)} />
+      )}
+
+      {/* 批量删除确认对话框 */}
+      {batchConfirmOpen && (
+        <Dialog
+          open
+          onClose={() => setBatchConfirmOpen(false)}
+          icon={<Trash2 className="h-5 w-5" />}
+          title="批量删除会话"
+          description={`将删除所选 ${selectedIds.size} 个会话及其全部数据（原始包、事件、状态变更与投影），且不可恢复。`}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setBatchConfirmOpen(false)}>
+                <X className="h-4 w-4" />
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={deleteSessions.isPending}
+                onClick={handleBatchDelete}
+              >
+                {deleteSessions.isPending ? "删除中…" : "确认删除"}
+              </Button>
+            </>
+          }
+        >
+          <div className="max-h-40 overflow-auto space-y-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-muted-foreground">
+            {Array.from(selectedIds).map((id) => (
+              <div key={id} className="break-all">{id}</div>
+            ))}
+          </div>
+        </Dialog>
       )}
     </div>
   );

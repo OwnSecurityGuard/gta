@@ -170,6 +170,8 @@ CREATE TABLE IF NOT EXISTS event_index (
 		// Event 模型索引
 		"CREATE INDEX IF NOT EXISTS idx_events_time ON events(timestamp)",
 		"CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)",
+		// 分页查询（WHERE session_id ORDER BY timestamp DESC）覆盖索引
+		"CREATE INDEX IF NOT EXISTS idx_events_session_time ON events(session_id, timestamp)",
 		"CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)",
 		"CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id)",
 		"CREATE INDEX IF NOT EXISTS idx_events_origin ON events(origin_id)",
@@ -201,6 +203,9 @@ CREATE TABLE IF NOT EXISTS event_index (
 		return err
 	}
 	if _, err := s.db.Exec("PRAGMA synchronous=NORMAL;"); err != nil {
+		return err
+	}
+	if err := s.migrateRawTimestamps(context.Background()); err != nil {
 		return err
 	}
 	s.probeTraceCols()
@@ -252,6 +257,8 @@ func (s *SQLiteStore) ClearDecodedData(ctx context.Context) error {
 
 // AppendRawPackets 追加原始数据包到 raw_packets 表（实现 EventWriter）。
 // 代理抓包场景（conn_id / metadata）在此持久化，供 Connections 页面按连接聚合。
+// timestamp 一律存 INTEGER（unix nano），SQL 层可直接 MIN/MAX/ORDER BY/时间范围过滤；
+// 零值时间归一为 0 哨兵（见 rawTimestamp）。
 func (s *SQLiteStore) AppendRawPackets(ctx context.Context, packets []event.Packet) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -281,7 +288,7 @@ func (s *SQLiteStore) AppendRawPackets(ctx context.Context, packets []event.Pack
 				metaJSON = sql.NullString{String: string(b), Valid: true}
 			}
 		}
-		if _, err := stmt.ExecContext(ctx, id, p.Timestamp, p.Src.String(), p.Dst.String(), p.Protocol, p.Raw, int32(p.LinkType), connID, metaJSON); err != nil {
+		if _, err := stmt.ExecContext(ctx, appendRawPacketArgs(p, id, connID, metaJSON)...); err != nil {
 			return err
 		}
 	}

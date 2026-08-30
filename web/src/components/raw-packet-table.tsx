@@ -1,11 +1,12 @@
-import { useState, useMemo, useEffect, Fragment, memo } from "react";
+import { useState, useMemo, useEffect, useRef, Fragment, memo } from "react";
 import { useRawPackets, useListPlugins, useDecodeRawPackets } from "@/hooks/use-mcp";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
-import { ChevronLeft, ChevronRight, ChevronsLeft, Network, RotateCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, Network, RotateCw, X } from "lucide-react";
 import type { RawPacket } from "@/types/raw-packet";
 
 interface RawPacketTableProps {
@@ -161,6 +162,35 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
   const [selectedPlugin, setSelectedPlugin] = useState<string>("");
   const [clearExisting, setClearExisting] = useState<boolean>(true);
 
+  // 原始包筛选：本地输入 + 防抖提交后的实际生效条件
+  const [protoInput, setProtoInput] = useState("");
+  const [srcInput, setSrcInput] = useState("");
+  const [dstInput, setDstInput] = useState("");
+  const [filters, setFilters] = useState<{
+    protocol: string;
+    src: string;
+    dst: string;
+  }>({ protocol: "", src: "", dst: "" });
+  const debounceRef = useRef<number | null>(null);
+
+  // 三个筛选输入共用防抖，300ms 后提交，并回到第一页
+  useEffect(() => {
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      setFilters({ protocol: protoInput.trim(), src: srcInput.trim(), dst: dstInput.trim() });
+      setPage(0);
+    }, 300);
+    return () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    };
+  }, [protoInput, srcInput, dstInput]);
+
+  function clearFilters() {
+    setProtoInput("");
+    setSrcInput("");
+    setDstInput("");
+  }
+
   const { data: pluginsData } = useListPlugins();
   const decodeMutation = useDecodeRawPackets();
   const plugins = pluginsData?.plugins ?? [];
@@ -203,6 +233,9 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
   } = useRawPackets(sessionId, {
     limit: PAGE_SIZE,
     offset,
+    protocol: filters.protocol || undefined,
+    src: filters.src || undefined,
+    dst: filters.dst || undefined,
   });
 
   const packets = useMemo(() => data?.packets ?? [], [data]);
@@ -213,6 +246,41 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
   function handleToggleExpand(packetId: string) {
     setExpandedId((prev) => (prev === packetId ? null : packetId));
   }
+
+  const hasFilter = !!(protoInput || srcInput || dstInput);
+
+  const filterBar = (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2.5 shadow-sm">
+      <span className="shrink-0 text-xs font-medium text-muted-foreground">筛选</span>
+      <Input
+        value={protoInput}
+        onChange={(e) => setProtoInput(e.target.value)}
+        placeholder="协议 (如 TCP)"
+        aria-label="按协议筛选"
+        className="h-8 w-28 text-xs"
+      />
+      <Input
+        value={srcInput}
+        onChange={(e) => setSrcInput(e.target.value)}
+        placeholder="源地址"
+        aria-label="按源地址筛选"
+        className="h-8 w-40 text-xs"
+      />
+      <Input
+        value={dstInput}
+        onChange={(e) => setDstInput(e.target.value)}
+        placeholder="目的地址"
+        aria-label="按目的地址筛选"
+        className="h-8 w-40 text-xs"
+      />
+      {hasFilter && (
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={clearFilters}>
+          <X className="h-3.5 w-3.5 mr-1" />
+          清除
+        </Button>
+      )}
+    </div>
+  );
 
   if (!sessionId) {
     return (
@@ -252,12 +320,20 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
 
   if (packets.length === 0) {
     return (
-      <EmptyState
-        icon={<Network className="h-5 w-5" />}
-        title="暂无原始包"
-        hint="该会话尚未抓取到任何原始包数据。"
-        className="h-64 justify-center"
-      />
+      <div className="space-y-3 relative">
+        {isFetching && !isLoading && <div className="gta-loading-bar" aria-hidden="true" />}
+        {filterBar}
+        <EmptyState
+          icon={<Network className="h-5 w-5" />}
+          title={hasFilter ? "无匹配结果" : "暂无原始包"}
+          hint={
+            hasFilter
+              ? "未找到符合筛选条件的原始包，可调整或清除筛选条件。"
+              : "该会话尚未抓取到任何原始包数据。"
+          }
+          className="h-64 justify-center"
+        />
+      </div>
     );
   }
 
@@ -265,6 +341,9 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
     <div className="space-y-3 relative">
       {/* 后台刷新指示 */}
       {isFetching && !isLoading && <div className="gta-loading-bar" aria-hidden="true" />}
+
+      {/* 原始包筛选栏 */}
+      {filterBar}
 
       {/* 解码工具栏：用插件对离线会话原始包批量解码，结果写入 decoded_events */}
       {sessionId && (

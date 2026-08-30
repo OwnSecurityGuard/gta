@@ -244,6 +244,7 @@ func applyLimitOffset(query string, args []any, limit, offset int) (string, []an
 
 // QueryRawPackets 查询 raw_packets 表，支持 protocol/src/dst 过滤。
 // capture.sqlite 为单 session 库，raw_packets 表目前无 session_id 列。
+// timestamp 兼容 INTEGER（新）与文本（旧库）两种存储，经 scanPacketTime 归一。
 func (s *SQLiteStore) QueryRawPackets(ctx context.Context, q RawPacketQuery) ([]RawPacketRow, error) {
 	query := `SELECT id, timestamp, src, dst, protocol, payload, link_type
 FROM raw_packets WHERE 1=1`
@@ -270,9 +271,15 @@ FROM raw_packets WHERE 1=1`
 	var result []RawPacketRow
 	for rows.Next() {
 		var r RawPacketRow
-		if err := rows.Scan(&r.ID, &r.Timestamp, &r.Src, &r.Dst, &r.Protocol, &r.Payload, &r.LinkType); err != nil {
+		var ts any
+		if err := rows.Scan(&r.ID, &ts, &r.Src, &r.Dst, &r.Protocol, &r.Payload, &r.LinkType); err != nil {
 			return nil, err
 		}
+		t, err := scanPacketTime(ts)
+		if err != nil {
+			return nil, err
+		}
+		r.Timestamp = t
 		result = append(result, r)
 	}
 	return result, rows.Err()

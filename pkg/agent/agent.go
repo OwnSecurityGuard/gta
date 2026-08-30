@@ -2,14 +2,15 @@
 //
 // 职责边界：
 //   - 不修改 sing-box、不 fork：sing-box 提供 TUN/混合代理，本包只做"流量中继 + 连接元数据推送"；
-//   - 连接级数据通过 gRPC 客户端流推送给 GTA mobile capture source，由 GTA 侧做流重组与应用层分帧；
+//   - 连接级数据通过 gRPC 客户端流推送给 GTA mobile capture source，GTA 侧按数据块原样透传
+//     （应用层分帧/重组是协议语义，由绑定到会话的解码插件按连接自行完成）；
 //   - 本包不关心解码、不关心存储，保持 Source 边界。
 //
 // 数据流：
 //
 //	Game ──▶ Relay(本包 TCP 中继) ──▶ 上游 server
 //	              │
-//	              └── gRPC Push ──▶ GTA mobile source ──▶ 流重组 ──▶ event.Packet
+//	              └── gRPC Push ──▶ GTA mobile source ──▶ event.Packet（数据块直通）
 package agent
 
 import (

@@ -205,9 +205,6 @@ message PcapFileConfig {
 // 监听地址形如 "127.0.0.1:9090"（tcp）或 "unix:///tmp/gta-mobile.sock"（unix）。
 message MobileSourceConfig {
   string listen_addr = 1;   // gRPC 服务监听地址，agent 连这里
-  string frame_style = 2;   // raw | length_prefix（默认 raw）
-  int32 prefix_len = 3;     // length_prefix 的长度前缀字节数 1|2|4（默认 4）
-  bool little_endian = 4;   // 长度前缀字节序，默认大端
 }
 
 message StartCaptureRequest {
@@ -387,17 +384,18 @@ message GetProxyConfigRequest {}
 message ProxyConfigState {
   string listen_addr = 1;    // agent HTTP CONNECT 代理监听地址（手机连这里）
   string server_addr = 2;    // mobile Source gRPC 监听地址（agent 推这里）
-  string frame_style = 3;    // raw | length_prefix
-  int32 prefix_len = 4;      // length_prefix 长度前缀字节数
-  bool little_endian = 5;    // 长度前缀字节序
-  bool agent_running = 6;    // gta-singbox-agent 子进程是否存活
-  int32 agent_pid = 7;       // agent 子进程 PID（未运行时为 0）
-  bool session_running = 8;  // 代理抓包会话是否运行中
-  string session_id = 9;     // 代理抓包会话 id（未运行时为空）
-  string config_path = 10;   // 配置文件绝对路径
-  string plugin = 11;        // 代理抓包会话绑定的解码插件名（空=仅抓原始包）
-  repeated string include_hosts = 12;  // 连接筛选：仅抓取目标主机在此列表内的连接
-  repeated int32 include_ports = 13;   // 连接筛选：仅抓取目标端口在此列表内的连接
+  bool agent_running = 3;    // gta-singbox-agent 子进程是否存活
+  int32 agent_pid = 4;       // agent 子进程 PID（未运行时为 0）
+  bool session_running = 5;  // 代理抓包会话是否运行中
+  string session_id = 6;     // 代理抓包会话 id（未运行时为空）
+  string config_path = 7;    // 配置文件绝对路径
+  string plugin = 8;         // 代理抓包会话绑定的解码插件名（空=仅抓原始包）
+  repeated string include_hosts = 9;  // 连接筛选：仅抓取目标主机在此列表内的连接
+  repeated int32 include_ports = 10;  // 连接筛选：仅抓取目标端口在此列表内的连接
+  int64 active_conns = 11;   // 当前活跃手机连接数（open - close）
+  uint64 total_conns = 12;   // 累计打开连接数
+  int64 last_data_unix = 13; // 最近一次收到数据的 unix 毫秒（0=从未）
+  uint64 total_bytes = 14;   // 累计接收应用层字节
 }
 
 message GetProxyConfigResponse {
@@ -410,12 +408,9 @@ message GetProxyConfigResponse {
 message UpdateProxyConfigRequest {
   string listen_addr = 1;
   string server_addr = 2;
-  string frame_style = 3;
-  int32 prefix_len = 4;
-  bool little_endian = 5;
-  string plugin = 6;
-  repeated string include_hosts = 7;
-  repeated int32 include_ports = 8;
+  string plugin = 3;
+  repeated string include_hosts = 4;
+  repeated int32 include_ports = 5;
 }
 
 message UpdateProxyConfigResponse {

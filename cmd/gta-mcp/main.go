@@ -57,7 +57,6 @@ type sessionMetadata struct {
 	PCAPFile     string                 `json:"pcap_file,omitempty"`
 	Source       string                 `json:"source,omitempty"` // nic | proxy
 	ListenAddr   string                 `json:"listen_addr,omitempty"`
-	FrameStyle   string                 `json:"frame_style,omitempty"`
 	RawPackets   int64                  `json:"raw_packets,omitempty"`
 	Events       int64                  `json:"events,omitempty"`
 	Metrics      int64                  `json:"metrics,omitempty"`
@@ -480,10 +479,7 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 		agentSource = true
 	}
 	listenAddr := req.GetString("listen_addr", "")
-	frameStyle := req.GetString("frame_style", "")
-	prefixLen, _ := req.RequireInt("prefix_len")
-	littleEndian := strings.EqualFold(req.GetString("little_endian", "false"), "true")
-	slog.Info("start_capture requested", "port", port, "plugin", pluginName, "pcap_file", pcapFile, "source", source, "listen_addr", listenAddr, "frame_style", frameStyle)
+	slog.Info("start_capture requested", "port", port, "plugin", pluginName, "pcap_file", pcapFile, "source", source, "listen_addr", listenAddr)
 
 	// 构造 gRPC request
 	grpcReq := &pb.StartCaptureRequest{
@@ -503,10 +499,7 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 		}
 		grpcReq.Source = &pb.StartCaptureRequest_Mobile{
 			Mobile: &pb.MobileSourceConfig{
-				ListenAddr:   listenAddr,
-				FrameStyle:   frameStyle,
-				PrefixLen:    int32(prefixLen),
-				LittleEndian: littleEndian,
+				ListenAddr: listenAddr,
 			},
 		}
 	case pcapFile != "":
@@ -544,7 +537,6 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 		PCAPFile:   pcapFile,
 		Source:     source,
 		ListenAddr: listenAddr,
-		FrameStyle: frameStyle,
 		DBPath:     resp.GetDbPath(),
 	}
 	if err := m.sessionMgr.writeSessionMetadata(resp.GetSessionId(), meta); err != nil {
@@ -1390,6 +1382,15 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 	offset := req.GetInt("offset", 0)
 	sessionID := req.GetString("session_id", "")
 	filterExpr := req.GetString("filter", "")
+	// sessionID 为空时解析为当前会话的实际 ID：分页查询（QueryEventPage /
+	// StreamEventsDesc / capture context）都以 events.session_id 过滤，需要真实值。
+	// 旧实现的空串会过滤出 0 行（"默认当前会话"对事件查询从未真正生效）。
+	if sessionID == "" {
+		owner := auth.OwnerFrom(ctx)
+		if current, cErr := m.sessionMgr.readCurrent(owner); cErr == nil && current != nil && current.SessionID != "" {
+			sessionID = current.SessionID
+		}
+	}
 	dbPath, err := m.getDBPath(ctx, sessionID)
 	if err != nil {
 		return errorResult(err), nil
@@ -1402,11 +1403,21 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 
 	// Compile filter expression if provided.
 	var program *vm.Program
+	var pd filterPushdown
 	if filterExpr != "" {
 		program, err = expr.Compile(filterExpr, expr.Env(queryEnv()))
 		if err != nil {
 			return errorResult(fmt.Errorf("compile filter: %w", err)), nil
 		}
+		// 提取可下推 SQL 的 type 谓词（protocol == "http" 等）。
+		pd, err = parseFilterPushdown(filterExpr)
+		if err != nil {
+			// expr.Compile 已通过，parse 不应失败；保守降级为无下推（语义不受影响）。
+			slog.Debug("parse filter pushdown failed (fallback to no pushdown)", "filter", filterExpr, "error", err)
+			pd = filterPushdown{}
+		}
+	} else {
+		pd = filterPushdown{Pure: true}
 	}
 
 	reader, err := m.openReader(ctx, sessionID)
@@ -1415,80 +1426,57 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 	}
 	defer reader.Close()
 
-	// 诊断：确认解析到的 db 文件确实存在且有内容
-	if fi, statErr := os.Stat(dbPath); statErr == nil {
-		slog.Info("list_decoded_data: db file present", "db_path", dbPath, "size_bytes", fi.Size())
-	} else {
-		slog.Warn("list_decoded_data: db file missing", "db_path", dbPath, "error", statErr)
+	pager, ok := reader.(store.EventPager)
+	if !ok {
+		return errorResult(fmt.Errorf("event reader does not support paging")), nil
 	}
 
-	// Query all events (no LIMIT) for application-level filtering.
-	eventRows, err := reader.QueryEventsDesc(ctx, sessionID, 0, 0)
-	if err != nil {
-		return errorResult(fmt.Errorf("query events: %w", err)), nil
-	}
-	slog.Info("list_decoded_data: queried events from db", "session_id", sessionID, "db_path", dbPath, "raw_event_count", len(eventRows))
-
-	// 捕获上下文索引：基于全量事件计算连接序号/流序号（与分页、筛选无关）。
+	// 捕获上下文索引：从 event_index 轻量行计算连接序号/流序号（无 payload 解码）。
 	// 仅代理抓包（conn_id 非空）的事件会获得 capture 字段，供前端展示 Capture Context。
-	captureIdx := buildCaptureContext(eventRows)
+	captureIdx := buildCaptureContextFromIndex(ctx, reader, sessionID)
 
-	// 批量查询原始包长度：收集所有 RawPacketID，一次 SELECT id,LENGTH(payload) 构建 map。
-	rawLenMap := make(map[string]int, len(eventRows))
-	if dbReader, ok := reader.(interface{ DB() *sql.DB }); ok {
-		var ids []string
-		for _, ev := range eventRows {
-			if ev.Context.RawPacketID != "" {
-				ids = append(ids, ev.Context.RawPacketID)
+	pageQ := store.EventPageQuery{SessionID: sessionID, TypeEq: pd.TypeEq, TypeNot: pd.TypeNot}
+
+	// 纯 SQL 分页路径：filter 为空，或 filter 恰好被 type 谓词完全表达。
+	// LIMIT/OFFSET/COUNT 全部下推到 SQL，payload msgpack 仅对页内行解码。
+	// 这是前端 2s 轮询的默认路径，代价 O(page) 而非 O(全量事件)。
+	if program == nil || pd.Pure {
+		pageLimit := limit
+		if pageLimit <= 0 {
+			// 保持旧语义：limit<=0 返回空页 + 精确 total。
+			pageLimit = 1
+		}
+		pageEvents, total, err := pager.QueryEventPage(ctx, pageQ, pageLimit, offset)
+		if err != nil {
+			return errorResult(fmt.Errorf("query events: %w", err)), nil
+		}
+		rawLenMap := lookupRawLens(ctx, reader, pageEvents)
+		var events []map[string]any
+		if limit > 0 {
+			events = make([]map[string]any, 0, len(pageEvents))
+			for _, ev := range pageEvents {
+				events = append(events, decodedEventMap(ev, captureIdx, rawLenMap))
 			}
 		}
-		if len(ids) > 0 {
-			placeholder := strings.Repeat(",?", len(ids)-1)
-			rows, qErr := dbReader.DB().QueryContext(ctx,
-				"SELECT id, COALESCE(LENGTH(payload),0) FROM raw_packets WHERE id IN (?"+placeholder+")",
-				toAnySlice(ids)...,
-			)
-			if qErr != nil {
-				slog.Debug("batch raw_len lookup failed (non-fatal)", "error", qErr)
-			} else {
-				for rows.Next() {
-					var id string
-					var ln int
-					if err := rows.Scan(&id, &ln); err == nil {
-						rawLenMap[id] = ln
-					}
-				}
-				rows.Close()
-			}
-		}
+		slog.Info("list_decoded_data completed", "filter", filterExpr, "total_matched", total, "returned", len(events), "path", "sql-page")
+		return successResult(map[string]any{
+			"total_matched": total,
+			"count":         len(events),
+			"events":        events,
+		}), nil
 	}
 
-	matched := make([]map[string]any, 0)
-	for _, ev := range eventRows {
-		// 从 Event 构建 eventMap
-		dataContent := ev.Payload.Value.ToAny()
-		if dataContent == nil {
-			dataContent = map[string]any{}
-		}
-
-		rawLen := 0
-		if ev.Context.RawPacketID != "" {
-			rawLen = rawLenMap[ev.Context.RawPacketID]
-		}
-
-		eventMap := map[string]any{
-			"id":         string(ev.Identity.ID),
-			"timestamp":  ev.Identity.Timestamp.Format(time.RFC3339),
-			"session_id": ev.Identity.SessionID,
-			"protocol":   string(ev.Identity.Type),
-			"raw_len":    rawLen,
-			"data":       dataContent,
-		}
-		if cc, ok := captureIdx[string(ev.Identity.ID)]; ok {
-			eventMap["capture"] = cc
-		}
-
-		if program != nil {
+	// 应用层过滤路径：SQL 下推 type 谓词缩小候选集，流式分批求值完整表达式。
+	// 内存 O(batch + 页)；total 需精确，故遍历全部候选行（与旧实现 CPU 同阶，
+	// 但不再全量物化事件，且纯 protocol 过滤不会走到这里）。
+	var (
+		totalMatched int
+		pageMaps     []map[string]any
+	)
+	err = pager.StreamEventsDesc(ctx, pageQ, 500, func(batch []*event.Event) (bool, error) {
+		rawLenMap := lookupRawLens(ctx, reader, batch)
+		for _, ev := range batch {
+			eventMap := decodedEventMap(ev, captureIdx, rawLenMap)
 			out, err := expr.Run(program, eventMap)
 			if err != nil {
 				slog.Debug("filter eval error", "event_id", ev.Identity.ID, "error", err)
@@ -1497,29 +1485,85 @@ func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallTool
 			if v, ok := out.(bool); !ok || !v {
 				continue
 			}
+			totalMatched++
+			if totalMatched > offset && totalMatched <= offset+limit {
+				pageMaps = append(pageMaps, eventMap)
+			}
 		}
-		matched = append(matched, eventMap)
+		return true, nil
+	})
+	if err != nil {
+		return errorResult(fmt.Errorf("filter events: %w", err)), nil
 	}
 
-	totalMatched := len(matched)
-
-	// Apply offset/limit to filtered results.
-	start := offset
-	if start > totalMatched {
-		start = totalMatched
-	}
-	end := start + limit
-	if end > totalMatched {
-		end = totalMatched
-	}
-	events := matched[start:end]
-
-	slog.Info("list_decoded_data completed", "filter", filterExpr, "total_matched", totalMatched, "returned", len(events))
+	slog.Info("list_decoded_data completed", "filter", filterExpr, "total_matched", totalMatched, "returned", len(pageMaps), "path", "stream-filter")
 	return successResult(map[string]any{
 		"total_matched": totalMatched,
-		"count":         len(events),
-		"events":        events,
+		"count":         len(pageMaps),
+		"events":        pageMaps,
 	}), nil
+}
+
+// lookupRawLens 批量查询原始包长度（SELECT id, LENGTH(payload) WHERE id IN ...），
+// 作用于页内/批内事件，返回 RawPacketID → 字节数映射。
+// 查询失败非致命：返回空 map，raw_len 字段为 0。
+func lookupRawLens(ctx context.Context, reader captureReader, events []*event.Event) map[string]int {
+	rawLenMap := make(map[string]int, len(events))
+	dbReader, ok := reader.(interface{ DB() *sql.DB })
+	if !ok {
+		return rawLenMap
+	}
+	var ids []string
+	for _, ev := range events {
+		if ev.Context.RawPacketID != "" {
+			ids = append(ids, ev.Context.RawPacketID)
+		}
+	}
+	if len(ids) == 0 {
+		return rawLenMap
+	}
+	placeholder := strings.Repeat(",?", len(ids)-1)
+	rows, qErr := dbReader.DB().QueryContext(ctx,
+		"SELECT id, COALESCE(LENGTH(payload),0) FROM raw_packets WHERE id IN (?"+placeholder+")",
+		toAnySlice(ids)...,
+	)
+	if qErr != nil {
+		slog.Debug("batch raw_len lookup failed (non-fatal)", "error", qErr)
+		return rawLenMap
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var ln int
+		if err := rows.Scan(&id, &ln); err == nil {
+			rawLenMap[id] = ln
+		}
+	}
+	return rawLenMap
+}
+
+// decodedEventMap 构造 list_decoded_data 输出的事件 map（字段契约与旧实现一致）。
+func decodedEventMap(ev *event.Event, captureIdx map[string]captureContextJSON, rawLenMap map[string]int) map[string]any {
+	dataContent := ev.Payload.Value.ToAny()
+	if dataContent == nil {
+		dataContent = map[string]any{}
+	}
+	rawLen := 0
+	if ev.Context.RawPacketID != "" {
+		rawLen = rawLenMap[ev.Context.RawPacketID]
+	}
+	eventMap := map[string]any{
+		"id":         string(ev.Identity.ID),
+		"timestamp":  ev.Identity.Timestamp.Format(time.RFC3339),
+		"session_id": ev.Identity.SessionID,
+		"protocol":   string(ev.Identity.Type),
+		"raw_len":    rawLen,
+		"data":       dataContent,
+	}
+	if cc, ok := captureIdx[string(ev.Identity.ID)]; ok {
+		eventMap["capture"] = cc
+	}
+	return eventMap
 }
 
 // captureContextJSON 是单个事件的捕获上下文（Capture Context），
@@ -2229,7 +2273,6 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 			"pcap_file":     sess.PCAPFile,
 			"source":        sess.Source,
 			"listen_addr":   sess.ListenAddr,
-			"frame_style":   sess.FrameStyle,
 			"raw_packets":   sess.RawPackets,
 			"events":        sess.Events,
 			"metrics":       sess.Metrics,
@@ -2488,6 +2531,11 @@ func main() {
 	logFormat := flag.String("log-format", "json", "log format: json | text")
 	logFile := flag.String("log-file", "", "log file path (default: <workdir>/logs/gta-mcp.log)")
 	allowedOrigins := flag.String("allowed-origins", os.Getenv("GTA_MCP_ALLOWED_ORIGINS"), "CORS 允许的跨域 Origin（逗号分隔，如 http://localhost:5173,https://gta.example.com）；留空不返回 CORS 头（同源用法不受影响）")
+	// 会话保留策略（存储优化）：TTL 与数量上限防止 sessions/ 无限膨胀。
+	// flag 默认值已读环境变量（GTA_SESSION_RETENTION_DAYS / GTA_MAX_SESSIONS），
+	// 均可设 0 关闭对应策略；gta.yaml sessions.* 在 flag 与环境变量均未设置时生效。
+	sessionTTLDays := flag.Int("session-ttl-days", configEnvInt("GTA_SESSION_RETENTION_DAYS", 7), "会话保留天数：无写入活动超过该天数的会话被周期清理（0 关闭；gta.yaml sessions.retention_days）")
+	maxSessions := flag.Int("max-sessions", configEnvInt("GTA_MAX_SESSIONS", 200), "最大保留会话数：超出时从最旧的非运行会话清理（0 不限制；gta.yaml sessions.max_sessions）")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -2516,6 +2564,14 @@ func main() {
 	// 这里只在 flag 未显式传入且环境变量为空时用配置文件值补齐。
 	if !flagSet["allowed-origins"] && *allowedOrigins == "" && cfg.MCP.AllowedOrigins != "" {
 		*allowedOrigins = cfg.MCP.AllowedOrigins
+	}
+	// 会话保留策略：flag 默认值已读环境变量，这里在 flag 与环境变量均未设置时
+	// 用 gta.yaml sessions.* 补齐（yaml 显式 0 无法表达"关闭"，请用 flag/env 置 0）。
+	if !flagSet["session-ttl-days"] && cfg.Sessions.RetentionDays > 0 {
+		*sessionTTLDays = cfg.Sessions.RetentionDays
+	}
+	if !flagSet["max-sessions"] && cfg.Sessions.MaxSessions > 0 {
+		*maxSessions = cfg.Sessions.MaxSessions
 	}
 
 	// 工作目录：显式 flag > GTA_HOME > gta.yaml workdir > CWD 既有数据沿用 > ~/.gta。
@@ -2565,6 +2621,17 @@ func main() {
 		defer capture.pdConn.Close()
 	}
 
+	// 会话保留策略（存储优化）：启动即清一轮，之后周期执行。
+	// 默认 TTL 7 天 / 最多 200 个会话；-session-ttl-days 0 / -max-sessions 0 关闭对应项。
+	retention := retentionPolicy{
+		TTL:         time.Duration(*sessionTTLDays) * 24 * time.Hour,
+		MaxSessions: *maxSessions,
+	}
+	if retention.TTL > 0 || retention.MaxSessions > 0 {
+		slog.Info("session retention enabled", "ttl", retention.TTL.String(), "max_sessions", retention.MaxSessions)
+		go capture.runRetentionLoop(retention, 30*time.Minute)
+	}
+
 	s.AddTool(mcp.NewTool("start_capture",
 		mcp.WithDescription("Start capturing traffic. Capture sources: source=nic (default) captures on a network interface filtered by port; source=proxy starts the mobile proxy gRPC listener (gta-singbox-agent connects and pushes connection-level frames); source=agent subscribes to the agent hub (a running gta-agent pushes raw frames for this session_id). Sources can be combined where supported (e.g. agent with pcap_file). Packets are always captured and stored; an optional plugin enables protocol decoding."),
 		mcp.WithNumber("port", mcp.DefaultNumber(0), mcp.Description("Server port to capture or filter, e.g. 8080. Required for source=nic; ignored for source=proxy")),
@@ -2572,9 +2639,6 @@ func main() {
 		mcp.WithString("pcap_file", mcp.Description("Optional pcap file to replay instead of live capture")),
 		mcp.WithString("source", mcp.DefaultString("nic"), mcp.Description("Capture source: nic (network interface, default), proxy (mobile proxy via gta-singbox-agent) or agent (raw frames pushed by gta-agent via the agent hub)")),
 		mcp.WithString("listen_addr", mcp.DefaultString("127.0.0.1:9090"), mcp.Description("For source=proxy: gRPC listen address that gta-singbox-agent connects to, e.g. 127.0.0.1:9090 or unix:///tmp/gta-mobile.sock")),
-		mcp.WithString("frame_style", mcp.DefaultString("raw"), mcp.Description("For source=proxy: frame reassembly style, raw (each data chunk as one frame) or length_prefix (N-byte length header)")),
-		mcp.WithNumber("prefix_len", mcp.DefaultNumber(4), mcp.Description("For source=proxy + frame_style=length_prefix: length prefix byte count 1|2|4")),
-		mcp.WithString("little_endian", mcp.DefaultString("false"), mcp.Description("For source=proxy + frame_style=length_prefix: length prefix byte order, 'true' for little-endian, default big-endian")),
 	), capture.handleStartCapture)
 
 	s.AddTool(mcp.NewTool("stop_capture",
@@ -2642,12 +2706,9 @@ func main() {
 	), capture.handleGetProxyServerConfig)
 
 	s.AddTool(mcp.NewTool("update_proxy_server_config",
-		mcp.WithDescription("Apply a new mobile proxy capture server config: persists to proxy.json, hot-restarts gta-singbox-agent and restarts the always-on proxy session so the change takes effect immediately. Empty fields keep the current value (listen_addr is the proxy port the phone connects to, e.g. 0.0.0.0:12000; server_addr is the mobile source gRPC addr, e.g. 127.0.0.1:9090; frame_style raw|length_prefix with prefix_len 1|2|4)."),
+		mcp.WithDescription("Apply a new mobile proxy capture server config: persists to proxy.json, hot-restarts gta-singbox-agent and restarts the always-on proxy session so the change takes effect immediately. Empty fields keep the current value (listen_addr is the proxy port the phone connects to, e.g. 0.0.0.0:12000; server_addr is the mobile source gRPC addr, e.g. 127.0.0.1:9090; plugin is the decoder bound to the proxy session — framing/reassembly is handled by the plugin itself, not configured here)."),
 		mcp.WithString("listen_addr", mcp.Description("HTTP CONNECT proxy listen address, e.g. 0.0.0.0:12000 (empty = keep current)")),
 		mcp.WithString("server_addr", mcp.Description("Mobile source gRPC address the agent pushes to, e.g. 127.0.0.1:9090 (empty = keep current)")),
-		mcp.WithString("frame_style", mcp.Description("Frame reassembly style: raw | length_prefix (empty = keep current)")),
-		mcp.WithNumber("prefix_len", mcp.Description("Length prefix byte count for length_prefix: 1|2|4")),
-		mcp.WithString("little_endian", mcp.Description("Length prefix byte order: 'true' for little-endian, default big-endian")),
 	), capture.handleUpdateProxyServerConfig)
 
 	s.AddTool(mcp.NewTool("get_registry_addr",

@@ -45,6 +45,17 @@ type EventReader interface {
 	Close() error
 }
 
+// EventPager 是展示层分页查询扩展：SQL 层完成 LIMIT/OFFSET/COUNT 与
+// 可下推的结构化谓词（type 过滤），payload 仅对页内行解码。
+// 由 list_decoded_data 等高频轮询路径使用，避免全量加载。
+type EventPager interface {
+	// QueryEventPage 返回按 timestamp DESC 的一页事件与 SQL 条件命中总数。
+	QueryEventPage(ctx context.Context, q EventPageQuery, limit, offset int) ([]*event.Event, int, error)
+	// StreamEventsDesc 以时间倒序分批流式遍历事件，供应用层表达式过滤
+	//（内存 O(batch)，精确 total 需遍历全部候选行）。
+	StreamEventsDesc(ctx context.Context, q EventPageQuery, batch int, yield func([]*event.Event) (bool, error)) error
+}
+
 // ===== 第 2 层：投影 =====
 
 // ProjectionWriter 由 gta-pipeline 使用，写派生数据。

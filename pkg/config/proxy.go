@@ -19,7 +19,7 @@ import (
 //	手机代理软件 ── HTTP CONNECT ──▶ gta-singbox-agent ── gRPC ──▶ mobile Source（代理抓包会话）
 //	         （ListenAddr）                    （ServerAddr）
 //
-// 它描述"服务端"应如何监听与分帧、绑定解码插件、以及按目标主机/端口筛选哪些连接
+// 它描述"服务端"应如何监听、绑定解码插件、以及按目标主机/端口筛选哪些连接
 // 需要抓包。配置落盘为 <workdir>/proxy.json，由 gta-pipeline 在启动/热更新时读取并应用。
 type ProxyServerConfig struct {
 	// ListenAddr 是 gta-singbox-agent 的 HTTP CONNECT 代理监听地址，手机代理软件连这里。
@@ -28,13 +28,8 @@ type ProxyServerConfig struct {
 	// ServerAddr 是 mobile Source 的 gRPC 监听地址，agent 推送连接级数据到这里。
 	// 必须与代理抓包会话的 mobile source listen_addr 一致。
 	ServerAddr string `json:"server_addr"`
-	// FrameStyle 代理抓包会话的分帧方式：raw（默认）| length_prefix。
-	FrameStyle string `json:"frame_style"`
-	// PrefixLen length_prefix 分帧的长度前缀字节数（1|2|4），默认 4。
-	PrefixLen int `json:"prefix_len"`
-	// LittleEndian 长度前缀字节序，默认大端。
-	LittleEndian bool `json:"little_endian"`
 	// Plugin 代理抓包会话绑定的解码插件名（空表示仅抓原始包不解码）。
+	// 应用层分帧/重组由该插件按连接自行完成，平台不配置帧格式。
 	Plugin string `json:"plugin"`
 	// IncludeHosts 连接筛选：仅抓取目标主机（CONNECT 中的 host）在此列表内的连接。
 	// 支持 IP 或域名，不区分大小写；为空表示不按主机筛选。
@@ -56,8 +51,6 @@ func DefaultProxyServerConfig() ProxyServerConfig {
 	return ProxyServerConfig{
 		ListenAddr: "0.0.0.0:12000",
 		ServerAddr: serverAddr,
-		FrameStyle: "raw",
-		PrefixLen:  4,
 	}
 }
 
@@ -101,23 +94,6 @@ func (c ProxyServerConfig) Normalize() (ProxyServerConfig, error) {
 	}
 	if strings.TrimSpace(c.ServerAddr) == "" {
 		c.ServerAddr = DefaultProxyServerConfig().ServerAddr
-	}
-	switch c.FrameStyle {
-	case "", "raw", "length_prefix":
-		if c.FrameStyle == "" {
-			c.FrameStyle = "raw"
-		}
-	default:
-		return c, fmt.Errorf("unsupported frame_style %q (allowed: raw|length_prefix)", c.FrameStyle)
-	}
-	if c.FrameStyle == "length_prefix" {
-		switch c.PrefixLen {
-		case 0:
-			c.PrefixLen = 4
-		case 1, 2, 4:
-		default:
-			return c, fmt.Errorf("prefix_len must be 1|2|4, got %d", c.PrefixLen)
-		}
 	}
 	if c.ListenPort() <= 0 {
 		return c, errors.New("listen_addr must be host:port")

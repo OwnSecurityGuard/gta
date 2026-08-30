@@ -1,8 +1,12 @@
 # Dockerfile（T15）——服务端镜像：gta-pipeline + gta-mcp。
 #
 # 多阶段构建：
+#   webui   : node:22-bookworm-slim 构建 web/ 前端（Vite 产物 dist）；
 #   builder : golang:1.25-bookworm + libpcap-dev，以 cgo（pcap）编译两个服务端二进制；
+#             前端产物先 COPY 进 cmd/gta-mcp/webui/，由 //go:embed 嵌入 gta-mcp；
 #   runtime : debian:bookworm-slim + libpcap0.8（gopacket/pcap 运行时需要的共享库）。
+#
+# Web UI：浏览器直接访问 http://<host>:8781（静态资源免鉴权，API 语义不变）。
 #
 # 远程 Agent 即时编译（方案一）：gta-mcp 的 /download/agent 会在服务端用
 #   go build -tags "embedded pcap" 现场编译 gta-agent 下载产物。为此 runtime 镜像
@@ -16,6 +20,31 @@
 #
 # 构建（版本注入与 Makefile 的 -X ldflags 同源，见 pkg/version/version.go）：
 #   docker build --build-arg VERSION=v0.5.0 --build-arg GIT_COMMIT=abc1234 -t gta-server .
+
+# ============================================================================
+# 阶段 0：webui（前端构建）
+# ============================================================================
+# node:22 构建 web/（React 19 + Vite），产物经 builder 阶段 COPY 进
+# cmd/gta-mcp/webui/ 后由 //go:embed 嵌入 gta-mcp——runtime 阶段零新增文件。
+#
+# npm registry 默认走 npmmirror（与 GOPROXY 默认 goproxy.cn 的境内网络取向
+# 一致）；境外构建可覆盖：
+#   docker build --build-arg NPM_REGISTRY=https://registry.npmjs.org .
+# VITE_ENABLE_RAW_DEBUG=1 可开启前端「原始包」调试页（构建期静态替换，默认关闭）。
+FROM node:22-bookworm-slim AS webui
+
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG VITE_ENABLE_RAW_DEBUG=0
+ENV VITE_ENABLE_RAW_DEBUG=${VITE_ENABLE_RAW_DEBUG}
+
+WORKDIR /src
+
+# 先只拷 package.json/package-lock.json 做 npm ci，充分利用层缓存。
+COPY web/package.json web/package-lock.json ./
+RUN npm config set registry ${NPM_REGISTRY} && npm ci
+
+COPY web/ ./
+RUN npm run build
 
 # ============================================================================
 # 阶段 1：builder
@@ -46,6 +75,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+
+# 前端产物嵌入 gta-mcp（//go:embed cmd/gta-mcp/webui）。.dockerignore 已把
+# 本地 webui 产物挡在上下文外（目录里只有 .gitkeep），node 阶段产物是唯一
+# 来源——镜像内前端永远与本次构建的源码同步，不残留陈旧 hash 产物。
+COPY --from=webui /src/dist ./cmd/gta-mcp/webui/
 
 RUN CGO_ENABLED=1 \
 	go build -tags pcap -trimpath \
@@ -104,7 +138,7 @@ ENV GTA_HOME=/data
 WORKDIR /data
 VOLUME ["/data"]
 
-# 9888 CaptureControl | 9091 PluginRegistry | 9092 AgentIngest | 8781 MCP HTTP/SSE
+# 9888 CaptureControl | 9091 PluginRegistry | 9092 AgentIngest | 8781 MCP HTTP/SSE + Web UI
 EXPOSE 9888 9091 9092 8781
 
 # 默认跑 pipeline；gta-mcp 用法见 docker-compose.yml（覆盖 entrypoint）。

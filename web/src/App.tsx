@@ -61,6 +61,8 @@ export default function App() {
   const [linkedRunSessionId, setLinkedRunSessionId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [activeTab, setActiveTab] = useState<ViewTab>("decoded");
+  // 从连接详情点击 flow_id 跳转时预填到「行为」Tab 的 flow_id
+  const [tracePrefill, setTracePrefill] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 服务器开启令牌校验且本地无有效凭证（401）：横幅提示并自动打开设置。
   const authError = useAuthError();
@@ -75,6 +77,8 @@ export default function App() {
 
   // 筛选框引用：用于 "/" 快捷键聚焦
   const filterInputRef = useRef<HTMLInputElement>(null);
+  // 会话搜索框引用：用于 Ctrl/Cmd+K 快捷键聚焦
+  const sessionSearchInputRef = useRef<HTMLInputElement>(null);
 
   // "/" 快捷键：在协议数据 Tab 聚焦筛选框（不在输入框/可编辑区时）
   useEffect(() => {
@@ -92,6 +96,18 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [activeTab]);
+
+  // Ctrl/Cmd+K 快捷键：全局聚焦左侧会话搜索框
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        sessionSearchInputRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // 订阅后端插件事件 SSE 流，插件上下线/热更时零延迟刷新面板与侧边栏。
   usePluginEventStream();
@@ -141,6 +157,20 @@ export default function App() {
     setFilter(""); // 切换 session 时清空 filter
   }, []);
 
+  // 从连接详情点击 flow_id：「行为」Tab 预填 flow_id 并切换过去
+  const handleJumpToRun = useCallback((flowId: string) => {
+    setTracePrefill(flowId);
+    setActiveTab("runs");
+  }, []);
+
+  // 从代理抓包状态卡一键跳转：选中常驻会话切到「连接」页并关闭弹窗
+  const handleNavigateToSession = useCallback((sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    setFilter("");
+    setActiveTab("connections");
+    setProxyConfigOpen(false);
+  }, []);
+
   // Tab 键导航：左右方向键在 tablist 中移动焦点
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   function handleTabKeyDown(e: ReactKeyboardEvent) {
@@ -173,6 +203,7 @@ export default function App() {
         <SessionSidebar
           selectedSessionId={selectedSessionId}
           onSelectSession={handleSelectSession}
+          searchInputRef={sessionSearchInputRef}
           onDeleted={(id) => {
             if (id === selectedSessionId) setSelectedSessionId(null);
             // 被删会话若正联动某行为窗口，一并清除联动状态
@@ -343,13 +374,17 @@ export default function App() {
           )}
           {activeTab === "connections" && (
             <div className="h-full overflow-auto p-4 gta-scroll">
-              <ConnectionsPage sessionId={selectedSessionId} />
+              <ConnectionsPage sessionId={selectedSessionId} onJumpToRun={handleJumpToRun} />
             </div>
           )}
           {activeTab === "analytics" && <AnalyticsPanel sessionId={selectedSessionId} />}
           {activeTab === "timeline" && <TimelinePanel sessionId={selectedSessionId} />}
           {activeTab === "runs" && (
-            <RunsPanel linkedRunId={linkedRunId} linkedSessionId={linkedRunSessionId} />
+            <RunsPanel
+              linkedRunId={linkedRunId}
+              linkedSessionId={linkedRunSessionId}
+              tracePrefill={tracePrefill}
+            />
           )}
           {activeTab === "data" && (
             <div className="flex h-full flex-col">
@@ -376,7 +411,7 @@ export default function App() {
       {/* 设置弹窗 */}
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {/* 代理服务器配置弹窗 */}
-      <ProxyConfigDialog open={proxyConfigOpen} onClose={() => setProxyConfigOpen(false)} />
+      <ProxyConfigDialog open={proxyConfigOpen} onClose={() => setProxyConfigOpen(false)} onNavigateToSession={handleNavigateToSession} />
       {/* 下载远程 Agent 弹窗（跨环境抓包上报） */}
       <AgentDownloadDialog open={agentDownloadOpen} onClose={() => setAgentDownloadOpen(false)} />
       {/* 开始抓包弹窗（本机网卡 / 远程 agent 源） */}

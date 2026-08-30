@@ -539,10 +539,8 @@ func openCaptureSourcesBase(ctx context.Context, iface string, port int, pcapFil
 
 	if mcfg != nil {
 		src, err := capture.Open(ctx, "mobile", mobile.MobileConfig{
-			ListenAddr:   mcfg.ListenAddr,
-			FrameStyle:   mobile.FrameStyle(mcfg.FrameStyle),
-			PrefixLen:    mcfg.PrefixLen,
-			LittleEndian: mcfg.LittleEndian,
+			ListenAddr: mcfg.ListenAddr,
+			Activity:   mcfg.Activity,
 		})
 		if err != nil {
 			return nil, err

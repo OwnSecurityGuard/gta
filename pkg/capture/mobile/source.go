@@ -30,22 +30,21 @@ func init() {
 
 func newSource(cfg any) (capture.Source, error) {
 	c := cfg.(MobileConfig)
-	c.applyDefaults()
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
 	s := &mobileSource{
 		cfg:   c,
 		out:   make(chan event.Packet, 256),
-		reasm: NewReassembler(c),
 		conns: make(map[string]*connState),
+		// Activity 可能为 nil（未注入时仅维护内部计数器）。
+		activity: c.Activity,
 	}
 	s.StatTracker.Init()
 	return s, nil
 }
 
 // connState 保存单个连接（conn_id）的元数据与打开时间。
-// 一个连接的两个方向（request/response）是独立的字节流，由 Reassembler 分开缓冲。
 type connState struct {
 	id      string
 	open    *proto.ConnOpen
@@ -58,19 +57,22 @@ type connState struct {
 //
 // Source 内部做：
 //  1. 按 conn_id 维护连接元数据；
-//  2. Reassembler 把 TCP 字节流重组为应用层帧（raw 或 length_prefix）；
-//  3. 每帧构造一个 event.Packet（LinkType=ProxyPayload，Metadata 携带五元组），
+//  2. 每个数据块原样封装为一个 event.Packet（不做应用层分帧，
+//     协议帧边界的判定由解码插件按连接自行处理）；
+//  3. 每帧构造（LinkType=ProxyPayload，Metadata 携带五元组），
 //     经 EnrichFromMetadata 等价逻辑回填 Src/Dst/Protocol。
 type mobileSource struct {
 	cfg MobileConfig
 
 	proto.UnimplementedMobileCaptureServer
 
-	out   chan event.Packet
-	reasm *Reassembler
+	out chan event.Packet
 
 	connsMu sync.Mutex
 	conns   map[string]*connState
+
+	// activity 为可选注入的运行时活动追踪器（见 MobileConfig.Activity）。
+	activity *Activity
 
 	lis        net.Listener
 	grpcServer *grpc.Server
@@ -98,8 +100,7 @@ func (s *mobileSource) setup() error {
 	s.grpcServer = grpc.NewServer()
 	proto.RegisterMobileCaptureServer(s.grpcServer, s)
 	slog.Info("mobile capture source listening",
-		"network", network, "addr", addr,
-		"frame_style", s.cfg.FrameStyle, "prefix_len", s.cfg.PrefixLen)
+		"network", network, "addr", addr)
 	return nil
 }
 
@@ -174,6 +175,10 @@ func (s *mobileSource) handleOpen(connID string, ts time.Time, open *proto.ConnO
 	} else {
 		s.conns[connID] = &connState{id: connID, open: open, created: ts}
 		s.connsOpened.Add(1)
+		if s.activity != nil {
+			s.activity.activeConns.Add(1)
+			s.activity.totalConns.Add(1)
+		}
 	}
 	s.connsMu.Unlock()
 }
@@ -196,14 +201,13 @@ func (s *mobileSource) handleData(connID, direction string, ts time.Time, payloa
 		direction = "request"
 	}
 	s.bytesRecv.Add(uint64(len(payload)))
-	frames, dropped := s.reasm.Write(connID, direction, payload)
-	if dropped > 0 {
-		s.StatTracker.AddErrors(uint64(dropped))
-		slog.Debug("mobile reassembler dropped bytes", "conn", connID, "bytes", dropped)
+	if s.activity != nil {
+		s.activity.lastDataUnix.Store(ts.UnixMilli())
+		s.activity.totalBytes.Add(uint64(len(payload)))
 	}
-	for _, f := range frames {
-		s.emit(conn, direction, f, ts)
-	}
+	// 数据块原样转发为一个 packet：不做应用层分帧，粘包/半包与帧边界
+	// 的判定由解码插件按连接自行处理（见 MobileConfig 的分帧职责说明）。
+	s.emit(conn, direction, payload, ts)
 }
 
 func (s *mobileSource) handleClose(connID string, ts time.Time, reason string) {
@@ -215,22 +219,14 @@ func (s *mobileSource) handleClose(connID string, ts time.Time, reason string) {
 		s.countError("conn_close for unknown conn %s", connID)
 		return
 	}
-	// flush 两个方向残余缓冲：长度前缀模式下不完整的尾帧被丢弃。
-	for _, dir := range []string{"request", "response"} {
-		frames, dropped := s.reasm.Flush(connID, dir)
-		if dropped > 0 {
-			s.StatTracker.AddErrors(uint64(dropped))
-		}
-		for _, f := range frames {
-			s.emit(conn, dir, f, ts)
-		}
+	if s.activity != nil {
+		s.activity.activeConns.Add(-1)
 	}
-	s.reasm.Drop(connID)
 }
 
-// emit 把一个应用帧包装为 event.Packet 并发往 out channel。
+// emit 把一段应用层数据块包装为 event.Packet 并发往 out channel。
 func (s *mobileSource) emit(conn *connState, direction string, frame []byte, ts time.Time) {
-	// Reassembler 返回的是内部缓冲切片，后续 Write 可能复用，必须复制。
+	// payload 来自 gRPC 反序列化，后续 Recv 可能复用底层字节，必须复制。
 	payload := make([]byte, len(frame))
 	copy(payload, frame)
 	pkt := buildPacket(conn.open, conn.id, direction, payload, ts)

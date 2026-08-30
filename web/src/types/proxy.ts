@@ -1,15 +1,10 @@
-/** 代理抓包服务器配置 + 运行时状态（get_proxy_server_config 返回）。 */
+/** 代理抓包服务器配置 + 运行时状态（get_proxy_server_config 返回）。
+ * 不含分帧配置：帧边界判定是协议语义，由绑定到会话的解码插件按连接自行处理。 */
 export interface ProxyConfigState {
   /** agent HTTP CONNECT 代理监听地址（手机代理软件连这里），如 0.0.0.0:12000 */
   listen_addr: string;
   /** mobile Source gRPC 监听地址（agent 推送数据到这里），如 127.0.0.1:9090 */
   server_addr: string;
-  /** 分帧方式：raw | length_prefix */
-  frame_style: string;
-  /** length_prefix 长度前缀字节数（1|2|4） */
-  prefix_len: number;
-  /** 长度前缀字节序 */
-  little_endian: boolean;
   /** gta-singbox-agent 子进程是否存活 */
   agent_running: boolean;
   /** agent 子进程 PID（未运行时为 0） */
@@ -26,6 +21,14 @@ export interface ProxyConfigState {
   include_hosts: string[];
   /** 连接筛选：仅抓取目标端口在此列表内的连接（空=不筛选） */
   include_ports: number[];
+  /** 当前活跃手机连接数（open - close），实时值来自常驻 mobile 会话 */
+  active_conns: number;
+  /** 累计打开连接数（当前常驻会话周期内） */
+  total_conns: number;
+  /** 最近一次收到数据的 unix 毫秒（0=从未收到数据） */
+  last_data_unix: number;
+  /** 累计接收应用层字节（当前常驻会话周期内） */
+  total_bytes: number;
   /** 本机局域网 IP（用于手机扫描二维码连接） */
   lan_ip: string;
   /** 手机代理软件填写的 HTTP CONNECT 代理地址（二维码内容），如 192.168.1.5:12000 */
@@ -52,10 +55,7 @@ export interface UpdateProxyConfigResult {
 export interface ProxyConfigUpdateVars {
   listenAddr?: string;
   serverAddr?: string;
-  frameStyle?: string;
-  prefixLen?: number;
-  littleEndian?: boolean;
-  /** 解码插件名（空=仅抓原始包不解码） */
+  /** 解码插件名（空=仅抓原始包不解码；分帧由插件自身实现） */
   plugin?: string;
   /** 连接筛选：仅抓取目标主机在此列表内的连接 */
   includeHosts?: string[];

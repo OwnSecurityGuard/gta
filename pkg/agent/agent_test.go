@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,11 +32,9 @@ type addrSource interface {
 func TestRelayEndToEnd(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
 
-	// 1. GTA mobile source（length_prefix 分帧）
+	// 1. GTA mobile source（数据块直通：不做应用层分帧）
 	src, err := capture.Open(context.Background(), "mobile", mobile.MobileConfig{
 		ListenAddr: "127.0.0.1:0",
-		FrameStyle: mobile.FrameLengthPrefix,
-		PrefixLen:  4,
 	})
 	if err != nil {
 		t.Fatalf("open mobile source: %v", err)
@@ -98,39 +97,16 @@ func TestRelayEndToEnd(t *testing.T) {
 		t.Fatalf("run sim client: %v", err)
 	}
 
-	// 6. 期望 4 request + 4 response = 8 个完整应用帧
-	var reqs, resps int
-	deadline = time.Now().Add(5 * time.Second)
-	for reqs+resps < 8 {
-		select {
-		case pkt, ok := <-src.Packets():
-			if !ok {
-				t.Fatalf("packet channel closed early: reqs=%d resps=%d", reqs, resps)
-			}
-			if pkt.LinkType != event.LinkTypeProxyPayload || pkt.Protocol != "tcp" {
-				t.Errorf("packet link_type/protocol = %d/%s", pkt.LinkType, pkt.Protocol)
-			}
-			switch pkt.Metadata["direction"] {
-			case "request":
-				if pkt.Dst.String() != echoAddr {
-					t.Errorf("request dst = %s, want %s", pkt.Dst, echoAddr)
-				}
-				reqs++
-			case "response":
-				if pkt.Src.String() != echoAddr {
-					t.Errorf("response src = %s, want %s", pkt.Src, echoAddr)
-				}
-				resps++
-			default:
-				t.Errorf("unexpected direction metadata: %v", pkt.Metadata["direction"])
-			}
-		case <-time.After(time.Until(deadline)):
-			t.Fatalf("timeout: reqs=%d resps=%d", reqs, resps)
-		}
+	// 6. 数据块直通语义：source 不保证块边界（粘包/半包由插件处理），
+	// 但两个方向的字节流拼接必须与模拟客户端/服务端写出的帧字节逐字节一致。
+	var wantReqs, wantResps [][]byte
+	for _, m := range messages {
+		wantReqs = append(wantReqs, frameOf(m))
+		wantResps = append(wantResps, frameOf([]byte(fmt.Sprintf(`{"ok":true,"echo":%d}`, len(m)))))
 	}
-	if reqs != 4 || resps != 4 {
-		t.Fatalf("reqs=%d resps=%d, want 4/4", reqs, resps)
-	}
+	wantReq := bytes.Join(wantReqs, nil)
+	wantResp := bytes.Join(wantResps, nil)
+	drainPackets(t, src.Packets(), echoAddr, wantReq, wantResp)
 	// 停止 relay：cancel 会让 Serve 关闭监听并返回，确认其干净退出。
 	cancel()
 	if err := <-relayErr; err != nil {
@@ -156,11 +132,9 @@ func (w testWriter) Write(p []byte) (int, error) {
 func TestRelayHTTPConnectProxy(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
 
-	// 1. GTA mobile source（length_prefix 分帧）
+	// 1. GTA mobile source（数据块直通：不做应用层分帧）
 	src, err := capture.Open(context.Background(), "mobile", mobile.MobileConfig{
 		ListenAddr: "127.0.0.1:0",
-		FrameStyle: mobile.FrameLengthPrefix,
-		PrefixLen:  4,
 	})
 	if err != nil {
 		t.Fatalf("open mobile source: %v", err)
@@ -239,39 +213,10 @@ func TestRelayHTTPConnectProxy(t *testing.T) {
 		t.Fatalf("echo = %q, want EchoServer JSON response", echo)
 	}
 
-	// 7. 期望 1 request + 1 response，方向与目标正确
-	var reqs, resps int
-	deadline = time.Now().Add(5 * time.Second)
-	for reqs+resps < 2 {
-		select {
-		case pkt, ok := <-src.Packets():
-			if !ok {
-				t.Fatalf("packet channel closed early: reqs=%d resps=%d", reqs, resps)
-			}
-			if pkt.LinkType != event.LinkTypeProxyPayload || pkt.Protocol != "tcp" {
-				t.Errorf("packet link_type/protocol = %d/%s", pkt.LinkType, pkt.Protocol)
-			}
-			switch pkt.Metadata["direction"] {
-			case "request":
-				if pkt.Dst.String() != echoAddr {
-					t.Errorf("request dst = %s, want %s", pkt.Dst, echoAddr)
-				}
-				reqs++
-			case "response":
-				if pkt.Src.String() != echoAddr {
-					t.Errorf("response src = %s, want %s", pkt.Src, echoAddr)
-				}
-				resps++
-			default:
-				t.Errorf("unexpected direction metadata: %v", pkt.Metadata["direction"])
-			}
-		case <-time.After(time.Until(deadline)):
-			t.Fatalf("timeout: reqs=%d resps=%d", reqs, resps)
-		}
-	}
-	if reqs != 1 || resps != 1 {
-		t.Fatalf("reqs=%d resps=%d, want 1/1", reqs, resps)
-	}
+	// 7. 数据块直通：request 字节流 == 客户端写出的帧，response 字节流 == EchoServer 回写帧
+	wantReq := frameOf(payload)
+	wantResp := frameOf([]byte(fmt.Sprintf(`{"ok":true,"echo":%d}`, len(payload))))
+	drainPackets(t, src.Packets(), echoAddr, wantReq, wantResp)
 
 	// 8. 停止 relay，确认干净退出
 	cancel()
@@ -315,11 +260,9 @@ func TestConnectionFilter(t *testing.T) {
 func TestRelayHTTPConnectFilter(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
 
-	// 1. GTA mobile source（length_prefix 分帧）
+	// 1. GTA mobile source（数据块直通：不做应用层分帧）
 	src, err := capture.Open(context.Background(), "mobile", mobile.MobileConfig{
 		ListenAddr: "127.0.0.1:0",
-		FrameStyle: mobile.FrameLengthPrefix,
-		PrefixLen:  4,
 	})
 	if err != nil {
 		t.Fatalf("open mobile source: %v", err)
@@ -411,12 +354,14 @@ func TestRelayHTTPConnectFilter(t *testing.T) {
 	}
 	_ = miss.Close()
 
-	// 6. 匹配连接：应上报 1 request + 1 response
+	// 6. 匹配连接：数据块直通 + 字节流拼接 == echo 连接的帧字节
+	//    （discard 连接被筛选、不得上报：drainPackets 会逐包校验端点）
 	hit, err := tunnel(echoAddr)
 	if err != nil {
 		t.Fatalf("echo tunnel: %v", err)
 	}
-	if err := WriteFrame(hit, []byte(`{"msg":"login"}`)); err != nil {
+	hitPayload := []byte(`{"msg":"login"}`)
+	if err := WriteFrame(hit, hitPayload); err != nil {
 		t.Fatalf("write to echo tunnel: %v", err)
 	}
 	if _, err := ReadFrame(hit); err != nil {
@@ -424,34 +369,63 @@ func TestRelayHTTPConnectFilter(t *testing.T) {
 	}
 	_ = hit.Close()
 
-	var reqs, resps int
-	deadline = time.Now().Add(5 * time.Second)
-	for reqs+resps < 2 {
-		select {
-		case pkt, ok := <-src.Packets():
-			if !ok {
-				t.Fatalf("packet channel closed early: reqs=%d resps=%d", reqs, resps)
-			}
-			if pkt.Dst.String() != echoAddr && pkt.Src.String() != echoAddr {
-				t.Fatalf("unexpected packet endpoint (filter should exclude discard): %s->%s", pkt.Src, pkt.Dst)
-			}
-			switch pkt.Metadata["direction"] {
-			case "request":
-				reqs++
-			case "response":
-				resps++
-			}
-		case <-time.After(time.Until(deadline)):
-			t.Fatalf("timeout: reqs=%d resps=%d", reqs, resps)
-		}
-	}
-	if reqs != 1 || resps != 1 {
-		t.Fatalf("reqs=%d resps=%d, want 1/1 (discard connection must not be captured)", reqs, resps)
-	}
+	wantReq := frameOf(hitPayload)
+	wantResp := frameOf([]byte(fmt.Sprintf(`{"ok":true,"echo":%d}`, len(hitPayload))))
+	drainPackets(t, src.Packets(), echoAddr, wantReq, wantResp)
 
 	cancel()
 	if err := <-relayErr; err != nil {
 		t.Fatalf("relay serve: %v", err)
+	}
+}
+
+// frameOf 按模拟游戏协议（4 字节大端长度前缀）序列化一帧的完整线上字节。
+// 供数据块直通语义下"字节流拼接 == 原始写出字节"的期望值构造。
+func frameOf(payload []byte) []byte {
+	f := make([]byte, simFramePrefixLen+len(payload))
+	binary.BigEndian.PutUint32(f, uint32(len(payload)))
+	copy(f[simFramePrefixLen:], payload)
+	return f
+}
+
+// drainPackets 从包通道按 direction 收集 payload 并拼接，直到两个方向各自
+// 达到期望字节数后逐字节比较。mobile source 数据块直通不保证块边界，
+// 但字节流的顺序与内容必须与源端写出完全一致（粘包/半包由插件处理）。
+func drainPackets(t *testing.T, ch <-chan event.Packet, echoAddr string, wantReq, wantResp []byte) {
+	t.Helper()
+	var req, resp bytes.Buffer
+	deadline := time.Now().Add(5 * time.Second)
+	for req.Len() < len(wantReq) || resp.Len() < len(wantResp) {
+		select {
+		case pkt, ok := <-ch:
+			if !ok {
+				t.Fatalf("packet channel closed early: req=%d/%d resp=%d/%d",
+					req.Len(), len(wantReq), resp.Len(), len(wantResp))
+			}
+			if pkt.LinkType != event.LinkTypeProxyPayload || pkt.Protocol != "tcp" {
+				t.Errorf("packet link_type/protocol = %d/%s", pkt.LinkType, pkt.Protocol)
+			}
+			switch pkt.Metadata["direction"] {
+			case "request":
+				if pkt.Dst.String() != echoAddr {
+					t.Errorf("request dst = %s, want %s", pkt.Dst, echoAddr)
+				}
+				req.Write(pkt.Raw)
+			case "response":
+				if pkt.Src.String() != echoAddr {
+					t.Errorf("response src = %s, want %s", pkt.Src, echoAddr)
+				}
+				resp.Write(pkt.Raw)
+			default:
+				t.Errorf("unexpected direction metadata: %v", pkt.Metadata["direction"])
+			}
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("timeout: req=%d/%d resp=%d/%d", req.Len(), len(wantReq), resp.Len(), len(wantResp))
+		}
+	}
+	if !bytes.Equal(req.Bytes(), wantReq) || !bytes.Equal(resp.Bytes(), wantResp) {
+		t.Fatalf("payload mismatch:\nreq=%x\nwant=%x\nresp=%x\nwant=%x",
+			req.Bytes(), wantReq, resp.Bytes(), wantResp)
 	}
 }
 

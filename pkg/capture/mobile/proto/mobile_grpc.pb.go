@@ -28,7 +28,8 @@ const (
 //
 // MobileCapture 由 gta-pipeline 的 mobile capture source 提供（gRPC server）。
 // gta-singbox-agent（sing-box 侧）作为 client 连接并推送连接级流量。
-// 全连接共用一条流，靠 conn_id 区分；服务端按 (conn_id, direction) 做流重组与分帧。
+// 全连接共用一条流，靠 conn_id 区分；服务端按 (conn_id, direction) 归组，
+// 但**不做**应用层分帧/重组——每个数据块原样透传为 packet，帧边界由解码插件判定。
 type MobileCaptureClient interface {
 	// Push 客户端流式推送 AgentEvent；结束返回汇总统计。
 	// 一条连接的两个方向是独立的字节流，direction 用于区分。
@@ -62,7 +63,8 @@ type MobileCapture_PushClient = grpc.ClientStreamingClient[AgentEvent, PushResul
 //
 // MobileCapture 由 gta-pipeline 的 mobile capture source 提供（gRPC server）。
 // gta-singbox-agent（sing-box 侧）作为 client 连接并推送连接级流量。
-// 全连接共用一条流，靠 conn_id 区分；服务端按 (conn_id, direction) 做流重组与分帧。
+// 全连接共用一条流，靠 conn_id 区分；服务端按 (conn_id, direction) 归组，
+// 但**不做**应用层分帧/重组——每个数据块原样透传为 packet，帧边界由解码插件判定。
 type MobileCaptureServer interface {
 	// Push 客户端流式推送 AgentEvent；结束返回汇总统计。
 	// 一条连接的两个方向是独立的字节流，direction 用于区分。

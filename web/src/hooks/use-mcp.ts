@@ -220,9 +220,6 @@ export function useStartCapture() {
       /** nic | proxy */
       source?: string;
       listenAddr?: string;
-      frameStyle?: string;
-      prefixLen?: number;
-      littleEndian?: boolean;
     }) =>
       mcpClient.callTool<StartCaptureResult>("start_capture", {
         port: vars.port,
@@ -230,9 +227,6 @@ export function useStartCapture() {
         pcap_file: vars.pcapFile,
         source: vars.source ?? "nic",
         listen_addr: vars.source === "proxy" ? (vars.listenAddr ?? "127.0.0.1:9090") : undefined,
-        frame_style: vars.source === "proxy" ? (vars.frameStyle ?? "raw") : undefined,
-        prefix_len: vars.source === "proxy" ? (vars.prefixLen ?? 4) : undefined,
-        little_endian: vars.source === "proxy" ? String(!!vars.littleEndian) : undefined,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
@@ -361,6 +355,28 @@ export function useDeleteSession() {
     onSuccess: (_data, vars) => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["sessionStatus", vars.sessionId] });
+    },
+  });
+}
+
+/** 批量删除多个会话（逐个调用 delete_session，统计失败数）。 */
+export function useDeleteSessions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionIds: string[]) => {
+      const results = await Promise.allSettled(
+        sessionIds.map((id) =>
+          mcpClient.callTool<DeleteSessionResult>("delete_session", { session_id: id }),
+        ),
+      );
+      const failed = results.filter(
+        (r): r is PromiseRejectedResult => r.status === "rejected",
+      ).length;
+      return { total: sessionIds.length, failed };
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessionStatus"] });
     },
   });
 }
@@ -624,9 +640,6 @@ export function useUpdateProxyServerConfig() {
       mcpClient.callTool<UpdateProxyConfigResult>("update_proxy_server_config", {
         listen_addr: vars.listenAddr ?? "",
         server_addr: vars.serverAddr ?? "",
-        frame_style: vars.frameStyle ?? "",
-        prefix_len: vars.prefixLen ?? 0,
-        little_endian: vars.littleEndian !== undefined ? String(vars.littleEndian) : "false",
         plugin: vars.plugin ?? "",
         // undefined 序列化后省略（表示不修改）；空数组保留（表示清空筛选）。
         include_hosts: vars.includeHosts,

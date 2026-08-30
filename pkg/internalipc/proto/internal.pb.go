@@ -1263,10 +1263,7 @@ func (x *PcapFileConfig) GetPath() string {
 // 监听地址形如 "127.0.0.1:9090"（tcp）或 "unix:///tmp/gta-mobile.sock"（unix）。
 type MobileSourceConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ListenAddr    string                 `protobuf:"bytes,1,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"`        // gRPC 服务监听地址，agent 连这里
-	FrameStyle    string                 `protobuf:"bytes,2,opt,name=frame_style,json=frameStyle,proto3" json:"frame_style,omitempty"`        // raw | length_prefix（默认 raw）
-	PrefixLen     int32                  `protobuf:"varint,3,opt,name=prefix_len,json=prefixLen,proto3" json:"prefix_len,omitempty"`          // length_prefix 的长度前缀字节数 1|2|4（默认 4）
-	LittleEndian  bool                   `protobuf:"varint,4,opt,name=little_endian,json=littleEndian,proto3" json:"little_endian,omitempty"` // 长度前缀字节序，默认大端
+	ListenAddr    string                 `protobuf:"bytes,1,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"` // gRPC 服务监听地址，agent 连这里
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1306,27 +1303,6 @@ func (x *MobileSourceConfig) GetListenAddr() string {
 		return x.ListenAddr
 	}
 	return ""
-}
-
-func (x *MobileSourceConfig) GetFrameStyle() string {
-	if x != nil {
-		return x.FrameStyle
-	}
-	return ""
-}
-
-func (x *MobileSourceConfig) GetPrefixLen() int32 {
-	if x != nil {
-		return x.PrefixLen
-	}
-	return 0
-}
-
-func (x *MobileSourceConfig) GetLittleEndian() bool {
-	if x != nil {
-		return x.LittleEndian
-	}
-	return false
 }
 
 type StartCaptureRequest struct {
@@ -2908,17 +2884,18 @@ type ProxyConfigState struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ListenAddr     string                 `protobuf:"bytes,1,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"`                // agent HTTP CONNECT 代理监听地址（手机连这里）
 	ServerAddr     string                 `protobuf:"bytes,2,opt,name=server_addr,json=serverAddr,proto3" json:"server_addr,omitempty"`                // mobile Source gRPC 监听地址（agent 推这里）
-	FrameStyle     string                 `protobuf:"bytes,3,opt,name=frame_style,json=frameStyle,proto3" json:"frame_style,omitempty"`                // raw | length_prefix
-	PrefixLen      int32                  `protobuf:"varint,4,opt,name=prefix_len,json=prefixLen,proto3" json:"prefix_len,omitempty"`                  // length_prefix 长度前缀字节数
-	LittleEndian   bool                   `protobuf:"varint,5,opt,name=little_endian,json=littleEndian,proto3" json:"little_endian,omitempty"`         // 长度前缀字节序
-	AgentRunning   bool                   `protobuf:"varint,6,opt,name=agent_running,json=agentRunning,proto3" json:"agent_running,omitempty"`         // gta-singbox-agent 子进程是否存活
-	AgentPid       int32                  `protobuf:"varint,7,opt,name=agent_pid,json=agentPid,proto3" json:"agent_pid,omitempty"`                     // agent 子进程 PID（未运行时为 0）
-	SessionRunning bool                   `protobuf:"varint,8,opt,name=session_running,json=sessionRunning,proto3" json:"session_running,omitempty"`   // 代理抓包会话是否运行中
-	SessionId      string                 `protobuf:"bytes,9,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                   // 代理抓包会话 id（未运行时为空）
-	ConfigPath     string                 `protobuf:"bytes,10,opt,name=config_path,json=configPath,proto3" json:"config_path,omitempty"`               // 配置文件绝对路径
-	Plugin         string                 `protobuf:"bytes,11,opt,name=plugin,proto3" json:"plugin,omitempty"`                                         // 代理抓包会话绑定的解码插件名（空=仅抓原始包）
-	IncludeHosts   []string               `protobuf:"bytes,12,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`         // 连接筛选：仅抓取目标主机在此列表内的连接
-	IncludePorts   []int32                `protobuf:"varint,13,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"` // 连接筛选：仅抓取目标端口在此列表内的连接
+	AgentRunning   bool                   `protobuf:"varint,3,opt,name=agent_running,json=agentRunning,proto3" json:"agent_running,omitempty"`         // gta-singbox-agent 子进程是否存活
+	AgentPid       int32                  `protobuf:"varint,4,opt,name=agent_pid,json=agentPid,proto3" json:"agent_pid,omitempty"`                     // agent 子进程 PID（未运行时为 0）
+	SessionRunning bool                   `protobuf:"varint,5,opt,name=session_running,json=sessionRunning,proto3" json:"session_running,omitempty"`   // 代理抓包会话是否运行中
+	SessionId      string                 `protobuf:"bytes,6,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                   // 代理抓包会话 id（未运行时为空）
+	ConfigPath     string                 `protobuf:"bytes,7,opt,name=config_path,json=configPath,proto3" json:"config_path,omitempty"`                // 配置文件绝对路径
+	Plugin         string                 `protobuf:"bytes,8,opt,name=plugin,proto3" json:"plugin,omitempty"`                                          // 代理抓包会话绑定的解码插件名（空=仅抓原始包）
+	IncludeHosts   []string               `protobuf:"bytes,9,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`          // 连接筛选：仅抓取目标主机在此列表内的连接
+	IncludePorts   []int32                `protobuf:"varint,10,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"` // 连接筛选：仅抓取目标端口在此列表内的连接
+	ActiveConns    int64                  `protobuf:"varint,11,opt,name=active_conns,json=activeConns,proto3" json:"active_conns,omitempty"`           // 当前活跃手机连接数（open - close）
+	TotalConns     uint64                 `protobuf:"varint,12,opt,name=total_conns,json=totalConns,proto3" json:"total_conns,omitempty"`              // 累计打开连接数
+	LastDataUnix   int64                  `protobuf:"varint,13,opt,name=last_data_unix,json=lastDataUnix,proto3" json:"last_data_unix,omitempty"`      // 最近一次收到数据的 unix 毫秒（0=从未）
+	TotalBytes     uint64                 `protobuf:"varint,14,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`              // 累计接收应用层字节
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2965,27 +2942,6 @@ func (x *ProxyConfigState) GetServerAddr() string {
 		return x.ServerAddr
 	}
 	return ""
-}
-
-func (x *ProxyConfigState) GetFrameStyle() string {
-	if x != nil {
-		return x.FrameStyle
-	}
-	return ""
-}
-
-func (x *ProxyConfigState) GetPrefixLen() int32 {
-	if x != nil {
-		return x.PrefixLen
-	}
-	return 0
-}
-
-func (x *ProxyConfigState) GetLittleEndian() bool {
-	if x != nil {
-		return x.LittleEndian
-	}
-	return false
 }
 
 func (x *ProxyConfigState) GetAgentRunning() bool {
@@ -3044,6 +3000,34 @@ func (x *ProxyConfigState) GetIncludePorts() []int32 {
 	return nil
 }
 
+func (x *ProxyConfigState) GetActiveConns() int64 {
+	if x != nil {
+		return x.ActiveConns
+	}
+	return 0
+}
+
+func (x *ProxyConfigState) GetTotalConns() uint64 {
+	if x != nil {
+		return x.TotalConns
+	}
+	return 0
+}
+
+func (x *ProxyConfigState) GetLastDataUnix() int64 {
+	if x != nil {
+		return x.LastDataUnix
+	}
+	return 0
+}
+
+func (x *ProxyConfigState) GetTotalBytes() uint64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
 type GetProxyConfigResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	State         *ProxyConfigState      `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
@@ -3095,12 +3079,9 @@ type UpdateProxyConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ListenAddr    string                 `protobuf:"bytes,1,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"`
 	ServerAddr    string                 `protobuf:"bytes,2,opt,name=server_addr,json=serverAddr,proto3" json:"server_addr,omitempty"`
-	FrameStyle    string                 `protobuf:"bytes,3,opt,name=frame_style,json=frameStyle,proto3" json:"frame_style,omitempty"`
-	PrefixLen     int32                  `protobuf:"varint,4,opt,name=prefix_len,json=prefixLen,proto3" json:"prefix_len,omitempty"`
-	LittleEndian  bool                   `protobuf:"varint,5,opt,name=little_endian,json=littleEndian,proto3" json:"little_endian,omitempty"`
-	Plugin        string                 `protobuf:"bytes,6,opt,name=plugin,proto3" json:"plugin,omitempty"`
-	IncludeHosts  []string               `protobuf:"bytes,7,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`
-	IncludePorts  []int32                `protobuf:"varint,8,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"`
+	Plugin        string                 `protobuf:"bytes,3,opt,name=plugin,proto3" json:"plugin,omitempty"`
+	IncludeHosts  []string               `protobuf:"bytes,4,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`
+	IncludePorts  []int32                `protobuf:"varint,5,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3147,27 +3128,6 @@ func (x *UpdateProxyConfigRequest) GetServerAddr() string {
 		return x.ServerAddr
 	}
 	return ""
-}
-
-func (x *UpdateProxyConfigRequest) GetFrameStyle() string {
-	if x != nil {
-		return x.FrameStyle
-	}
-	return ""
-}
-
-func (x *UpdateProxyConfigRequest) GetPrefixLen() int32 {
-	if x != nil {
-		return x.PrefixLen
-	}
-	return 0
-}
-
-func (x *UpdateProxyConfigRequest) GetLittleEndian() bool {
-	if x != nil {
-		return x.LittleEndian
-	}
-	return false
 }
 
 func (x *UpdateProxyConfigRequest) GetPlugin() string {
@@ -3374,15 +3334,10 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\bsnap_len\x18\x03 \x01(\x05R\asnapLen\x12\x18\n" +
 	"\apromisc\x18\x04 \x01(\bR\apromisc\"$\n" +
 	"\x0ePcapFileConfig\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"\x9a\x01\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"5\n" +
 	"\x12MobileSourceConfig\x12\x1f\n" +
 	"\vlisten_addr\x18\x01 \x01(\tR\n" +
-	"listenAddr\x12\x1f\n" +
-	"\vframe_style\x18\x02 \x01(\tR\n" +
-	"frameStyle\x12\x1d\n" +
-	"\n" +
-	"prefix_len\x18\x03 \x01(\x05R\tprefixLen\x12#\n" +
-	"\rlittle_endian\x18\x04 \x01(\bR\flittleEndian\"\xe2\x02\n" +
+	"listenAddr\"\xe2\x02\n" +
 	"\x13StartCaptureRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -3508,43 +3463,39 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x16GetRegistryAddrRequest\">\n" +
 	"\x17GetRegistryAddrResponse\x12#\n" +
 	"\rregistry_addr\x18\x01 \x01(\tR\fregistryAddr\"\x17\n" +
-	"\x15GetProxyConfigRequest\"\xc6\x03\n" +
+	"\x15GetProxyConfigRequest\"\xec\x03\n" +
 	"\x10ProxyConfigState\x12\x1f\n" +
 	"\vlisten_addr\x18\x01 \x01(\tR\n" +
 	"listenAddr\x12\x1f\n" +
 	"\vserver_addr\x18\x02 \x01(\tR\n" +
-	"serverAddr\x12\x1f\n" +
-	"\vframe_style\x18\x03 \x01(\tR\n" +
-	"frameStyle\x12\x1d\n" +
+	"serverAddr\x12#\n" +
+	"\ragent_running\x18\x03 \x01(\bR\fagentRunning\x12\x1b\n" +
+	"\tagent_pid\x18\x04 \x01(\x05R\bagentPid\x12'\n" +
+	"\x0fsession_running\x18\x05 \x01(\bR\x0esessionRunning\x12\x1d\n" +
 	"\n" +
-	"prefix_len\x18\x04 \x01(\x05R\tprefixLen\x12#\n" +
-	"\rlittle_endian\x18\x05 \x01(\bR\flittleEndian\x12#\n" +
-	"\ragent_running\x18\x06 \x01(\bR\fagentRunning\x12\x1b\n" +
-	"\tagent_pid\x18\a \x01(\x05R\bagentPid\x12'\n" +
-	"\x0fsession_running\x18\b \x01(\bR\x0esessionRunning\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\t \x01(\tR\tsessionId\x12\x1f\n" +
-	"\vconfig_path\x18\n" +
-	" \x01(\tR\n" +
+	"session_id\x18\x06 \x01(\tR\tsessionId\x12\x1f\n" +
+	"\vconfig_path\x18\a \x01(\tR\n" +
 	"configPath\x12\x16\n" +
-	"\x06plugin\x18\v \x01(\tR\x06plugin\x12#\n" +
-	"\rinclude_hosts\x18\f \x03(\tR\fincludeHosts\x12#\n" +
-	"\rinclude_ports\x18\r \x03(\x05R\fincludePorts\"Q\n" +
+	"\x06plugin\x18\b \x01(\tR\x06plugin\x12#\n" +
+	"\rinclude_hosts\x18\t \x03(\tR\fincludeHosts\x12#\n" +
+	"\rinclude_ports\x18\n" +
+	" \x03(\x05R\fincludePorts\x12!\n" +
+	"\factive_conns\x18\v \x01(\x03R\vactiveConns\x12\x1f\n" +
+	"\vtotal_conns\x18\f \x01(\x04R\n" +
+	"totalConns\x12$\n" +
+	"\x0elast_data_unix\x18\r \x01(\x03R\flastDataUnix\x12\x1f\n" +
+	"\vtotal_bytes\x18\x0e \x01(\x04R\n" +
+	"totalBytes\"Q\n" +
 	"\x16GetProxyConfigResponse\x127\n" +
-	"\x05state\x18\x01 \x01(\v2!.gta.internalipc.ProxyConfigStateR\x05state\"\xa3\x02\n" +
+	"\x05state\x18\x01 \x01(\v2!.gta.internalipc.ProxyConfigStateR\x05state\"\xbe\x01\n" +
 	"\x18UpdateProxyConfigRequest\x12\x1f\n" +
 	"\vlisten_addr\x18\x01 \x01(\tR\n" +
 	"listenAddr\x12\x1f\n" +
 	"\vserver_addr\x18\x02 \x01(\tR\n" +
-	"serverAddr\x12\x1f\n" +
-	"\vframe_style\x18\x03 \x01(\tR\n" +
-	"frameStyle\x12\x1d\n" +
-	"\n" +
-	"prefix_len\x18\x04 \x01(\x05R\tprefixLen\x12#\n" +
-	"\rlittle_endian\x18\x05 \x01(\bR\flittleEndian\x12\x16\n" +
-	"\x06plugin\x18\x06 \x01(\tR\x06plugin\x12#\n" +
-	"\rinclude_hosts\x18\a \x03(\tR\fincludeHosts\x12#\n" +
-	"\rinclude_ports\x18\b \x03(\x05R\fincludePorts\"~\n" +
+	"serverAddr\x12\x16\n" +
+	"\x06plugin\x18\x03 \x01(\tR\x06plugin\x12#\n" +
+	"\rinclude_hosts\x18\x04 \x03(\tR\fincludeHosts\x12#\n" +
+	"\rinclude_ports\x18\x05 \x03(\x05R\fincludePorts\"~\n" +
 	"\x19UpdateProxyConfigResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +

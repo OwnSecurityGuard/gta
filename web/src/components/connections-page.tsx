@@ -54,9 +54,11 @@ export function protocolLabel(c: Pick<ConnectionSummary, "protocol" | "event_typ
 
 interface ConnectionsPageProps {
   sessionId: string | null;
+  /** 点击连接详情中的 flow_id 后跳转到「行为」Tab 并预填 */
+  onJumpToRun?: (flowId: string) => void;
 }
 
-export function ConnectionsPage({ sessionId }: ConnectionsPageProps) {
+export function ConnectionsPage({ sessionId, onJumpToRun }: ConnectionsPageProps) {
   const [selected, setSelected] = useState<{ connId: string; seq: number } | null>(null);
   const [page, setPage] = useState(0);
 
@@ -84,6 +86,7 @@ export function ConnectionsPage({ sessionId }: ConnectionsPageProps) {
         connId={selected.connId}
         connSeq={selected.seq}
         onBack={() => setSelected(null)}
+        onJumpToRun={onJumpToRun}
       />
     );
   }

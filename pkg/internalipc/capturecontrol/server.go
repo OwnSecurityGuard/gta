@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"gta/pkg/auth"
+	"gta/pkg/capture/mobile"
 	pb "gta/pkg/internalipc/proto"
 )
 
@@ -62,9 +63,6 @@ type CaptureEngine interface {
 type ProxyConfigState struct {
 	ListenAddr     string
 	ServerAddr     string
-	FrameStyle     string
-	PrefixLen      int32
-	LittleEndian   bool
 	AgentRunning   bool
 	AgentPID       int32
 	SessionRunning bool
@@ -73,15 +71,17 @@ type ProxyConfigState struct {
 	Plugin         string
 	IncludeHosts   []string
 	IncludePorts   []int32
+	ActiveConns    int64
+	TotalConns     uint64
+	LastDataUnix   int64
+	TotalBytes     uint64
 }
 
 // ProxyConfigUpdate 是新的代理抓包服务器配置（字段为空表示不修改）。
+// 不含分帧参数：帧边界判定是协议语义，由解码插件按连接自行处理（见 mobile.MobileConfig）。
 type ProxyConfigUpdate struct {
 	ListenAddr   string
 	ServerAddr   string
-	FrameStyle   string
-	PrefixLen    int32
-	LittleEndian bool
 	Plugin       string
 	IncludeHosts []string
 	IncludePorts []int32
@@ -180,10 +180,11 @@ type FileConfig struct {
 
 // MobileConfig 对应 proto MobileSourceConfig。
 type MobileConfig struct {
-	ListenAddr   string
-	FrameStyle   string
-	PrefixLen    int
-	LittleEndian bool
+	ListenAddr string
+	// Activity 可选的运行时活动追踪器（mobile.Activity），由 pipeline 代理抓包
+	// 常驻会话注入，用于向控制面暴露手机连接实时状态（活跃连接/累计字节等）。
+	// 非代理抓包场景（普通 mobile 会话）为 nil。
+	Activity *mobile.Activity
 }
 
 // StartSessionResult 是启动结果。
@@ -279,10 +280,7 @@ func (s *Server) StartCapture(ctx context.Context, req *pb.StartCaptureRequest) 
 		engineReq.File = &FileConfig{Path: src.File.GetPath()}
 	case *pb.StartCaptureRequest_Mobile:
 		engineReq.Mobile = &MobileConfig{
-			ListenAddr:   src.Mobile.GetListenAddr(),
-			FrameStyle:   src.Mobile.GetFrameStyle(),
-			PrefixLen:    int(src.Mobile.GetPrefixLen()),
-			LittleEndian: src.Mobile.GetLittleEndian(),
+			ListenAddr: src.Mobile.GetListenAddr(),
 		}
 	}
 	res, err := s.engine.StartSession(ctx, engineReq)
@@ -563,9 +561,6 @@ func (s *Server) UpdateProxyConfig(ctx context.Context, req *pb.UpdateProxyConfi
 	st, err := s.engine.UpdateProxyConfig(ctx, ProxyConfigUpdate{
 		ListenAddr:   req.GetListenAddr(),
 		ServerAddr:   req.GetServerAddr(),
-		FrameStyle:   req.GetFrameStyle(),
-		PrefixLen:    req.GetPrefixLen(),
-		LittleEndian: req.GetLittleEndian(),
 		Plugin:       req.GetPlugin(),
 		IncludeHosts: req.GetIncludeHosts(),
 		IncludePorts: req.GetIncludePorts(),
@@ -587,9 +582,6 @@ func stateToProto(st ProxyConfigState) *pb.ProxyConfigState {
 	return &pb.ProxyConfigState{
 		ListenAddr:     st.ListenAddr,
 		ServerAddr:     st.ServerAddr,
-		FrameStyle:     st.FrameStyle,
-		PrefixLen:      st.PrefixLen,
-		LittleEndian:   st.LittleEndian,
 		AgentRunning:   st.AgentRunning,
 		AgentPid:       st.AgentPID,
 		SessionRunning: st.SessionRunning,
@@ -598,5 +590,9 @@ func stateToProto(st ProxyConfigState) *pb.ProxyConfigState {
 		Plugin:         st.Plugin,
 		IncludeHosts:   st.IncludeHosts,
 		IncludePorts:   st.IncludePorts,
+		ActiveConns:    st.ActiveConns,
+		TotalConns:     st.TotalConns,
+		LastDataUnix:   st.LastDataUnix,
+		TotalBytes:     st.TotalBytes,
 	}
 }

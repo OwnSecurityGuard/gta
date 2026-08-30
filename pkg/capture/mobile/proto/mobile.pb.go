@@ -274,7 +274,7 @@ func (x *ConnData) GetPayload() []byte {
 	return nil
 }
 
-// ConnClose 连接关闭：触发该连接缓冲区 flush。
+// ConnClose 连接关闭：插件可据此 flush 该连接的待组装缓冲。
 type ConnClose struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"` // 关闭原因（可选）

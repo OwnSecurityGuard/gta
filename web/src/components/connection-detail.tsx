@@ -46,6 +46,8 @@ interface ConnectionDetailViewProps {
   /** 连接列表中的序号（用于展示 Connection #001） */
   connSeq: number;
   onBack: () => void;
+  /** 点击 flow_id 后跳转到「行为」Tab 并预填 flow_id 构建行为链 */
+  onJumpToRun?: (flowId: string) => void;
 }
 
 type DetailTab = "timeline" | "streams" | "frames" | "events" | "raw";
@@ -207,7 +209,13 @@ function TimelineTab({ streams }: { streams: ConnectionStream[] }) {
 
 // ─── 子页：Streams（Stream View）──────────────────────────────
 
-function StreamsTab({ streams }: { streams: ConnectionStream[] }) {
+function StreamsTab({
+  streams,
+  onJumpToRun,
+}: {
+  streams: ConnectionStream[];
+  onJumpToRun?: (flowId: string) => void;
+}) {
   if (streams.length === 0) {
     return (
       <EmptyState
@@ -260,9 +268,14 @@ function StreamsTab({ streams }: { streams: ConnectionStream[] }) {
                   {ev.msg_name || ev.type || "(unknown)"}
                 </span>
                 {ev.flow_id && (
-                  <span className="ml-auto font-mono text-[10px] text-muted-foreground/70 truncate">
+                  <button
+                    type="button"
+                    className="ml-auto font-mono text-[10px] text-muted-foreground/70 truncate transition-colors hover:text-primary hover:underline"
+                    title={`构建行为链 flow_id=${ev.flow_id}`}
+                    onClick={() => onJumpToRun?.(ev.flow_id)}
+                  >
                     flow: {ev.flow_id}
-                  </span>
+                  </button>
                 )}
               </div>
             ))}
@@ -456,7 +469,13 @@ function frameHex(frame: ConnectionFrame): string {
 
 // ─── 子页：Events ─────────────────────────────────────────────
 
-function EventsTab({ streams }: { streams: ConnectionStream[] }) {
+function EventsTab({
+  streams,
+  onJumpToRun,
+}: {
+  streams: ConnectionStream[];
+  onJumpToRun?: (flowId: string) => void;
+}) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // 摊平全部流的事件，按时间正序，作为连接内的事件列表。
@@ -502,6 +521,27 @@ function EventsTab({ streams }: { streams: ConnectionStream[] }) {
             <span className="font-mono text-xs font-semibold truncate">
               {ev.msg_name || ev.type || "(unknown)"}
             </span>
+            {ev.flow_id && (
+              <span
+                role="button"
+                tabIndex={0}
+                className="ml-auto font-mono text-[10px] text-muted-foreground/70 hover:text-primary hover:underline cursor-pointer"
+                title={`构建行为链 flow_id=${ev.flow_id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onJumpToRun?.(ev.flow_id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onJumpToRun?.(ev.flow_id);
+                  }
+                }}
+              >
+                flow: {ev.flow_id}
+              </span>
+            )}
           </button>
           {expandedId === ev.id && (
             <div className="border-t border-border bg-muted/30 p-4 gta-fade-in">
@@ -603,6 +643,7 @@ export function ConnectionDetailView({
   connId,
   connSeq,
   onBack,
+  onJumpToRun,
 }: ConnectionDetailViewProps) {
   const [tab, setTab] = useState<DetailTab>("timeline");
 
@@ -685,9 +726,13 @@ export function ConnectionDetailView({
           </div>
         )}
         {!streamsLoading && tab === "timeline" && <TimelineTab streams={streams} />}
-        {!streamsLoading && tab === "streams" && <StreamsTab streams={streams} />}
+        {!streamsLoading && tab === "streams" && (
+          <StreamsTab streams={streams} onJumpToRun={onJumpToRun} />
+        )}
         {tab === "frames" && <FramesTab sessionId={sessionId} connId={connId} />}
-        {!streamsLoading && tab === "events" && <EventsTab streams={streams} />}
+        {!streamsLoading && tab === "events" && (
+          <EventsTab streams={streams} onJumpToRun={onJumpToRun} />
+        )}
         {tab === "raw" && <FramesTab sessionId={sessionId} connId={connId} rawOnly />}
       </div>
     </div>

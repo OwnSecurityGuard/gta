@@ -215,10 +215,7 @@ func TestServer_StartCaptureMobile(t *testing.T) {
 		Plugin:    "game",
 		Source: &pb.StartCaptureRequest_Mobile{
 			Mobile: &pb.MobileSourceConfig{
-				ListenAddr:   "127.0.0.1:9090",
-				FrameStyle:   "length_prefix",
-				PrefixLen:    4,
-				LittleEndian: true,
+				ListenAddr: "127.0.0.1:9090",
 			},
 		},
 	})
@@ -232,8 +229,7 @@ func TestServer_StartCaptureMobile(t *testing.T) {
 	if m == nil {
 		t.Fatalf("expected mobile config, got nil")
 	}
-	if m.ListenAddr != "127.0.0.1:9090" || m.FrameStyle != "length_prefix" ||
-		m.PrefixLen != 4 || !m.LittleEndian {
+	if m.ListenAddr != "127.0.0.1:9090" {
 		t.Errorf("unexpected mobile config: %+v", m)
 	}
 }

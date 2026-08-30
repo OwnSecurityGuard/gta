@@ -13,6 +13,7 @@ import (
 	"gta/pkg/auth"
 	"gta/pkg/capture"
 	"gta/pkg/capture/agent"
+	"gta/pkg/capture/mobile"
 	"gta/pkg/config"
 	"gta/pkg/internalipc"
 	"gta/pkg/internalipc/capturecontrol"
@@ -54,6 +55,9 @@ type pipelineService struct {
 	spawnAgent     bool
 	agentBin       string
 	agentProc      *agentProcess
+	// proxyActivity 是注入常驻 mobile 会话的运行时活动追踪器（非 nil 表示
+	// 当前常驻会话已接线），GetProxyConfig 从它取实时连接状态。
+	proxyActivity *mobile.Activity
 
 	// proxyServerAddrOverride 是 T11 注入的 server_addr 兜底值（gta.yaml
 	// proxy.server_addr / GTA_PROXY_SERVER_ADDR）。proxy.json 未指定 server_addr

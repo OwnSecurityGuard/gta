@@ -17,7 +17,16 @@ sessions/
 runs/
 plugins/
 docs/plans/
-web/
+# web/ 源码需要进构建上下文（Dockerfile webui 阶段 npm ci && npm run build），
+# 只排除依赖与本地产物（阶段内自建）；cmd/gta-mcp/webui/ 的本地构建产物同理
+# 排除——镜像内前端由 webui 阶段产物唯一提供，避免残留陈旧 hash 产物
+# （.gitkeep 保留，保证 go:embed 目录非空）。
+web/node_modules/
+web/dist/
+web/.vite/
+web/*.tsbuildinfo
+cmd/gta-mcp/webui/assets/
+cmd/gta-mcp/webui/index.html
 tmp_*
 .current*
 control.sqlite*

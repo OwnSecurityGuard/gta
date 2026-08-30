@@ -34,11 +34,14 @@ function StatRow({ label, value }: { label: string; value: number | undefined })
 export function RunsPanel({
   linkedRunId = null,
   linkedSessionId = null,
+  tracePrefill = null,
 }: {
   /** 由 start_capture 自动开启的行为窗口 run_id */
   linkedRunId?: string | null;
   /** 该窗口联动的抓包会话 session_id */
   linkedSessionId?: string | null;
+  /** 从连接详情「flow_id 一键跳转」预填的 flow_id */
+  tracePrefill?: string | null;
 }) {
   // 开始窗口表单
   const [featureName, setFeatureName] = useState("");
@@ -66,6 +69,11 @@ export function RunsPanel({
   useEffect(() => {
     if (linkedRunId && linkedRunId !== runId) setRunId(linkedRunId);
   }, [linkedRunId, runId]);
+
+  // 从连接详情跳转过来的 flow_id：预填到「构建时序链路」输入框。
+  useEffect(() => {
+    if (tracePrefill) setFlowId(tracePrefill);
+  }, [tracePrefill]);
 
   function handleBegin() {
     if (!featureName || !projectPath) return;

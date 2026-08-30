@@ -121,13 +121,22 @@ func (s *SQLiteStore) QueryConnections(ctx context.Context, sessionID string, li
 	index := make(map[string]int)
 	for rows.Next() {
 		var c ConnectionSummary
-		var firstStr, lastStr, src, dst, protocol string
+		var firstTS, lastTS any
+		var src, dst, protocol string
 		var meta sql.NullString
-		if err := rows.Scan(&c.ConnID, &firstStr, &lastStr, &c.FrameCount, &src, &dst, &protocol, &meta); err != nil {
+		if err := rows.Scan(&c.ConnID, &firstTS, &lastTS, &c.FrameCount, &src, &dst, &protocol, &meta); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
-		c.StartTime = parsePacketTime(firstStr)
-		c.EndTime = parsePacketTime(lastStr)
+		first, err := scanPacketTime(firstTS)
+		if err != nil {
+			return nil, err
+		}
+		last, err := scanPacketTime(lastTS)
+		if err != nil {
+			return nil, err
+		}
+		c.StartTime = first
+		c.EndTime = last
 		c.DurationSec = c.EndTime.Sub(c.StartTime).Seconds()
 		c.Client, c.Server, c.Source = endpointsFromMeta(meta.String, src, dst)
 		c.Protocol = protocol
@@ -195,18 +204,26 @@ func (s *SQLiteStore) QueryConnectionDetail(ctx context.Context, sessionID, conn
 	var d ConnectionDetail
 	d.ConnID = connID
 
-	// 时间范围与帧数（raw_packets 总有数据；文本时间戳在应用层解析）。
-	var firstStr, lastStr string
+	// 时间范围与帧数（raw_packets 总有数据；时间戳兼容 INTEGER/旧文本两种存储）。
+	var firstTS, lastTS any
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT COALESCE(MIN(timestamp), ''), COALESCE(MAX(timestamp), ''), COUNT(*)
+		SELECT MIN(timestamp), MAX(timestamp), COUNT(*)
 		FROM raw_packets WHERE conn_id = ?`,
 		connID,
-	).Scan(&firstStr, &lastStr, &d.FrameCount); err != nil {
+	).Scan(&firstTS, &lastTS, &d.FrameCount); err != nil {
 		return nil, fmt.Errorf("query connection detail: %w", err)
 	}
-	if firstStr != "" {
-		d.StartTime = parsePacketTime(firstStr)
-		d.EndTime = parsePacketTime(lastStr)
+	if firstTS != nil {
+		first, err := scanPacketTime(firstTS)
+		if err != nil {
+			return nil, err
+		}
+		last, err := scanPacketTime(lastTS)
+		if err != nil {
+			return nil, err
+		}
+		d.StartTime = first
+		d.EndTime = last
 		d.DurationSec = d.EndTime.Sub(d.StartTime).Seconds()
 	}
 
@@ -371,9 +388,15 @@ func (s *SQLiteStore) QueryConnectionFrames(ctx context.Context, connID string, 
 	for rows.Next() {
 		var f ConnectionFrame
 		var meta sql.NullString
-		if err := rows.Scan(&f.ID, &f.Timestamp, &f.Src, &f.Dst, &f.Protocol, &f.Payload, &f.LinkType, &meta); err != nil {
+		var ts any
+		if err := rows.Scan(&f.ID, &ts, &f.Src, &f.Dst, &f.Protocol, &f.Payload, &f.LinkType, &meta); err != nil {
 			return nil, err
 		}
+		t, err := scanPacketTime(ts)
+		if err != nil {
+			return nil, err
+		}
+		f.Timestamp = t
 		if meta.Valid {
 			var m map[string]any
 			if json.Unmarshal([]byte(meta.String), &m) == nil {

@@ -66,6 +66,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+      # release-matrix 前置依赖 web-build：gta-mcp 产物内嵌前端（需要 node）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       # CGO_ENABLED=0 交叉编译，无需 libpcap-dev。
       - name: Build release matrix

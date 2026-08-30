@@ -7,17 +7,17 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -66,8 +66,85 @@ func nextPort(port string) string {
 	return strconv.Itoa(n + 1)
 }
 
+// agentBinDir 定位「多平台预置 agent」目录。
+// 解析顺序：GTA_AGENT_BIN_DIR 环境变量 → 仓库根的 build/agents。
+func (m *mcpCapture) agentBinDir() (string, error) {
+	for _, guess := range []string{os.Getenv("GTA_AGENT_BIN_DIR"), filepath.Join(".", "build", "agents")} {
+		if guess == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(guess); err == nil {
+			if st, err := os.Stat(abs); err == nil && st.IsDir() {
+				return abs, nil
+			}
+		}
+	}
+	// 目录不存在也返回默认路径（供下载时给出明确“该平台未预置”错误）。
+	return func() string {
+		abs, _ := filepath.Abs(filepath.Join(".", "build", "agents"))
+		return abs
+	}(), nil
+}
+
+// prebuiltAgentPlatform 是一份已预置（或缺失）的 agent 平台产物。
+type prebuiltAgentPlatform struct {
+	OS        string `json:"os"`        // windows / linux / darwin
+	Arch      string `json:"arch"`      // amd64 / arm64
+	Label     string `json:"label"`     // 展示名，如 "Windows x64"
+	ExeSuffix bool   `json:"exe"`       // 是否需要 .exe 后缀
+	Available bool   `json:"available"` // 该平台产物是否已预置
+	Filename  string `json:"filename"`  // 磁盘文件名（含 .exe 时）
+}
+
+// prebuiltplatforms 定义下载 agent 支持的目标平台矩阵（按公开顺序）。
+func prebuiltPlatforms() []struct {
+	OS        string
+	Arch      string
+	Label     string
+	ExeSuffix bool
+} {
+	return []struct {
+		OS        string
+		Arch      string
+		Label     string
+		ExeSuffix bool
+	}{
+		{"windows", "amd64", "Windows x64", true},
+		{"linux", "amd64", "Linux x64", false},
+		{"windows", "arm64", "Windows ARM64", true},
+		{"linux", "arm64", "Linux ARM64", false},
+	}
+}
+
+// availableAgentPlatforms 扫描 agentBinDir，返回每份产物及其可用性。
+func (m *mcpCapture) availableAgentPlatforms() []prebuiltAgentPlatform {
+	binDir, _ := m.agentBinDir()
+	out := make([]prebuiltAgentPlatform, 0, 4)
+	for _, p := range prebuiltPlatforms() {
+		fn := "gta-agent-" + p.OS + "-" + p.Arch
+		if p.ExeSuffix {
+			fn += ".exe"
+		}
+		avail := false
+		if st, err := os.Stat(filepath.Join(binDir, fn)); err == nil && !st.IsDir() {
+			avail = true
+		}
+		out = append(out, prebuiltAgentPlatform{
+			OS:        p.OS,
+			Arch:      p.Arch,
+			Label:     p.Label,
+			ExeSuffix: p.ExeSuffix,
+			Available: avail,
+			Filename:  fn,
+		})
+	}
+	return out
+}
+
 // handleGetAgentDownloadOptions 返回下载 Agent 页面需要的服务端信息：
-// 本机可达 IP、registry/ingest 地址与端口、服务端平台（仅支持服务端本机平台抓包）。
+// 本机可达 IP、registry/ingest 地址与端口，以及可下载的目标平台矩阵。
+// 平台可用性以「预置产物是否存在」为准，绝不回落到服务端平台（消除旧方案
+// "服务端 Linux → 用户拿到 Linux 二进制" 的缺陷）。
 func (m *mcpCapture) handleGetAgentDownloadOptions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	registry, ingest := m.registryIngest(ctx)
 	_, registryPort := splitHostPort(registry)
@@ -78,80 +155,64 @@ func (m *mcpCapture) handleGetAgentDownloadOptions(ctx context.Context, req mcp.
 		"ingest_addr":    ingest,
 		"registry_port":  registryPort,
 		"ingest_port":    ingestPort,
-		"platform":       runtime.GOOS + "/" + runtime.GOARCH,
-		"message":        "在下载页填写 Agent 回连地址时，端口用 registry 端口（" + registryPort + "）；Agent 会自动把推流口取为 ingest 端口（" + ingestPort + "）。host 需为远端 Agent 可达的网段地址（局域网 IP 或公网地址）。",
+		"platforms":      m.availableAgentPlatforms(),
+		"message":        "选择目标机器的操作系统下载 Agent。产物按「平台 + 运行时 sidecar 配置」打包为 zip：解压后双击运行 gta-agent(.exe) 即可免参数抓包上报。回连地址端口用 registry 端口（" + registryPort + "）；Agent 会自动把推流口取为 ingest 端口（" + ingestPort + "）。host 需为远端 Agent 可达的网段地址。",
 	}
 	return successResult(out), nil
 }
 
-// agentSrcDir 定位 cmd/gta-agent 源码目录（编译下载产物用）。
-// 解析顺序：GTA_AGENT_SRC_DIR 环境变量 → CWD 下 ./cmd/gta-agent。
-func (m *mcpCapture) agentSrcDir() (string, error) {
-	for _, guess := range []string{os.Getenv("GTA_AGENT_SRC_DIR"), filepath.Join(".", "cmd", "gta-agent")} {
-		if guess == "" {
-			continue
-		}
-		if abs, err := filepath.Abs(guess); err == nil {
-			if st, err := os.Stat(abs); err == nil && st.IsDir() {
-				return abs, nil
-			}
+// serviceBearerToken 从请求中提取当前调用者凭证，用于一并烧进 agent sidecar 配置。
+// 优先 Authorization: Bearer，其次 X-GTA-Token，最后兼容回退 query `token`
+// （后者会进访问日志，仅作过渡保留）。
+func serviceBearerToken(r *http.Request, q url.Values) string {
+	if h := strings.TrimSpace(r.Header.Get("Authorization")); strings.HasPrefix(h, "Bearer ") {
+		if t := strings.TrimSpace(strings.TrimPrefix(h, "Bearer ")); t != "" {
+			return t
 		}
 	}
-	return "", errors.New("cannot locate gta-agent source directory (set GTA_AGENT_SRC_DIR to <repo>/cmd/gta-agent)")
+	if h := strings.TrimSpace(r.Header.Get("X-GTA-Token")); h != "" {
+		return h
+	}
+	return strings.TrimSpace(q.Get("token"))
 }
 
-// buildAgentBinary 在服务端即时编译下载形态的 gta-agent：把 cfgJSON 写入
-// cmd/gta-agent/config.embedded.json，以 -tags "embedded pcap" 构建，返回二进制临时路径。
-// 整段（写配置文件 + 编译 + 清理）用 m.buildMu 串行化，避免并发下载互相覆盖 go:embed 文件。
-// 只支持服务端本机平台：pcap 依赖 cgo，跨系统交叉编译不可行。
-func (m *mcpCapture) buildAgentBinary(buildCtx context.Context, cfgJSON []byte) (string, error) {
-	m.buildMu.Lock()
-	defer m.buildMu.Unlock()
-
-	srcDir, err := m.agentSrcDir()
+// buildAgentZip 把选定的预置平台二进制与该下载对应的 sidecar 配置
+// （config.embedded.json）打成 zip。产物解压后，通用 gta-agent 会在运行时
+// 读取同目录 config.embedded.json，从而免参数回连服务端、托管插件并抓包。
+func buildAgentZip(binPath string, cfgJSON []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	cfgW, err := zw.Create("config.embedded.json")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	ext := ""
-	if runtime.GOOS == "windows" {
-		ext = ".exe"
+	if _, err := cfgW.Write(cfgJSON); err != nil {
+		return nil, err
 	}
-	outPath := filepath.Join(os.TempDir(), fmt.Sprintf("gta-agent-%s-%s-%d%s",
-		runtime.GOOS, runtime.GOARCH, time.Now().UnixNano(), ext))
-
-	cfgPath := filepath.Join(srcDir, "config.embedded.json")
-	if err := os.WriteFile(cfgPath, cfgJSON, 0o644); err != nil {
-		return "", fmt.Errorf("write embedded config: %w", err)
+	binData, err := os.ReadFile(binPath)
+	if err != nil {
+		return nil, err
 	}
-	defer func() { _ = os.Remove(cfgPath) }()
-
-	// srcDir 形如 <repo>/cmd/gta-agent；往上逐级找 go.mod 定位 repo 根，
-	// 使 `go build ./cmd/gta-agent` 在该根下能解析 gta 模块。
-	repoDir := filepath.Dir(srcDir)
-	for {
-		if _, err := os.Stat(filepath.Join(repoDir, "go.mod")); err == nil {
-			break
-		}
-		parent := filepath.Dir(repoDir)
-		if parent == repoDir {
-			_ = os.Remove(cfgPath)
-			return "", errors.New("cannot find repo root (go.mod) above gta-agent source dir")
-		}
-		repoDir = parent
+	binW, err := zw.Create(filepath.Base(binPath))
+	if err != nil {
+		return nil, err
 	}
-
-	cmd := exec.CommandContext(buildCtx, "go", "build", "-tags", "embedded pcap", "-o", outPath, "./cmd/gta-agent")
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		_ = os.Remove(outPath)
-		_ = os.Remove(cfgPath)
-		return "", fmt.Errorf("compile agent failed (server requires Go toolchain + libpcap,pcap build tags): %v\n%s", err, out)
+	if _, err := binW.Write(binData); err != nil {
+		return nil, err
 	}
-	return outPath, nil
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
-// handleAgentDownload 是下载 Agent 的 HTTP 端点：GET /download/agent?port=&plugin=&server=&token=
-// 处于鉴权链内，访问者即会话 owner；token 由前端传入其当前凭证，一并烧进二进制。
+// handleAgentDownload 是下载 Agent 的 HTTP 端点：
+//
+//	GET /download/agent?platform=<os>/<arch>&port=&plugin=&server=
+//	Authorization: Bearer <token>
+//
+// 平台取「预置产物」下发（见 availableAgentPlatforms），不再服务端即时编译；
+// 会话在下载时创建，session_id 通过响应头 X-Session-Id 回传，供前端自动选中。
 func (m *mcpCapture) handleAgentDownload(w http.ResponseWriter, r *http.Request) {
 	owner := auth.OwnerFrom(r.Context())
 	q := r.URL.Query()
@@ -171,7 +232,31 @@ func (m *mcpCapture) handleAgentDownload(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "server must be host:port, e.g. 192.168.1.10:9091", http.StatusBadRequest)
 		return
 	}
-	token := strings.TrimSpace(q.Get("token"))
+	platform := strings.TrimSpace(q.Get("platform"))
+	if platform == "" {
+		http.Error(w, "platform (os/arch) is required, e.g. windows/amd64", http.StatusBadRequest)
+		return
+	}
+	token := serviceBearerToken(r, q)
+
+	// 定位目标平台预置产物；缺失即报错，绝不上报服务端自身平台。
+	binDir, _ := m.agentBinDir()
+	var binPath string
+	for _, p := range m.availableAgentPlatforms() {
+		if p.OS+"/"+p.Arch != platform {
+			continue
+		}
+		if !p.Available {
+			http.Error(w, "platform "+platform+" is not available; run `make build-agents` on the server to prebuild it", http.StatusNotFound)
+			return
+		}
+		binPath = filepath.Join(binDir, p.Filename)
+		break
+	}
+	if binPath == "" {
+		http.Error(w, "unsupported platform: "+platform, http.StatusBadRequest)
+		return
+	}
 
 	if m.pipelineClient == nil {
 		http.Error(w, "pipeline is not reachable; cannot open a receive session", http.StatusServiceUnavailable)
@@ -207,14 +292,13 @@ func (m *mcpCapture) handleAgentDownload(w http.ResponseWriter, r *http.Request)
 	}
 	m.sessionMgr.writeCurrent(meta)
 
-	// 2) 端口换算成 BPF，组装固化配置并编译。
+	// 2) 端口换算成 BPF，组装 sidecar 配置。
 	bpf := fmt.Sprintf("tcp port %d or udp port %d", port, port)
-	// 插件按名字白名单烧入：agent 侧只托管用户选定的插件（空则不托管/不解码，由服务端会话负责解码处理）。
 	cfg := map[string]any{
-		"server":      server,
-		"token":       token,
-		"session":     sessionID,
-		"bpf":         bpf,
+		"server":       server,
+		"token":        token,
+		"session":      sessionID,
+		"bpf":          bpf,
 		"plugin_names": []string{},
 	}
 	if plugin != "" {
@@ -225,24 +309,22 @@ func (m *mcpCapture) handleAgentDownload(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	binPath, err := m.buildAgentBinary(r.Context(), cfgJSON)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer os.Remove(binPath)
 
-	// 3) 流式下发二进制。
-	f, err := os.Open(binPath)
+	// 3) 打包 zip（通用二进制 + sidecar 配置）并下发；session_id 走响应头回传。
+	zipData, err := buildAgentZip(binPath, cfgJSON)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "package agent zip failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer f.Close()
-	filename := filepath.Base(binPath)
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	zipName := fmt.Sprintf("gta-agent-%s-%s.zip", platform, time.Now().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+zipName+`"`)
 	w.Header().Set("Cache-Control", "no-store")
-	http.ServeContent(w, r, filename, time.Now(), f)
-	slog.Info("agent downloaded", "owner", owner, "port", port, "plugin", plugin, "server", server, "session_id", sessionID)
+	w.Header().Set("X-Session-Id", sessionID) // 供前端自动选中刚创建的会话
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(zipData); err != nil {
+		slog.Warn("stream agent zip failed", "owner", owner, "session_id", sessionID, "error", err)
+		return
+	}
+	slog.Info("agent downloaded", "owner", owner, "platform", platform, "port", port, "plugin", plugin, "server", server, "session_id", sessionID)
 }

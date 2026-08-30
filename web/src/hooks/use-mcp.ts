@@ -39,6 +39,7 @@ import type { QueryCaptureTableResult } from "@/types/table-browser";
 import type { ListConnectionsResult, GetConnectionDetailResult, ListConnectionStreamsResult, ListConnectionFramesResult } from "@/types/connection";
 import type { GetProxyConfigResult, UpdateProxyConfigResult, ProxyConfigUpdateVars } from "@/types/proxy";
 import type { GetAgentDownloadOptionsResult } from "@/types/agent";
+import type { ListProjectsResult, ProjectResult } from "@/types/project";
 
 /** 查询 session 列表 */
 export function useSessions() {
@@ -377,6 +378,62 @@ export function useDeleteSessions() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["sessionStatus"] });
+    },
+  });
+}
+
+// ===== 轻量「项目」模型（名称 + 默认插件 + 默认端口）=====
+
+/** list_projects：列出当前可见项目。 */
+export function useProjects() {
+  return useQuery({
+    queryKey: ["projects"],
+    queryFn: () => mcpClient.callTool<ListProjectsResult>("list_projects"),
+    staleTime: 10_000,
+  });
+}
+
+/** create_project：新建项目。 */
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { name: string; plugin?: string; port?: number }) =>
+      mcpClient.callTool<ProjectResult>("create_project", {
+        name: vars.name,
+        plugin: vars.plugin ?? "",
+        port: vars.port ?? 0,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
+/** update_project：更新项目。 */
+export function useUpdateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; name?: string; plugin?: string; port?: number }) =>
+      mcpClient.callTool<ProjectResult>("update_project", {
+        id: vars.id,
+        name: vars.name ?? "",
+        plugin: vars.plugin ?? "",
+        port: vars.port ?? 0,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
+/** delete_project：删除项目。 */
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string }) =>
+      mcpClient.callTool<ProjectResult>("delete_project", { id: vars.id }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
   });
 }

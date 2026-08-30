@@ -12,10 +12,21 @@ interface StartCaptureDialogProps {
   onStarted?: (sessionId: string) => void;
   /** 抓包启动并自动开启行为窗口后回调，携带 run_id 与联动的 session_id。 */
   onRunLinked?: (runId: string, sessionId: string) => void;
+  /** 从项目预填的默认端口（0=不预填） */
+  initialPort?: number;
+  /** 从项目预填的默认插件名 */
+  initialPlugin?: string;
 }
 
 /** 开始抓包对话框：本机网卡抓包 / 远程 agent 推流（移动代理抓包为常驻服务，见「代理服务器配置」页）。 */
-export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: StartCaptureDialogProps) {
+export function StartCaptureDialog({
+  open,
+  onClose,
+  onStarted,
+  onRunLinked,
+  initialPort,
+  initialPlugin,
+}: StartCaptureDialogProps) {
   const [source, setSource] = useState<"nic" | "agent">("nic");
   const [port, setPort] = useState("8080");
   const [plugin, setPlugin] = useState("");
@@ -39,7 +50,12 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
     if (open) {
       setStarted(false);
       setAgentCommand(null);
+      // 打开时应用项目预填：有初始端口/插件才覆盖默认值，否则回到默认。
+      if (initialPort && initialPort > 0) setPort(String(initialPort));
+      if (initialPlugin) setPlugin(initialPlugin);
     }
+    // 仅在每次打开时读取一次预填（把 initialPort/initialPlugin 当作当次快照）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   function handleStart() {

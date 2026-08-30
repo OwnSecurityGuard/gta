@@ -78,6 +78,13 @@ func main() {
 	// 固化配置（-tags embedded 下载形态）：任何命令行参数为空时以其作为默认值。
 	// 这样下载回来的 agent 无需填任何参数（含 token）即可回连、托管插件并抓包。
 	embedded, hasEmbedded := loadEmbeddedConfig()
+	// 预置（多平台下载）产物未带 embedded 标签：运行时从可执行文件同目录载入
+	// config.embedded.json（download zip 里同放的 sidecar 配置），保持免参数行为。
+	if !hasEmbedded {
+		if sc, ok := loadSidecarConfig(); ok {
+			embedded, hasEmbedded = sc, true
+		}
+	}
 	if hasEmbedded && embedded != nil {
 		if server == "" {
 			server = embedded.Server

@@ -1,4 +1,20 @@
-/** get_agent_download_options 返回：下载 Agent 页面需要的服务端回连信息（扁平结构 + ok）。 */
+/** get_agent_download_options 返回的单平台预置产物。 */
+export interface AgentPlatform {
+  /** 目标操作系统：windows / linux */
+  os: string;
+  /** 目标架构：amd64 / arm64 */
+  arch: string;
+  /** 展示名，如 "Windows x64" */
+  label: string;
+  /** 是否需要 .exe 后缀 */
+  exe: boolean;
+  /** 该平台产物是否已预置（false 时不可下载） */
+  available: boolean;
+  /** 磁盘文件名（含 .exe 时） */
+  filename: string;
+}
+
+/** get_agent_download_options 返回：下载 Agent 页面需要的服务端信息 + 可下载平台矩阵（扁平结构 + ok）。 */
 export interface GetAgentDownloadOptionsResult {
   ok: boolean;
   /** 本机可被远端 Agent 访问的地址（局域网 IP 或公网地址） */
@@ -11,8 +27,8 @@ export interface GetAgentDownloadOptionsResult {
   registry_port: string;
   /** ingest 端口（Agent 自动推流用） */
   ingest_port: string;
-  /** 服务端平台（os/arch），仅支持服务端本机平台抓包 */
-  platform: string;
+  /** 可下载的目标平台矩阵（按预置产物存在与否标记可用性） */
+  platforms: AgentPlatform[];
   /** 给用户的端口/地址说明文案 */
   message: string;
 }

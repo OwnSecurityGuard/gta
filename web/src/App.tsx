@@ -14,14 +14,35 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { StartCaptureDialog } from "@/components/start-capture-dialog";
 import { ProxyConfigDialog } from "@/components/proxy-config-dialog";
 import { AgentDownloadDialog } from "@/components/agent-download-dialog";
+import { MyCapturePage } from "@/components/my-capture-page";
 import { Button } from "@/components/ui/button";
-import { Sun, Moon, Settings, Play, Square, Cable, KeyRound, Download } from "lucide-react";
+import { Sun, Moon, Settings, Play, Square, Cable, KeyRound, Download, ChevronDown, Check } from "lucide-react";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
 import { usePluginEventStream, useStopCapture, useSessions } from "@/hooks/use-mcp";
 import { useAuthError } from "@/hooks/use-auth";
 import { toast } from "@/components/ui/toast";
+import type { ProjectInfo } from "@/types/project";
 
-type ViewTab = "decoded" | "analytics" | "timeline" | "runs" | "data" | "plugins" | "raw" | "connections";
+type ViewTab = "home" | "connections" | "timeline" | "analytics" | "decoded" | "runs" | "data" | "plugins" | "raw";
+
+/** 一级视图：普通用户最常用的入口（我的抓包 / 连接 / 时间线 / 分析）。 */
+const PRIMARY_TABS: { id: ViewTab; label: string }[] = [
+  { id: "home", label: "我的抓包" },
+  { id: "connections", label: "连接" },
+  { id: "timeline", label: "时间线" },
+  { id: "analytics", label: "分析" },
+];
+
+/** 高级视图：插件 / 原始包 / 数据探查，默认收进「更多」下拉，降低普通用户的认知负担。 */
+const ADVANCED_TABS: { id: ViewTab; label: string }[] = [
+  { id: "decoded", label: "协议数据" },
+  { id: "runs", label: "行为" },
+  { id: "data", label: "数据探查" },
+  { id: "plugins", label: "插件" },
+  ...(RAW_DEBUG_ENABLED ? [{ id: "raw" as ViewTab, label: "原始包" }] : []),
+];
+
+const TABS: { id: ViewTab; label: string }[] = [...PRIMARY_TABS, ...ADVANCED_TABS];
 
 /** 品牌标识：广播/信号图标，呼应"游戏调试自动化"。 */
 function BrandMark({ className }: { className?: string }) {
@@ -43,24 +64,17 @@ function BrandMark({ className }: { className?: string }) {
   );
 }
 
-const TABS: { id: ViewTab; label: string }[] = [
-  { id: "decoded", label: "协议数据" },
-  { id: "connections", label: "连接" },
-  { id: "analytics", label: "分析" },
-  { id: "timeline", label: "时间线" },
-  { id: "runs", label: "行为" },
-  { id: "data", label: "数据探查" },
-  { id: "plugins", label: "插件" },
-  ...(RAW_DEBUG_ENABLED ? [{ id: "raw" as ViewTab, label: "原始包" }] : []),
-];
-
 export default function App() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   // 与当前抓包会话联动的行为窗口（start_capture 成功后自动 begin，便于在「行为」Tab 直接查看）。
   const [linkedRunId, setLinkedRunId] = useState<string | null>(null);
   const [linkedRunSessionId, setLinkedRunSessionId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-  const [activeTab, setActiveTab] = useState<ViewTab>("decoded");
+  const [activeTab, setActiveTab] = useState<ViewTab>("home");
+  // 「更多」下拉是否展开（普通用户把高级视图藏在这里）。
+  const [moreOpen, setMoreOpen] = useState(false);
+  // 从项目「一键抓包」带入的默认端口/插件，传给 StartCaptureDialog 预填。
+  const [projectPrefill, setProjectPrefill] = useState<{ port?: number; plugin?: string }>({});
   // 从连接详情点击 flow_id 跳转时预填到「行为」Tab 的 flow_id
   const [tracePrefill, setTracePrefill] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -142,7 +156,7 @@ export default function App() {
   // 若原始包调试未开启，避免停留在 raw Tab
   useEffect(() => {
     if (!RAW_DEBUG_ENABLED && activeTab === "raw") {
-      setActiveTab("decoded");
+      setActiveTab("home");
     }
   }, [activeTab]);
 
@@ -170,6 +184,24 @@ export default function App() {
     setActiveTab("connections");
     setProxyConfigOpen(false);
   }, []);
+
+  // 首页「本机抓包」：不带项目预填地打开开始抓包弹窗。
+  const handleStartDefault = useCallback(() => {
+    setProjectPrefill({});
+    setStartOpen(true);
+  }, []);
+
+  // 首页「我的项目 → 以该项目抓包」：把项目的默认端口/插件预填进开始抓包弹窗。
+  const handleStartProject = useCallback((p: ProjectInfo) => {
+    setProjectPrefill({ port: p.port && p.port > 0 ? p.port : undefined, plugin: p.plugin || undefined });
+    setStartOpen(true);
+  }, []);
+
+  // 从首页「最近会话」卡片进入会话详情并跳到「连接」主分析入口。
+  const handleHomeSelectSession = useCallback((sessionId: string) => {
+    handleSelectSession(sessionId);
+    setActiveTab("connections");
+  }, [handleSelectSession]);
 
   // Tab 键导航：左右方向键在 tablist 中移动焦点
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -238,14 +270,14 @@ export default function App() {
         {/* 顶部工具栏：Tab 切换 + 开始抓包 + 主题/设置 */}
         <header className="flex items-center justify-between gap-3 border-b border-border bg-card/80 px-4 py-2.5 backdrop-blur">
           <div className="flex items-center gap-3">
-            {/* 分段控件式 Tab */}
+            {/* 分段控件式 Tab：一级视图常驻；高级视图收进「更多」下拉 */}
             <div
               role="tablist"
               aria-label="视图切换"
               onKeyDown={handleTabKeyDown}
               className="flex items-center gap-1 rounded-lg bg-muted p-1"
             >
-              {TABS.map((t, i) => {
+              {PRIMARY_TABS.map((t, i) => {
                 const selected = activeTab === t.id;
                 return (
                   <button
@@ -268,6 +300,59 @@ export default function App() {
                   </button>
                 );
               })}
+
+              {/* 高级视图下拉 */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen((v) => !v)}
+                  aria-expanded={moreOpen}
+                  className={
+                    "inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 " +
+                    (ADVANCED_TABS.some((t) => t.id === activeTab)
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground")
+                  }
+                >
+                  更多
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+                {moreOpen && (
+                  <>
+                    {/* 点击空白关闭下拉 */}
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setMoreOpen(false)}
+                      aria-hidden
+                    />
+                    <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-lg">
+                      {ADVANCED_TABS.map((t) => {
+                        const selected = activeTab === t.id;
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setActiveTab(t.id);
+                              setMoreOpen(false);
+                            }}
+                            className={
+                              "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors " +
+                              (selected
+                                ? "bg-muted text-foreground"
+                                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")
+                            }
+                          >
+                            {t.label}
+                            {selected && <Check className="h-3.5 w-3.5 text-primary" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* 当前会话上下文 */}
@@ -367,6 +452,15 @@ export default function App() {
 
         {/* 数据表格 */}
         <div className="min-h-0 flex-1 overflow-hidden">
+          {activeTab === "home" && (
+            <MyCapturePage
+              onStartDefault={handleStartDefault}
+              onStartProject={handleStartProject}
+              onAgentDownload={() => setAgentDownloadOpen(true)}
+              onProxy={() => setProxyConfigOpen(true)}
+              onSelectSession={handleHomeSelectSession}
+            />
+          )}
           {activeTab === "decoded" && (
             <div className="h-full overflow-auto p-4 gta-scroll">
               <EventTable sessionId={selectedSessionId} filter={filter} />
@@ -413,15 +507,22 @@ export default function App() {
       {/* 代理服务器配置弹窗 */}
       <ProxyConfigDialog open={proxyConfigOpen} onClose={() => setProxyConfigOpen(false)} onNavigateToSession={handleNavigateToSession} />
       {/* 下载远程 Agent 弹窗（跨环境抓包上报） */}
-      <AgentDownloadDialog open={agentDownloadOpen} onClose={() => setAgentDownloadOpen(false)} />
+      <AgentDownloadDialog
+        open={agentDownloadOpen}
+        onClose={() => setAgentDownloadOpen(false)}
+        onNavigateToSession={handleNavigateToSession}
+      />
       {/* 开始抓包弹窗（本机网卡 / 远程 agent 源） */}
       <StartCaptureDialog
         open={startOpen}
         onClose={() => setStartOpen(false)}
+        initialPort={projectPrefill.port}
+        initialPlugin={projectPrefill.plugin}
         onStarted={(sessionId) => {
           setSelectedSessionId(sessionId);
           setFilter("");
-          setActiveTab("decoded");
+          // 抓包成功即跳到「连接」主分析入口，用户无需回侧边栏找会话。
+          setActiveTab("connections");
         }}
         onRunLinked={(runId, sessionId) => {
           setLinkedRunId(runId);

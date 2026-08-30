@@ -103,6 +103,7 @@ type mcpCapture struct {
 	mcpServer   *server.MCPServer
 	sessionMgr  *sessionManager
 	runRegistry *RunRegistry
+	projects    *projectStore
 
 	// gRPC client 连接 gta-pipeline
 	pipelineClient pb.CaptureControlClient
@@ -405,6 +406,7 @@ func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mc
 		mcpServer:      mcpServer,
 		sessionMgr:     newSessionManager(workDir),
 		runRegistry:    runRegistry,
+		projects:       newProjectStore(workDir),
 		pipelineClient: client,
 		grpcConn:       conn,
 		pdClient:       pdClient,
@@ -2936,6 +2938,31 @@ func main() {
 		mcp.WithDescription("Delete a capture session and its data"),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID to delete")),
 	), capture.handleDeleteSession)
+
+	// 轻量「项目」模型：只保存 名称 + 默认解码插件 + 默认抓包端口，供一键开始抓包复用配置（Web First · P1）。
+	s.AddTool(mcp.NewTool("create_project",
+		mcp.WithDescription("Create a lightweight capture project that remembers a name, a default decode plugin and a default capture port, so a later capture reuses them without re-entering. Keep it minimal: only these three fields, no workspace/org structures."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Project display name, e.g. Godot Game")),
+		mcp.WithString("plugin", mcp.Description("Default decode plugin name, e.g. godot_gateway. Optional.")),
+		mcp.WithNumber("port", mcp.Description("Default capture port (0 = unset). Optional.")),
+	), capture.handleCreateProject)
+
+	s.AddTool(mcp.NewTool("list_projects",
+		mcp.WithDescription("List capture projects visible to the current user (admin sees all owners' projects; normal users only see their own)."),
+	), capture.handleListProjects)
+
+	s.AddTool(mcp.NewTool("update_project",
+		mcp.WithDescription("Update a capture project's name / default plugin / default port. Only explicitly supplied fields are changed."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("name", mcp.Description("New project name")),
+		mcp.WithString("plugin", mcp.Description("New default decode plugin name")),
+		mcp.WithNumber("port", mcp.Description("New default capture port")),
+	), capture.handleUpdateProject)
+
+	s.AddTool(mcp.NewTool("delete_project",
+		mcp.WithDescription("Delete a capture project."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Project ID to delete")),
+	), capture.handleDeleteProject)
 
 	// Script management tools removed: the Python script sandbox (save_script /
 	// list_scripts / run_script / delete_script) has been deleted. Arbitrary

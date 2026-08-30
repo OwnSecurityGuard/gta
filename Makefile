@@ -1,4 +1,4 @@
-.PHONY: proto test build build-mcp build-pipeline build-plugin-dev build-agent build-examples run-mcp run-pipeline run-plugin-dev release release-matrix web-build docs
+.PHONY: proto test build build-mcp build-pipeline build-plugin-dev build-agent build-agents build-examples run-mcp run-pipeline run-plugin-dev release release-matrix web-build docs
 
 TAGS := pcap
 
@@ -71,6 +71,32 @@ build-plugin-dev:
 # 移动端流量入口（sing-box 侧 → GTA）：TCP 中继 + gRPC 推送连接级数据。
 build-agent:
 	go build -tags $(TAGS) -o bin/gta-singbox-agent.exe ./cmd/gta-singbox-agent
+
+# ============================================================================
+# 多平台下载 agent 预置矩阵（T-Web First） -> build/agents/
+#
+# 远程 agent 需要在"用户本机"做实时抓包，因此必须携带目标平台的 libpcap
+# （cgo），无法像 release-matrix 那样 CGO_ENABLED=0 纯交叉。这份预置只需
+# 在各自平台/具备交叉 CC 的 runner 上构建一次并随镜像/发布带上：
+#   - windows/amd64、linux/amd64 为 P0 必选；arm64 为 P1 增量；
+#   - 产物是「通用」gta-agent（不带 embedded 标签），下载时由服务端把
+#     config.embedded.json 作为 sidecar 打进 zip，运行时从 exe 同目录读取；
+#   - 缺平台的产物未提供时，后端 get_agent_download_options 会如实标记
+#     该平台不可下载（不会像旧方案那样回落到服务端本机平台）。
+# 本机（windows/amd64）可直接跑 make build-agents 验证；linux 产物需在
+# linux 上构建或配好 mingw/交叉工具链。
+AGENT_PLATFORMS := windows/amd64 linux/amd64 windows/arm64 linux/arm64
+build-agents:
+	set -e; \
+	mkdir -p build/agents; \
+	for platform in $(AGENT_PLATFORMS); do \
+		os=$${platform%/*}; arch=$${platform#*/}; \
+		ext=""; if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
+		echo "==> GOOS=$$os GOARCH=$$arch -tags pcap go build ./cmd/gta-agent"; \
+		GOOS=$$os GOARCH=$$arch go build -tags pcap \
+			-o build/agents/gta-agent-$$os-$$arch$$ext ./cmd/gta-agent; \
+	done; \
+	ls -la build/agents/
 
 build: build-mcp build-pipeline build-plugin-dev build-agent
 

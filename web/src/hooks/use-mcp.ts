@@ -39,6 +39,7 @@ import type { QueryCaptureTableResult } from "@/types/table-browser";
 import type { ListConnectionsResult, GetConnectionDetailResult, ListConnectionStreamsResult, ListConnectionFramesResult } from "@/types/connection";
 import type { GetProxyConfigResult, UpdateProxyConfigResult, ProxyConfigUpdateVars } from "@/types/proxy";
 import type { GetAgentDownloadOptionsResult } from "@/types/agent";
+import type { CreateAccessCodeResult, ListAccessCodesResult } from "@/types/access-code";
 import type {
   ListProjectsResult,
   ProjectResult,
@@ -787,6 +788,41 @@ export function useUpdateProxyServerConfig() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["proxyServerConfig"] });
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+// ===== 启动码接入（GTA-XXXX，成员目标机免参数回连抓包）=====
+
+/** list_access_codes：列出当前用户可见的启动码。 */
+export function useAccessCodes() {
+  return useQuery({
+    queryKey: ["accessCodes"],
+    queryFn: () => mcpClient.callTool<ListAccessCodesResult>("list_access_codes"),
+    staleTime: 10_000,
+  });
+}
+
+/** create_access_code：生成一个绑定当前用户的启动码（可选绑项目/插件/端口/平台/回连地址）。 */
+export function useCreateAccessCode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      projectId?: string;
+      plugin?: string;
+      port?: number;
+      platform?: string;
+      server?: string;
+    }) =>
+      mcpClient.callTool<CreateAccessCodeResult>("create_access_code", {
+        project_id: vars.projectId ?? "",
+        plugin: vars.plugin ?? "",
+        port: vars.port ?? 0,
+        platform: vars.platform ?? "",
+        server: vars.server ?? "",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["accessCodes"] });
     },
   });
 }

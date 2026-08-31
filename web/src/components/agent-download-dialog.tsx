@@ -13,6 +13,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useAgentDownloadOptions, useRegisteredPlugins, useSessionStatus } from "@/hooks/use-mcp";
+import { AccessCodePanel } from "@/components/access-code-panel";
 import { authHeaders } from "@/lib/auth";
 import { toast } from "@/components/ui/toast";
 import type { AgentPlatform } from "@/types/agent";
@@ -59,6 +60,8 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
   // 阶段：configure（填写配置 + 下载）→ awaiting（等待 Agent 连接 / 抓包中）
   const [phase, setPhase] = useState<"configure" | "awaiting">("configure");
   const [sessionId, setSessionId] = useState<string | null>(null);
+  // 接入模式：quick=启动码主路径（推荐） / advanced=原「下载 zip + sidecar 配置」
+  const [mode, setMode] = useState<"quick" | "advanced">("quick");
 
   const [os, setOs] = useState("windows");
   const [arch, setArch] = useState("amd64");
@@ -79,6 +82,7 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
     setBusy(false);
     setPhase("configure");
     setSessionId(null);
+    setMode("quick");
     if (deployHost && opts?.registry_port) {
       setServer(`${deployHost}:${opts.registry_port}`);
     } else {
@@ -181,19 +185,29 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
     }
   }
 
+  const inAdvanced = mode === "advanced";
+  const dialogTitle =
+    mode === "quick"
+      ? "我的接入"
+      : phase === "awaiting"
+        ? "等待 Agent 连接"
+        : "下载远程 Agent";
+  const dialogDesc =
+    mode === "quick"
+      ? "生成一次性启动码，在目标机执行复制到的命令即可免参数注册并回连抓包。"
+      : phase === "awaiting"
+        ? "在目标电脑解压并双击运行 Agent，GTA 会自动回连并开始抓包。"
+        : "选择目标操作系统与抓包端口后下载，回连地址、token 与会话都已打入 zip，运行即可免参数抓包上报。";
+
   return (
     <Dialog
       open={open}
       onClose={onClose}
       icon={<Download className="h-5 w-5" />}
-      title={phase === "awaiting" ? "等待 Agent 连接" : "下载远程 Agent"}
-      description={
-        phase === "awaiting"
-          ? "在目标电脑解压并双击运行 Agent，GTA 会自动回连并开始抓包。"
-          : "选择目标操作系统与抓包端口后下载，回连地址、token 与会话都已打入 zip，运行即可免参数抓包上报。"
-      }
+      title={dialogTitle}
+      description={dialogDesc}
       footer={
-        phase === "awaiting" ? (
+        inAdvanced && phase === "awaiting" ? (
           <>
             <Button variant="outline" onClick={() => setPhase("configure")}>
               <Download className="h-4 w-4" />
@@ -212,7 +226,7 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
               查看实时数据
             </Button>
           </>
-        ) : (
+        ) : inAdvanced ? (
           <>
             <Button variant="outline" onClick={onClose}>
               <X className="h-4 w-4" />
@@ -223,10 +237,45 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
               {busy ? "打包下载中…" : "下载 Agent"}
             </Button>
           </>
+        ) : (
+          <>
+            <Button variant="outline" onClick={onClose} className="ml-auto">
+              <X className="h-4 w-4" />
+              关闭
+            </Button>
+          </>
         )
       }
     >
-      {phase === "awaiting" ? (
+      {/* 接入模式切换：启动码主路径（推荐） / 高级下载（zip + sidecar 配置） */}
+      {!(inAdvanced && phase === "awaiting") && (
+        <div className="mb-3 grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/40 p-1">
+          <button
+            type="button"
+            onClick={() => setMode("quick")}
+            aria-pressed={mode === "quick"}
+            className={`rounded px-2 py-1.5 text-sm font-medium transition-colors ${
+              mode === "quick" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
+            }`}
+          >
+            ⚡ 快捷接入（推荐）
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("advanced")}
+            aria-pressed={mode === "advanced"}
+            className={`rounded px-2 py-1.5 text-sm font-medium transition-colors ${
+              mode === "advanced" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
+            }`}
+          >
+            高级下载
+          </button>
+        </div>
+      )}
+
+      {mode === "quick" ? (
+        <AccessCodePanel />
+      ) : phase === "awaiting" ? (
         <AwaitingAgentPanel attached={attached} packets={live.packets} events={live.events} />
       ) : (
         <div className="space-y-3">

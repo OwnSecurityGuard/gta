@@ -408,11 +408,11 @@ export default function App() {
               size="sm"
               className="h-8"
               onClick={() => setAgentDownloadOpen(true)}
-              title="下载远程 Agent（跨环境抓包上报，配置已烧入二进制免参数）"
-              aria-label="下载远程 Agent"
+              title="接入成员（生成启动码，把成员电脑接进团队抓包）"
+              aria-label="接入成员"
             >
               <Download className="h-4 w-4" />
-              下载 Agent
+              接入成员
             </Button>
             <Button
               variant="outline"

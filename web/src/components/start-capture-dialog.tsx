@@ -16,6 +16,8 @@ interface StartCaptureDialogProps {
   initialPort?: number;
   /** 从项目预填的默认插件名 */
   initialPlugin?: string;
+  /** 从项目一键抓包时绑定的项目 id；抓包会话归属到该项目 */
+  initialProjectId?: string;
 }
 
 /** 开始抓包对话框：本机网卡抓包 / 远程 agent 推流（移动代理抓包为常驻服务，见「代理服务器配置」页）。 */
@@ -26,10 +28,13 @@ export function StartCaptureDialog({
   onRunLinked,
   initialPort,
   initialPlugin,
+  initialProjectId,
 }: StartCaptureDialogProps) {
   const [source, setSource] = useState<"nic" | "agent">("nic");
   const [port, setPort] = useState("8080");
   const [plugin, setPlugin] = useState("");
+  // 从项目一键抓包时带入的项目 id（本次抓包会话归属到此项目）。
+  const [projectId, setProjectId] = useState("");
   const [started, setStarted] = useState(false);
   // agent 源启动成功后保持弹窗打开：成员机需要带真实会话ID的完整 gta-agent 命令
   // （--session/--iface 缺一则只托管插件、不抓包推流），故展示可复制命令而非自动关窗。
@@ -53,6 +58,7 @@ export function StartCaptureDialog({
       // 打开时应用项目预填：有初始端口/插件才覆盖默认值，否则回到默认。
       if (initialPort && initialPort > 0) setPort(String(initialPort));
       if (initialPlugin) setPlugin(initialPlugin);
+      setProjectId(initialProjectId ?? "");
     }
     // 仅在每次打开时读取一次预填（把 initialPort/initialPlugin 当作当次快照）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -67,6 +73,7 @@ export function StartCaptureDialog({
         port: p > 0 ? p : 0,
         plugin: plugin || undefined,
         source,
+        projectId: projectId || undefined,
       },
       {
         onSuccess: (data) => {

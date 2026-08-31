@@ -14,7 +14,7 @@ import {
   Dot,
   FolderGit2,
 } from "lucide-react";
-import { useSessions, useProjects, useCreateProject, useDeleteProject } from "@/hooks/use-mcp";
+import { useSessions, useProjects, useCreateProject, useDeleteProject, useProject } from "@/hooks/use-mcp";
 import type { ProjectInfo } from "@/types/project";
 import { toast } from "@/components/ui/toast";
 
@@ -52,6 +52,8 @@ interface MyCapturePageProps {
   onAgentDownload: () => void;
   onProxy: () => void;
   onSelectSession: (sessionId: string) => void;
+  /** 进入项目详情页（项目作为一等组织单元） */
+  onOpenProject: (projectId: string) => void;
 }
 
 export function MyCapturePage({
@@ -60,6 +62,7 @@ export function MyCapturePage({
   onAgentDownload,
   onProxy,
   onSelectSession,
+  onOpenProject,
 }: MyCapturePageProps) {
   const { data: sessionsData } = useSessions();
   const sessions = sessionsData?.sessions ?? [];
@@ -199,47 +202,74 @@ export function MyCapturePage({
                 还没有项目。新建一个项目，以后从项目一键开始抓包，不必重复输入端口与插件。
               </p>
             ) : (
-              projects.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center gap-3 rounded-xl border border-border bg-card/60 p-3"
-                >
-                  <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{p.name}</p>
-                    <p className="truncate text-[11px] text-muted-foreground">
-                      {p.default_plugin ? `插件 ${p.default_plugin}` : "默认插件未设置"}
-                      {p.default_port ? ` · 端口 ${p.default_port}` : ""}
-                    </p>
+              projects.map((p) => {
+                // 会话元数据暂不含 project_id，从该项目的 get_project 结果取最近会话做派生状态。
+                const { data: projData } = useProject(p.id);
+                const recent = projData?.recent_sessions ?? projData?.project?.recent_sessions ?? [];
+                const running = recent.some((s) => s.status === "running");
+                const latest = recent[0];
+                const latestText = running ? "抓包中" : latest ? "已停止" : "暂无会话";
+                return (
+                  <div
+                    key={p.id}
+                    className="flex items-center gap-3 rounded-xl border border-border bg-card/60 p-3"
+                  >
+                    <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`h-2 w-2 shrink-0 rounded-full ${running ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
+                          title={running ? "在线" : "离线"}
+                        />
+                        <p className="truncate text-sm font-medium">{p.name}</p>
+                      </div>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {p.default_plugin ? `插件 ${p.default_plugin}` : "默认插件未设置"}
+                        {p.default_port ? ` · 端口 ${p.default_port}` : ""}
+                      </p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {latest
+                          ? `最近 ${latestText} · ${latest.events?.toLocaleString() ?? 0} events`
+                          : "暂无会话"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onOpenProject(p.id)}
+                      title="进入项目详情"
+                      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/50"
+                    >
+                      进入
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onStartProject(p)}
+                      title="以该项目开始抓包"
+                      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/50"
+                    >
+                      <Play className="h-3 w-3" />
+                      抓包
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!window.confirm(`删除项目「${p.name}」？`)) return;
+                        deleteProject.mutate(
+                          { id: p.id },
+                          {
+                            onSuccess: () => toast.success("已删除", p.name),
+                            onError: (err) => toast.error("删除失败", err.message),
+                          },
+                        );
+                      }}
+                      title="删除项目"
+                      className="rounded-md p-1 text-muted-foreground hover:bg-muted/50 hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onStartProject(p)}
-                    title="以该项目开始抓包"
-                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/50"
-                  >
-                    <Play className="h-3 w-3" />
-                    抓包
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!window.confirm(`删除项目「${p.name}」？`)) return;
-                      deleteProject.mutate(
-                        { id: p.id },
-                        {
-                          onSuccess: () => toast.success("已删除", p.name),
-                          onError: (err) => toast.error("删除失败", err.message),
-                        },
-                      );
-                    }}
-                    title="删除项目"
-                    className="rounded-md p-1 text-muted-foreground hover:bg-muted/50 hover:text-destructive"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </section>

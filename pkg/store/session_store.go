@@ -55,12 +55,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     duration_sec  REAL,
     db_path       TEXT NOT NULL,
     extra         TEXT,
-    manifest_snapshot TEXT DEFAULT ''
+    manifest_snapshot TEXT DEFAULT '',
+    project_id      TEXT NOT NULL DEFAULT ''
 );`
 	if _, err := cs.db.Exec(schema); err != nil {
 		return err
 	}
 	if err := cs.migrateSessionsAddOwner(); err != nil {
+		return err
+	}
+	if err := cs.migrateSessionsAddProjectID(); err != nil {
 		return err
 	}
 	// plugin_debug_access 审计表（设计 §6）：sample_bytes 等取证工具的访问留痕。
@@ -94,6 +98,22 @@ CREATE TABLE IF NOT EXISTS plugin_debug_access (
 	return nil
 }
 
+// migrateSessionsAddProjectID 为既有数据库补齐 sessions.project_id 列（默认 ''）。
+func (cs *ControlStore) migrateSessionsAddProjectID() error {
+	if hasColumn(cs.db, "sessions", "project_id") {
+		return nil
+	}
+	if _, err := cs.db.Exec(`ALTER TABLE sessions ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		if hasColumn(cs.db, "sessions", "project_id") {
+			slog.Info("sessions.project_id column added concurrently by another process; skipping migration")
+			return nil
+		}
+		return fmt.Errorf("migrate sessions.project_id: %w", err)
+	}
+	slog.Info("migrated control store: added sessions.project_id column (backfilled '' = no project)")
+	return nil
+}
+
 // migrateSessionsAddOwner 为既有数据库补齐 sessions.owner 列（默认 ''）。
 // 老库回填 '' = 匿名：已有会话全部归属匿名 owner，本地单机用法行为不变。
 func (cs *ControlStore) migrateSessionsAddOwner() error {
@@ -116,7 +136,12 @@ func (cs *ControlStore) migrateSessionsAddOwner() error {
 
 // hasOwnerColumn 复查 sessions 表是否已有 owner 列。
 func hasOwnerColumn(db *sql.DB) bool {
-	rows, err := db.Query("PRAGMA table_info(sessions)")
+	return hasColumn(db, "sessions", "owner")
+}
+
+// hasColumn 通过 PRAGMA table_info 判断某表是否已有指定列。
+func hasColumn(db *sql.DB, table, col string) bool {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return false
 	}
@@ -129,7 +154,7 @@ func hasOwnerColumn(db *sql.DB) bool {
 		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dfltValue, &pk); err != nil {
 			return false
 		}
-		if name == "owner" {
+		if name == col {
 			return true
 		}
 	}
@@ -157,10 +182,10 @@ func (cs *ControlStore) CreateSession(ctx context.Context, meta SessionMeta) err
 		stoppedAt = sql.NullTime{Time: *meta.StoppedAt, Valid: true}
 	}
 	_, err := cs.db.ExecContext(ctx, `
-INSERT INTO sessions(owner, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
+INSERT INTO sessions(owner, project_id, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
                      raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		meta.Owner, meta.SessionID, meta.StartedAt, stoppedAt, meta.Status, meta.Port, meta.Plugin,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		meta.Owner, meta.ProjectID, meta.SessionID, meta.StartedAt, stoppedAt, meta.Status, meta.Port, meta.Plugin,
 		meta.Interface, meta.PCAPFile, meta.RawPackets, meta.Events, meta.Metrics,
 		meta.DecodeErrors, meta.DurationSec, meta.DBPath, extraJSON, meta.ManifestSnapshot,
 	)
@@ -168,7 +193,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 }
 
 // sessionSelectCols 是 sessions 查询的列清单（scanSession 与之配套）。
-const sessionSelectCols = `owner, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
+const sessionSelectCols = `owner, project_id, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
 	raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot`
 
 // GetSession 查询单个会话元数据（不过滤 owner，行为与引入 owner 前一致）。
@@ -220,6 +245,31 @@ func (cs *ControlStore) ListSessionsFor(ctx context.Context, f SessionOwnerFilte
 	return result, rows.Err()
 }
 
+// ListSessionsForProject 列出某项目下的会话元数据，按 started_at 降序、按 owner 可见性过滤。
+func (cs *ControlStore) ListSessionsForProject(ctx context.Context, projectID string, f SessionOwnerFilter) ([]SessionMeta, error) {
+	query := `SELECT ` + sessionSelectCols + ` FROM sessions WHERE project_id=?`
+	args := []any{projectID}
+	if !f.AllOwners {
+		query += ` AND owner=?`
+		args = append(args, f.Owner)
+	}
+	query += ` ORDER BY started_at DESC`
+	rows, err := cs.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []SessionMeta
+	for rows.Next() {
+		meta, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *meta)
+	}
+	return result, rows.Err()
+}
+
 // UpdateSession 更新会话元数据（按 session_id 匹配）。
 func (cs *ControlStore) UpdateSession(ctx context.Context, meta SessionMeta) error {
 	var extraJSON sql.NullString
@@ -235,11 +285,11 @@ func (cs *ControlStore) UpdateSession(ctx context.Context, meta SessionMeta) err
 		stoppedAt = sql.NullTime{Time: *meta.StoppedAt, Valid: true}
 	}
 	res, err := cs.db.ExecContext(ctx, `
-UPDATE sessions SET started_at=?, stopped_at=?, status=?, port=?, plugin=?, interface=?, pcap_file=?,
+UPDATE sessions SET started_at=?, project_id=?, stopped_at=?, status=?, port=?, plugin=?, interface=?, pcap_file=?,
                     raw_packets=?, events=?, metrics=?, decode_errors=?, duration_sec=?, db_path=?, extra=?,
                     manifest_snapshot=?
 WHERE session_id=?`,
-		meta.StartedAt, stoppedAt, meta.Status, meta.Port, meta.Plugin,
+		meta.StartedAt, meta.ProjectID, stoppedAt, meta.Status, meta.Port, meta.Plugin,
 		meta.Interface, meta.PCAPFile, meta.RawPackets, meta.Events, meta.Metrics,
 		meta.DecodeErrors, meta.DurationSec, meta.DBPath, extraJSON,
 		meta.ManifestSnapshot, meta.SessionID,
@@ -286,7 +336,7 @@ func scanSession(s sessionScanner) (*SessionMeta, error) {
 	var stoppedAt sql.NullTime
 	var extraJSON sql.NullString
 	if err := s.Scan(
-		&meta.Owner, &meta.SessionID, &meta.StartedAt, &stoppedAt, &meta.Status, &meta.Port, &meta.Plugin,
+		&meta.Owner, &meta.ProjectID, &meta.SessionID, &meta.StartedAt, &stoppedAt, &meta.Status, &meta.Port, &meta.Plugin,
 		&meta.Interface, &meta.PCAPFile, &meta.RawPackets, &meta.Events, &meta.Metrics,
 		&meta.DecodeErrors, &meta.DurationSec, &meta.DBPath, &extraJSON,
 		&meta.ManifestSnapshot,

@@ -410,3 +410,29 @@ func TestControlStore_OwnerFilter(t *testing.T) {
 		t.Errorf("admin reading bob's session: %v", err)
 	}
 }
+
+func TestSessionProjectIDRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	cs, err := NewControlStore(filepath.Join(dir, "control.sqlite"))
+	if err != nil {
+		t.Fatalf("NewControlStore: %v", err)
+	}
+	defer cs.Close()
+	meta := SessionMeta{
+		ProjectID: "20260831_120000.000",
+		SessionID: "sess-1",
+		StartedAt: time.Now(),
+		Status:    "running",
+		DBPath:    filepath.Join(dir, "sess.db"),
+	}
+	if err := cs.CreateSession(context.Background(), meta); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	got, err := cs.GetSession(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.ProjectID != meta.ProjectID {
+		t.Fatalf("ProjectID roundtrip = %q, want %q", got.ProjectID, meta.ProjectID)
+	}
+}

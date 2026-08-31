@@ -1322,8 +1322,10 @@ type StartCaptureRequest struct {
 	Agent bool `protobuf:"varint,7,opt,name=agent,proto3" json:"agent,omitempty"`
 	// 调用方身份（gta-mcp 从 HTTP auth ctx 提取后透传，见 ListPluginsRequest）。
 	// pipeline 用它记录会话归属（ControlStore SessionMeta.Owner / captureTask.owner）。
-	Owner         string `protobuf:"bytes,8,opt,name=owner,proto3" json:"owner,omitempty"`
-	AllOwners     bool   `protobuf:"varint,9,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	Owner     string `protobuf:"bytes,8,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners bool   `protobuf:"varint,9,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	// 会话归属的项目（projects.id），可选。gta-mcp 从 HTTP 入参透传。
+	ProjectId     string `protobuf:"bytes,10,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1432,6 +1434,13 @@ func (x *StartCaptureRequest) GetAllOwners() bool {
 		return x.AllOwners
 	}
 	return false
+}
+
+func (x *StartCaptureRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
 }
 
 type isStartCaptureRequest_Source interface {
@@ -3337,7 +3346,7 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"5\n" +
 	"\x12MobileSourceConfig\x12\x1f\n" +
 	"\vlisten_addr\x18\x01 \x01(\tR\n" +
-	"listenAddr\"\xe2\x02\n" +
+	"listenAddr\"\x81\x03\n" +
 	"\x13StartCaptureRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -3349,7 +3358,10 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x05agent\x18\a \x01(\bR\x05agent\x12\x14\n" +
 	"\x05owner\x18\b \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
-	"all_owners\x18\t \x01(\bR\tallOwnersB\b\n" +
+	"all_owners\x18\t \x01(\bR\tallOwners\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\n" +
+	" \x01(\tR\tprojectIdB\b\n" +
 	"\x06source\"d\n" +
 	"\x14StartCaptureResponse\x12\x1d\n" +
 	"\n" +

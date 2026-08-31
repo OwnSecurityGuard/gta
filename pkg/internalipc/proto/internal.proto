@@ -224,6 +224,8 @@ message StartCaptureRequest {
   // pipeline 用它记录会话归属（ControlStore SessionMeta.Owner / captureTask.owner）。
   string owner = 8;
   bool all_owners = 9;
+  // 会话归属的项目（projects.id），可选。gta-mcp 从 HTTP 入参透传。
+  string project_id = 10;
 }
 
 message StartCaptureResponse {

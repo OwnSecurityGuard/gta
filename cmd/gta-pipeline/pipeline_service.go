@@ -173,6 +173,7 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 		PCAPFile:         pcapFile,
 		DBPath:           dbPath,
 		ManifestSnapshot: manifestSnapshot,
+		ProjectID:        req.ProjectID,
 	}); err != nil {
 		_ = st.Close()
 		return capturecontrol.StartSessionResult{}, fmt.Errorf("create session record: %w", err)

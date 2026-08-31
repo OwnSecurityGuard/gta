@@ -480,14 +480,16 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 	if source == "agent" {
 		agentSource = true
 	}
+	projectID := req.GetString("project_id", "")
 	listenAddr := req.GetString("listen_addr", "")
 	slog.Info("start_capture requested", "port", port, "plugin", pluginName, "pcap_file", pcapFile, "source", source, "listen_addr", listenAddr)
 
 	// 构造 gRPC request
 	grpcReq := &pb.StartCaptureRequest{
-		Plugin: pluginName,
-		Port:   int32(port),
-		Agent:  agentSource,
+		Plugin:    pluginName,
+		Port:      int32(port),
+		Agent:     agentSource,
+		ProjectId: projectID,
 	}
 	// 透传调用方身份：pipeline 记录会话归属（SessionMeta.Owner）并做 owner 作用域插件路由。
 	if p, ok := auth.PrincipalFrom(ctx); ok {
@@ -556,6 +558,7 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 		"db_path":     resp.GetDbPath(),
 		"interface":   m.iface,
 		"listen_addr": listenAddr,
+		"project_id":  projectID,
 	}), nil
 }
 

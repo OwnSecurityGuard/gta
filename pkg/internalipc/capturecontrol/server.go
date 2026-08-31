@@ -163,6 +163,8 @@ type StartSessionRequest struct {
 	// Agent 为 true 时会话订阅 agent capture source（可与其他 source 组合，
 	// 单独为 true 表示纯 agent 会话）。
 	Agent bool
+	// ProjectID 会话归属的项目（projects.id），可选，透传自 proto StartCaptureRequest.project_id。
+	ProjectID string
 }
 
 // LiveConfig 对应 proto PcapLiveConfig。
@@ -267,6 +269,7 @@ func (s *Server) StartCapture(ctx context.Context, req *pb.StartCaptureRequest) 
 		Plugin:    req.GetPlugin(),
 		Port:      int(req.GetPort()),
 		Agent:     req.GetAgent(),
+		ProjectID: req.GetProjectId(),
 	}
 	switch src := req.GetSource().(type) {
 	case *pb.StartCaptureRequest_Live:

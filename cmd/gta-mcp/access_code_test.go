@@ -51,7 +51,7 @@ func TestAccessCodeRoundTrip(t *testing.T) {
 
 func TestNewAccessCodeFormat(t *testing.T) {
 	c := newAccessCode()
-	if len(c) != 11 { // "GTA-XXXX-XXXX"
+	if len(c) != 13 { // "GTA-XXXX-XXXX"
 		t.Fatalf("expected GTA-XXXX-XXXX, got %q", c)
 	}
 	if !strings.HasPrefix(c, "GTA-") {

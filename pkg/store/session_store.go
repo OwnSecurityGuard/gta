@@ -326,6 +326,21 @@ UPDATE sessions SET status='stopped', stopped_at=? WHERE status='running'`, stop
 	return res.RowsAffected()
 }
 
+// SetSessionProject 将会话绑定到某项目（或传空串清空绑定）。
+// 会话不存在时返回错误。
+func (cs *ControlStore) SetSessionProject(ctx context.Context, sessionID, projectID string) error {
+	res, err := cs.db.ExecContext(ctx,
+		`UPDATE sessions SET project_id=? WHERE session_id=?`, projectID, sessionID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	return nil
+}
+
 // sessionScanner 抽象 sql.Row 和 sql.Rows 的 Scan 方法。
 type sessionScanner interface {
 	Scan(dest ...any) error

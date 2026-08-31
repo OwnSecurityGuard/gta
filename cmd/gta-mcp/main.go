@@ -399,6 +399,13 @@ func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mc
 		return nil, fmt.Errorf("open control store: %w", err)
 	}
 
+	// SQLite-backed 项目存储（取代旧的按 owner 分片 JSON 文件）。
+	projects := newProjectStoreDB(controlStore.DB())
+	if err := projects.Init(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("init project store: %w", err)
+	}
+
 	m := &mcpCapture{
 		iface:          iface,
 		pluginsDir:     pluginsDir,
@@ -406,7 +413,7 @@ func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mc
 		mcpServer:      mcpServer,
 		sessionMgr:     newSessionManager(workDir),
 		runRegistry:    runRegistry,
-		projects:       newProjectStore(workDir),
+		projects:       projects,
 		pipelineClient: client,
 		grpcConn:       conn,
 		pdClient:       pdClient,
@@ -2951,21 +2958,59 @@ func main() {
 	), capture.handleCreateProject)
 
 	s.AddTool(mcp.NewTool("list_projects",
-		mcp.WithDescription("List capture projects visible to the current user (admin sees all owners' projects; normal users only see their own)."),
+		mcp.WithDescription("List capture projects visible to the current user (admin sees all owners' projects; normal users only see their own and projects they are a member of)."),
 	), capture.handleListProjects)
 
+	s.AddTool(mcp.NewTool("get_project",
+		mcp.WithDescription("Get a single capture project with its metadata and recent sessions."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Project ID")),
+	), capture.handleGetProject)
+
 	s.AddTool(mcp.NewTool("update_project",
-		mcp.WithDescription("Update a capture project's name / default plugin / default port. Only explicitly supplied fields are changed."),
+		mcp.WithDescription("Update a capture project's name / description / game / default plugin / default port. Only explicitly supplied fields are changed. Requires project admin."),
 		mcp.WithString("id", mcp.Required(), mcp.Description("Project ID")),
 		mcp.WithString("name", mcp.Description("New project name")),
-		mcp.WithString("plugin", mcp.Description("New default decode plugin name")),
-		mcp.WithNumber("port", mcp.Description("New default capture port")),
+		mcp.WithString("description", mcp.Description("New project description")),
+		mcp.WithString("game", mcp.Description("New project game title")),
+		mcp.WithString("default_plugin", mcp.Description("New default decode plugin name")),
+		mcp.WithNumber("default_port", mcp.Description("New default capture port")),
 	), capture.handleUpdateProject)
 
 	s.AddTool(mcp.NewTool("delete_project",
-		mcp.WithDescription("Delete a capture project."),
+		mcp.WithDescription("Delete a capture project. Requires project admin."),
 		mcp.WithString("id", mcp.Required(), mcp.Description("Project ID to delete")),
 	), capture.handleDeleteProject)
+
+	s.AddTool(mcp.NewTool("add_project_member",
+		mcp.WithDescription("Add or replace a member of a project. Requires project admin."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("user", mcp.Required(), mcp.Description("User (owner) to add as member")),
+		mcp.WithString("role", mcp.Required(), mcp.Description("Role: 'admin' or 'member'")),
+	), capture.handleAddProjectMember)
+
+	s.AddTool(mcp.NewTool("remove_project_member",
+		mcp.WithDescription("Remove a member from a project. Cannot remove the project creator. Requires project admin."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("user", mcp.Required(), mcp.Description("User (owner) to remove")),
+	), capture.handleRemoveProjectMember)
+
+	s.AddTool(mcp.NewTool("set_project_plugins",
+		mcp.WithDescription("Replace the project's associated plugin list. plugins is a JSON string array of [{\"id\",\"name\"}]. Requires project admin."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("plugins", mcp.Required(), mcp.Description("JSON string array of plugin entries")),
+	), capture.handleSetProjectPlugins)
+
+	s.AddTool(mcp.NewTool("set_project_rules",
+		mcp.WithDescription("Replace the project's associated rule list. rules is a JSON string array of [{\"id\",\"name\"}]. Requires project admin."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("rules", mcp.Required(), mcp.Description("JSON string array of rule entries")),
+	), capture.handleSetProjectRules)
+
+	s.AddTool(mcp.NewTool("set_session_project",
+		mcp.WithDescription("Bind a session to a project (screen project_id to clear the binding). Requires the session owner or a project admin."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID")),
+		mcp.WithString("project_id", mcp.Description("Project ID to bind; empty to clear")),
+	), capture.handleSetSessionProject)
 
 	// Script management tools removed: the Python script sandbox (save_script /
 	// list_scripts / run_script / delete_script) has been deleted. Arbitrary

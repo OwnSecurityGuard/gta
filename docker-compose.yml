@@ -71,6 +71,10 @@ services:
       - "${GTA_MCP_PORT:-8781}:8781" # MCP HTTP/SSE + Web UI（浏览器直接访问 http://<host>:8781）
     volumes:
       - gta-data:/data
+      # 远程 agent 预置产物（只读）：docker build 前先 `make build-agents` 在本机预置，
+      # 挂载到镜像默认的 GTA_AGENT_BIN_DIR=/opt/gta/agents（见 Dockerfile）。
+      # 「接入成员」页按此目录扫出的平台下发；缺产物平台会自动标为不可用，不影响其余功能。
+      - ./build/agents:/opt/gta/agents:ro
 
 volumes:
   gta-data:

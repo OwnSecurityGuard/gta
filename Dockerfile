@@ -8,11 +8,13 @@
 #
 # Web UI：浏览器直接访问 http://<host>:8781（静态资源免鉴权，API 语义不变）。
 #
-# 远程 Agent 即时编译（方案一）：gta-mcp 的 /download/agent 会在服务端用
-#   go build -tags "embedded pcap" 现场编译 gta-agent 下载产物。为此 runtime 镜像
-#   额外携带了 Go 工具链、Go 模块缓存、gta-agent 源码（GTA_AGENT_SRC_DIR），以及
-#   cgo 编译所需的 gcc + libpcap-dev。源码目录对运行用户可写，以便写入/清理
-#   config.embedded.json（go:embed 配置）。
+# 远程 Agent 预置二进制：gta-mcp 的 /download/agent 只下发预置产物（见
+#   cmd/gta-mcp/agent_download.go 的 agentBinDir/availableAgentPlatforms），不再现场
+#   编译。全平台 cgo/pcap 产物无法在单一 builder 内交叉编译，因此镜像默认不烧入，
+#   由 docker-compose 把宿主 `./build/agents`（make build-agents 产出）只读挂载到
+#   GTA_AGENT_BIN_DIR 指向的 /opt/gta/agents。缺产物的下载平台会被如实标为不可用。
+#   runtime 保留 Go 工具链是为 gta-mcp 内嵌 Developer Plane 现场编译插件
+#   （pkg/plugindev/build.go 的 build_plugin），与 agent 无关。
 #
 # pcap 说明：pipeline 仍可在服务端本地开 pcap 源（实时网卡抓包 / pcap 文件源），
 # 因此镜像带 pcap（cgo）编译；agent（gta-agent）推流入口是纯 Go gRPC，服务端
@@ -96,9 +98,10 @@ RUN CGO_ENABLED=1 \
 FROM debian:bookworm-slim
 
 # libpcap0.8：gopacket/pcap（cgo）的运行时共享库；ca-certificates：出站 TLS。
-# gcc + libc6-dev + libpcap-dev：gta-mcp 服务端即时编译 agent 下载产物（-tags pcap 走 cgo）。
+# 不再安装 gcc/libpcap-dev：原为远程 agent 现场编译（-tags pcap 走 cgo）所需，
+# 现 agent 改走预置二进制；build_plugin 编译插件是纯 Go，亦无需 gcc。
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends libpcap0.8 ca-certificates gcc libc6-dev libpcap-dev \
+	&& apt-get install -y --no-install-recommends libpcap0.8 ca-certificates \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& useradd --system --create-home --home-dir /data gta \
 	# 预建插件目录：进程只在 scaffold 时懒创建它，首次 list/build 前不存在会让
@@ -110,26 +113,32 @@ RUN apt-get update \
 COPY --from=builder /out/gta-pipeline /usr/local/bin/gta-pipeline
 COPY --from=builder /out/gta-mcp /usr/local/bin/gta-mcp
 
-# == 远程 Agent 即时编译（方案一）：把 Go 工具链 + 模块缓存 + gta-agent 源码带进 runtime ==
-# Go 工具链与模块缓存复用 builder（golang 镜像默认 GOPATH=/go，mod 缓存位于 /go/pkg/mod）。
+# == Developer Plane 插件编译：gta-mcp 内嵌的 PluginDev 会现场 `go build` 插件
+#    （pkg/plugindev/build.go），故 runtime 保留 Go 工具链 + 模块缓存；构建缓存落
+#    /data（gta 可写 HOME）。远程 Agent 已改「预置二进制」，不再现场编译，因此不
+#    携带 gta-agent 源码、也不装 gcc/libpcap-dev（见上方 apt 安装）。
 COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder /go/pkg/mod /go/pkg/mod
-# gta-agent 源码（repo 根含 go.mod）；命令以 <src>/cmd/gta-agent 为 srcDir，
-# 需要在 srcDir 内写/删 config.embedded.json，故整个源码树归 gta 所有。
-COPY --from=builder /src /opt/gta-agent/src
 
-ENV GTA_AGENT_SRC_DIR=/opt/gta-agent/src/cmd/gta-agent \
-	PATH=/usr/local/go/bin:${PATH} \
-	# 本地模块缓存：复用镜像内置缓存，避免下载即编译时再访问网络
+ENV PATH=/usr/local/go/bin:${PATH} \
+	# 本地模块缓存：复用镜像内置缓存，避免插件编译时再访问网络
 	GOPATH=/go \
 	GOMODCACHE=/go/pkg/mod \
-	# 构建缓存落在数据卷内（gta 可写 HOME）；GOTOOLCHAIN=local 防止自动下载更高版本 Go
+	# Go 构建缓存落数据卷（gta 可写 HOME）；GOTOOLCHAIN=local 防止自动下载更高版本 Go
 	GOCACHE=/data/.cache/go-build \
 	GOTOOLCHAIN=local \
 	GOPROXY=https://goproxy.cn,direct \
-	GOSUMDB=sum.golang.google.cn
+	GOSUMDB=sum.golang.google.cn \
+	# 远程 agent 预置产物目录（见下方 mkdir）：agentBinDir() 优先读此变量，否则会
+	# 回退到 WORKDIR(/data) 下的 ./build/agents —— 与 docker-compose 挂载点不一致。
+	GTA_AGENT_BIN_DIR=/opt/gta/agents
 
-RUN chown -R gta:gta /go /opt/gta-agent/src
+# 远程 agent 预置产物目录：镜像默认不烧入（全平台 cgo/pcap 产物无法在单一 builder
+# 交叉编译），由 docker-compose 把宿主 `./build/agents` 只读挂载到这里。该路径即
+# cmd/gta-mcp/agentBinDir 的 GTA_AGENT_BIN_DIR 来源，agent 下载按此目录扫可用平台。
+RUN mkdir -p /opt/gta/agents && chown gta:gta /opt/gta/agents
+
+RUN chown -R gta:gta /go
 
 # 统一配置（T10）：工作目录落 /data（卷挂载点），所有地址可用 GTA_* 环境变量覆盖。
 # WORKDIR 一并设为 /data：任何相对路径（含 flag 默认值 "." / "plugins"）都锚在数据卷上，

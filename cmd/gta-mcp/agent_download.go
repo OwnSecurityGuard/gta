@@ -1,9 +1,9 @@
 // agent_download.go — 远程 agent 下载端点与选项查询。
 //
-// 让不在同一网络环境的成员也能抓包上报：用户在前端指定「抓包端口 + 解码插件」，
-// 服务端为归属当前用户打开一个 agent 接收会话，把回连地址 / token / 会话 id /
-// 端口 BPF 烧进二进制（go:embed），再服务端即时编译（-tags "embedded pcap"）下发。
-// 终端用户拿到产物直接运行，无需任何命令行参数。
+// 让不在同一网络环境的成员也能抓包上报：用户在前端选择目标平台 + 抓包端口，服务端
+// 打开一个 agent 接收会话，再把平台对应的**预置二进制**（见 Makefile `build-agents`，
+// 产物位于 build/agents/，可由 GTA_AGENT_BIN_DIR 覆盖）连同 config.embedded.json
+// 打进 zip 下发。终端用户拿到产物直接运行，无需任何命令行参数。不再服务端现场编译。
 package main
 
 import (

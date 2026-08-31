@@ -5,6 +5,10 @@
 go.work
 go.work.sum
 bin/
+# 远程 agent 预置产物不进构建上下文：镜像不烧入，由 docker-compose 把宿主
+# `./build/agents` 只读挂载到 GTA_AGENT_BIN_DIR（见 Dockerfile）。保持镜像构建
+# 上下文不含宿主编译的多平台二进制（避免体积 + 陈旧产物进入 builder 层）。
+build/agents/
 *.exe
 *.dll
 *.so

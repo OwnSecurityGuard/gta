@@ -81,6 +81,33 @@ HTTP 路由：`/sse`、`/message`、`/mcp`、`/events/plugins` 均在鉴权链�
 
 **owner 隔离**：每个 token 对应一个 owner，会话与插件按 owner 作用域——bob 看不到/管不了 alice 的会话与插件；带 `:admin` 的 owner 可以跨 owner 操作。MCP 工具（如 `start_capture`）的调用身份取自 HTTP 请求的 `Authorization: Bearer`，无需额外配置。
 
+### 2.1 项目（Project）组织单元
+
+「项目 Project」是一等组织单元，在 owner 之上提供一层**团队级归组**：项目持有 Game / 成员（Members）/ 解码插件（Decoder Plugins）/ 规则（Rules）/ 会话（Sessions），会话可归属到某个项目，避免多用户各自裸奔一堆 `session_xxx`。
+
+项目相关接口：
+
+| MCP 工具 | 作用 |
+|---|---|
+| `create_project` / `list_projects` / `get_project` / `update_project` / `delete_project` | 项目 CRUD，跨 owner 可见（见下） |
+| `add_project_member` / `remove_project_member` | 项目成员增删；角色仅 `admin`/`member` 两档，不做复杂 RBAC |
+| `set_project_plugins` / `set_project_rules` | 项目持有的插件/规则条目（关联数据，非独立管理后台） |
+| `set_session_project` | 把既有会话绑定到项目（或空串解除），一键 `start_capture` 也可自动带 `project_id` |
+
+可见性与权限：
+
+- **可见性**：项目对 `created_by`、成员列表内的人、以及全局 `:admin` 可见（持久化在 `control.sqlite` 的 `projects` 表，跨 owner 共享）。
+- **管理权**：仅项目 `created_by` 或全局 `:admin` 可改/删项目、管理成员与插件/规则（`member` 只读可看、可抓包）。
+- **一手体验**：Web 首页「我的项目」展示项目在线/离线状态与最近会话；从项目发起抓包自动携带 `project_id`，会话持久化到 `sessions.project_id`。
+
+```bash
+# 通过 MCP 创建项目并加成员
+PROJECT_ID=$(mcp call create_project '{"name":"王者荣耀测试服","game":"王者荣耀"}')
+mcp call add_project_member "{\"project_id\":\"$PROJECT_ID\",\"user\":\"bob\",\"role\":\"member\"}"
+mcp call start_capture '{"source":"agent","project_id":"'$PROJECT_ID'"}'   # 自动归属
+# 校验归属：select session_id, project_id from sessions; （example）
+```
+
 **断线重连**：gta-agent 推流断线后按指数退避自动重连；插件进程崩溃由 gta-agent 按退避策略重启。服务器重启后 `restart: unless-stopped` 会自动拉起容器。
 
 **监听地址回写**：各 gRPC/HTTP 服务实际监听地址会回写到 `<workdir>/addr.<name>.json`（如 `addr.mcp.json`、`addr.control.json`），方便多实例/动态端口场景读取。

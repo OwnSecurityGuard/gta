@@ -386,6 +386,11 @@ func (m *mcpCapture) handleSetSessionProject(ctx context.Context, req mcp.CallTo
 		return nil, fmt.Errorf("set session project: %w", err)
 	}
 	// 同步到 filesystem metadata.json，供 list_all_sessions 暴露 project_id（在线/离线派生）。
+	// 测试等场景 sessionMgr 可能为 nil，避免调用 nil 指针 panic。
+	if m.sessionMgr == nil {
+		slog.Info("session project set (no sessionMgr)", "session_id", sessionID, "project_id", projectID)
+		return successResult(map[string]any{"session_id": sessionID, "project_id": projectID}), nil
+	}
 	if meta, err := m.sessionMgr.readSessionMetadata(sessionID, owner); err == nil && meta != nil {
 		meta.ProjectID = projectID
 		if err := m.sessionMgr.writeSessionMetadata(sessionID, *meta); err != nil {

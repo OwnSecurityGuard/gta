@@ -14,6 +14,18 @@ export interface AgentPlatform {
   filename: string;
 }
 
+/** 已注册插件归类后的友善呈现项（供 StartCaptureDialog 卡片选择使用）。 */
+export interface ParserOption {
+  /** 归组品牌：godot | unity | http | custom */
+  group: "godot" | "unity" | "http" | "custom";
+  /** 展示名，如 "Godot 世界解码器" */
+  label: string;
+  /** 实际插件名（传给 start_capture / agent 的 plugin 参数） */
+  plugin: string;
+  /** 在线状态（离线置灰） */
+  online: boolean;
+}
+
 /** get_agent_download_options 返回：下载 Agent 页面需要的服务端信息 + 可下载平台矩阵（扁平结构 + ok）。 */
 export interface GetAgentDownloadOptionsResult {
   ok: boolean;

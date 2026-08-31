@@ -10,12 +10,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +54,8 @@ func main() {
 		batchInterval time.Duration
 		snapLen       int
 		promisc       bool
+		accessCode    string
+		accessHost    string
 	)
 	fs := flag.NewFlagSet("gta-agent", flag.ExitOnError)
 	fs.StringVar(&server, "server", "", "pipeline 服务端基址 host 或 host:port（port 为 registry 端口，ingest 自动取 port+1）")
@@ -66,6 +70,8 @@ func main() {
 	fs.DurationVar(&batchInterval, "batch-interval", 200*time.Millisecond, "推流批时间阈值（低流量兜底刷批间隔）")
 	fs.IntVar(&snapLen, "snaplen", 1600, "pcap snaplen")
 	fs.BoolVar(&promisc, "promisc", true, "混杂模式")
+	fs.StringVar(&accessCode, "code", "", "启动码 GTA-XXXX-XXXX：无 server/token 时用它自动领取配置并回连")
+	fs.StringVar(&accessHost, "mcp", "127.0.0.1:8781", "服务端 MCP HTTP 地址（启动码领取用）")
 	showVersion := fs.Bool("version", false, "print version and exit")
 	_ = fs.Parse(os.Args[1:])
 	if *showVersion {
@@ -112,9 +118,58 @@ func main() {
 		}
 	}
 
+	// 启动码：显式传 --code，或既无 server/token 又无固化配置（首启引导）时，
+	// 用码自动领取 server/token/session 等作为默认配置。领取到的配置优先级最
+	// 低于命令行参数（命令行以空串判断覆盖），避免显式传入被启动码覆盖。
+	hasClaimed := false
+	var bindFromClaim []string
+	if accessCode != "" || (server == "" && token == "" && !hasEmbedded) {
+		if accessCode == "" {
+			// 交互式：stdin 读一行（首启引导）。非 TTY 下读 os.Stdin。
+			fmt.Print("请输入启动码 GTA-XXXX-XXXX: ")
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			accessCode = strings.ToUpper(strings.TrimSpace(line))
+		}
+		accessCode = strings.ToUpper(strings.TrimSpace(accessCode))
+		if accessCode == "" {
+			slog.Error("启动码不能为空；用 --code GTA-XXXX-XXXX 或输入启动码")
+			os.Exit(1)
+		}
+		if !strings.HasPrefix(accessCode, "GTA-") {
+			slog.Error("启动码格式应为 GTA-XXXX-XXXX", "code", accessCode)
+			os.Exit(1)
+		}
+		claimed, err := claimAccessCode(context.Background(), accessHost, accessCode)
+		if err != nil {
+			slog.Error("领取启动码失败（请确认 --mcp <host:8781> 可达且码有效）", "error", err)
+			os.Exit(1)
+		}
+		if server == "" {
+			server = claimed.Server
+		}
+		if registryAddr == "" {
+			registryAddr = claimed.RegistryAddr
+		}
+		if ingestAddr == "" {
+			ingestAddr = claimed.IngestAddr
+		}
+		if token == "" {
+			token = claimed.Token
+		}
+		if sessionID == "" {
+			sessionID = claimed.SessionID
+		}
+		if bpf == "" {
+			bpf = claimed.BPF
+		}
+		bindFromClaim = claimed.BindPlugins
+		hasClaimed = true
+		slog.Info("access code claimed", "code", accessCode, "session", claimed.SessionID)
+	}
+
 	// 参数校验：非法值 fail-fast，避免静默错误行为。
 	// 固化模式下 session 自带、网卡可自动探测，故不再强制 --iface。
-	if sessionID != "" && iface == "" && !hasEmbedded {
+	if sessionID != "" && iface == "" && !hasEmbedded && !hasClaimed {
 		slog.Error("--iface is required when --session is set (capture target)")
 		os.Exit(1)
 	}
@@ -148,9 +203,12 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// 1) 插件托管（无需抓包即可工作）。固化模式下仅托管白名单内的插件。
+	// 1) 插件托管（无需抓包即可工作）。固化/启动码模式下仅托管白名单内的插件。
 	var bind []string
-	if hasEmbedded && embedded != nil {
+	switch {
+	case hasClaimed:
+		bind = bindFromClaim
+	case hasEmbedded && embedded != nil:
 		bind = embedded.BindPlugins
 	}
 	sup := &pluginSupervisor{dir: pluginDir, registryAddr: registry, token: token, bind: bind}

@@ -213,9 +213,54 @@ func buildAgentZip(binPath string, cfgJSON []byte) ([]byte, error) {
 //
 // 平台取「预置产物」下发（见 availableAgentPlatforms），不再服务端即时编译；
 // 会话在下载时创建，session_id 通过响应头 X-Session-Id 回传，供前端自动选中。
+// serveAgentBinaryByPlatform 按平台下发预置二进制 zip（占位 config.embedded.json），
+// 用于启动码接入：会话已由 GET /access/claim 建立，此处只给二进制，配置由调用方脚本
+// 把 claim 返回值写入 config.embedded.json。返回 true 表示已写出响应。
+func (m *mcpCapture) serveAgentBinaryByPlatform(w http.ResponseWriter, platform string) bool {
+	binDir, _ := m.agentBinDir()
+	var binPath string
+	for _, p := range m.availableAgentPlatforms() {
+		if p.OS+"/"+p.Arch != platform {
+			continue
+		}
+		if !p.Available {
+			http.Error(w, "platform "+platform+" is not available; run `make build-agents` on the server to prebuild it", http.StatusNotFound)
+			return true
+		}
+		binPath = filepath.Join(binDir, p.Filename)
+		break
+	}
+	if binPath == "" {
+		http.Error(w, "unsupported platform: "+platform, http.StatusBadRequest)
+		return true
+	}
+	zipData, err := buildAgentZip(binPath, []byte("{}"))
+	if err != nil {
+		http.Error(w, "package agent zip failed: "+err.Error(), http.StatusInternalServerError)
+		return true
+	}
+	zipName := fmt.Sprintf("gta-agent-%s-%s.zip", platform, time.Now().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+zipName+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(zipData); err != nil {
+		slog.Warn("stream agent zip failed (code mode)", "platform", platform, "error", err)
+	}
+	slog.Info("agent binary served (code mode)", "platform", platform)
+	return true
+}
+
 func (m *mcpCapture) handleAgentDownload(w http.ResponseWriter, r *http.Request) {
 	owner := auth.OwnerFrom(r.Context())
 	q := r.URL.Query()
+
+	// 启动码接入：只凭 code + platform 下发预置二进制；会话已由 claim 建立，
+	// 不复用下方需要 port/server 的普通下载逻辑（避免重复开会话）。
+	if code := strings.TrimSpace(q.Get("code")); code != "" {
+		m.serveAgentBinaryByPlatform(w, strings.TrimSpace(q.Get("platform")))
+		return
+	}
 
 	port, err := strconv.Atoi(strings.TrimSpace(q.Get("port")))
 	if err != nil || port <= 0 || port > 65535 {

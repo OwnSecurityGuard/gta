@@ -14,7 +14,7 @@ import {
   Dot,
   FolderGit2,
 } from "lucide-react";
-import { useSessions, useProjects, useCreateProject, useDeleteProject, useProject } from "@/hooks/use-mcp";
+import { useSessions, useProjects, useCreateProject, useDeleteProject } from "@/hooks/use-mcp";
 import type { ProjectInfo } from "@/types/project";
 import { toast } from "@/components/ui/toast";
 
@@ -203,11 +203,10 @@ export function MyCapturePage({
               </p>
             ) : (
               projects.map((p) => {
-                // 会话元数据暂不含 project_id，从该项目的 get_project 结果取最近会话做派生状态。
-                const { data: projData } = useProject(p.id);
-                const recent = projData?.recent_sessions ?? projData?.project?.recent_sessions ?? [];
-                const running = recent.some((s) => s.status === "running");
-                const latest = recent[0];
+                // 从已加载的 sessions 中按 project_id 派生在线/离线状态，避免在循环里调用 Hook。
+                const list = sessions.filter((s) => s.session_id && s.project_id === p.id);
+                const running = list.some((s) => s.status === "running");
+                const latest = list[0];
                 const latestText = running ? "抓包中" : latest ? "已停止" : "暂无会话";
                 return (
                   <div

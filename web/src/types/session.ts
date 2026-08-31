@@ -2,6 +2,8 @@
 export interface SessionInfo {
   /** 会话归属者（团队模式下的用户名；匿名/本地单机为空） */
   owner?: string;
+  /** 会话所属项目（projects.id），未归属则为空 */
+  project_id?: string;
   session_id: string;
   started_at: string;
   stopped_at: string;

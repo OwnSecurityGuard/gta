@@ -46,7 +46,10 @@ import (
 type sessionMetadata struct {
 	// Owner 是会话归属者（pkg/auth 的 Principal.Owner）。
 	// 空串表示匿名（本地单机用法），落到 current.json；非空落到 current.<owner>.json。
-	Owner        string                 `json:"owner,omitempty"`
+	Owner string `json:"owner,omitempty"`
+	// ProjectID 是会话所属的项目（projects.id）。空串表示未归属任何项目。
+	// 持久化到 metadata.json，供 list_all_sessions 暴露给前端派生在线/离线状态。
+	ProjectID    string                 `json:"project_id,omitempty"`
 	SessionID    string                 `json:"session_id"`
 	StartedAt    string                 `json:"started_at"`
 	StoppedAt    string                 `json:"stopped_at,omitempty"`
@@ -539,6 +542,7 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 	// 也能通过 pipeline 返回的绝对 db_path 定位到正确的会话库。
 	meta := sessionMetadata{
 		Owner:      auth.OwnerFrom(ctx),
+		ProjectID:  projectID,
 		SessionID:  resp.GetSessionId(),
 		StartedAt:  time.Now().Format(time.RFC3339),
 		Status:     "running",
@@ -2276,6 +2280,7 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 		out = append(out, map[string]any{
 			"session_id":    sess.SessionID,
 			"owner":         sess.Owner,
+			"project_id":    sess.ProjectID,
 			"started_at":    sess.StartedAt,
 			"stopped_at":    sess.StoppedAt,
 			"status":        status,

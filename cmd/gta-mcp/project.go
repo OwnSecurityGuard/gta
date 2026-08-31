@@ -131,7 +131,7 @@ func (m *mcpCapture) handleGetProject(ctx context.Context, req mcp.CallToolReque
 		sessions = []store.SessionMeta{}
 	}
 	return successResult(map[string]any{
-		"project":        *p,
+		"project":         *p,
 		"recent_sessions": sessions,
 	}), nil
 }
@@ -384,6 +384,14 @@ func (m *mcpCapture) handleSetSessionProject(ctx context.Context, req mcp.CallTo
 	}
 	if err := m.controlStore.SetSessionProject(ctx, sessionID, projectID); err != nil {
 		return nil, fmt.Errorf("set session project: %w", err)
+	}
+	// 同步到 filesystem metadata.json，供 list_all_sessions 暴露 project_id（在线/离线派生）。
+	if meta, err := m.sessionMgr.readSessionMetadata(sessionID, owner); err == nil && meta != nil {
+		meta.ProjectID = projectID
+		if err := m.sessionMgr.writeSessionMetadata(sessionID, *meta); err != nil {
+			slog.Warn("set_session_project: persist metadata.json failed", "session_id", sessionID, "error", err)
+		}
+		m.sessionMgr.writeCurrent(*meta)
 	}
 	slog.Info("session project set", "session_id", sessionID, "project_id", projectID)
 	return successResult(map[string]any{"session_id": sessionID, "project_id": projectID}), nil

@@ -7,8 +7,10 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"gta/pkg/auth"
+	pb "gta/pkg/internalipc/proto"
 )
 
 const accessCodeSchema = `
@@ -209,4 +212,152 @@ func loadTokensByOwner() map[string]string {
 		}
 	}
 	return m
+}
+
+// handleAccessClaim 是 agent 首启时调用的未鉴权端点：携带启动码返回完整配置
+// （server/registry/ingest/token/session/plugin 等），复用手动 download 的开会话
+// 与组 sidecar 配置逻辑，但不打包 zip，改 JSON 返回。它只凭 code 存在性+未过期
+// 即可工作；码是一次性+24h 限时，泄露面被限制在有效期内。
+func (m *mcpCapture) handleAccessClaim(w http.ResponseWriter, r *http.Request) {
+	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
+	if code == "" {
+		http.Error(w, "code is required", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	rec, err := m.accessCodes.Get(ctx, code)
+	if err != nil || rec == nil {
+		http.Error(w, "invalid access code", http.StatusNotFound)
+		return
+	}
+	if time.Now().After(rec.ExpiresAt) {
+		http.Error(w, "access code expired", http.StatusGone)
+		return
+	}
+
+	// 复用 download 的开会话逻辑：从该 code 的 recipe 开 agent 接收会话。
+	if m.pipelineClient == nil {
+		http.Error(w, "pipeline is not reachable", http.StatusServiceUnavailable)
+		return
+	}
+	owner := rec.Owner
+	grpcReq := &pb.StartCaptureRequest{Plugin: rec.Plugin, Agent: true, Owner: owner}
+	if rec.ProjectID != "" {
+		grpcReq.ProjectId = rec.ProjectID
+	}
+	gctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	resp, err := m.pipelineClient.StartCapture(gctx, grpcReq)
+	if err != nil {
+		http.Error(w, "open receive session failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	sessionID := resp.GetSessionId()
+
+	// token：取该 owner 的真实静态凭证（从 GTA_AUTH_TOKENS 反查），烧进返回给 agent；
+	// 匿名部署留空，agent 以 owner=local 回连。
+	registry, ingest := m.registryIngest(ctx)
+	token := m.ownerSecret(owner)
+	if rec.Server != "" {
+		registry = rec.Server
+	}
+	cfg := map[string]any{
+		"server":       registry,
+		"ingest_addr":  ingest,
+		"token":        token,
+		"session":      sessionID,
+		"bpf":          accessCodeBPF(rec.Port),
+		"plugin_names": accessCodePlugins(rec.Plugin),
+	}
+
+	if err := m.accessCodes.MarkClaimed(ctx, code, sessionID); err != nil {
+		slog.Warn("mark access code claimed failed", "code", code, "error", err)
+	}
+	// 同步会话 metadata（供前端派生在线/离线与项目归属）。
+	meta := sessionMetadata{
+		Owner:     owner,
+		SessionID: sessionID,
+		StartedAt: time.Now().Format(time.RFC3339),
+		Status:    "running",
+		Port:      rec.Port,
+		Plugin:    rec.Plugin,
+		Source:    "agent",
+		DBPath:    resp.GetDbPath(),
+		ProjectID: rec.ProjectID,
+	}
+	if m.sessionMgr != nil {
+		if err := m.sessionMgr.writeSessionMetadata(sessionID, meta); err != nil {
+			slog.Warn("write session metadata in claim failed", "error", err)
+		}
+		m.sessionMgr.writeCurrent(meta)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Session-Id", sessionID)
+	_ = json.NewEncoder(w).Encode(cfg)
+	slog.Info("access code claimed", "owner", owner, "code", code, "session", sessionID)
+}
+
+func accessCodeBPF(port int) string {
+	if port <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("tcp port %d or udp port %d", port, port)
+}
+
+func accessCodePlugins(plugin string) []string {
+	if plugin == "" {
+		return []string{}
+	}
+	return []string{plugin}
+}
+
+// baseURL 从请求回推 scheme+host，供 setup.sh 等脚本拼接 download/claim 地址。
+func (m *mcpCapture) baseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+func linuxAmd64Platform() string { return "linux/amd64" }
+
+// handleSetupScript 返回 `curl ... | bash` 的一键脚本：先用启动码调 /access/claim 拿
+// sidecar 配置（含 token/session），再带 Bearer 下载本平台 agent zip、解压并把配置写入
+// config.embedded.json，随后启动 gta-agent。code 由调用方拼在 URL。
+func (m *mcpCapture) handleSetupScript(w http.ResponseWriter, r *http.Request) {
+	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
+	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
+	if code == "" {
+		http.Error(w, "code is required", http.StatusBadRequest)
+		return
+	}
+	if platform == "" {
+		platform = linuxAmd64Platform()
+	}
+	base := m.baseURL(r)
+	script := fmt.Sprintf(`#!/usr/bin/env bash
+set -euo pipefail
+CODE="%[1]s"
+PLATFORM="%[2]s"
+BIN_DIR="$HOME/.gta-agent"
+BASE="%[3]s"
+echo "领取启动码配置（token/session）..."
+CONFIG_JSON=$(curl -fsSL "$BASE/access/claim?code=$CODE") || { echo "启动码无效或已过期"; exit 1; }
+TOKEN=$(printf '%%s' "$CONFIG_JSON" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+AUTH=()
+if [ -n "$TOKEN" ]; then AUTH=(-H "Authorization: Bearer $TOKEN"); fi
+echo "下载 Agent（%[2]s）..."
+mkdir -p "$BIN_DIR"
+curl -fsSL "${AUTH[@]}" "$BASE/download/agent?code=$CODE&platform=$PLATFORM" -o /tmp/gta-agent.zip || { echo "下载失败，请确认目标机可访问服务端 $BASE"; exit 1; }
+unzip -o -q /tmp/gta-agent.zip -d "$BIN_DIR" || { echo "解压失败，请确认已安装 unzip"; exit 1; }
+printf '%%s' "$CONFIG_JSON" > "$BIN_DIR/config.embedded.json"
+chmod +x "$BIN_DIR/gta-agent"
+echo "已在 $BIN_DIR 完成安装。执行 $BIN_DIR/gta-agent 开始抓包上报。"
+`, code, platform, base)
+	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(script))
+	slog.Info("setup script served", "code", code, "platform", platform)
 }

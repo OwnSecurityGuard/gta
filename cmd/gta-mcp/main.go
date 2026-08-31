@@ -3070,6 +3070,10 @@ func main() {
 	// （与扫码页展示的信息一致），不含任何会话/抓包数据，故挂载在鉴权链之外。
 	root := http.NewServeMux()
 	root.HandleFunc("/singbox/profile", capture.handleSingboxProfile)
+	// 启动码 claim / setup.sh 鉴权豁免：agent 首启（还没有 token）与 `curl | bash`
+	// 一键脚本都无法携带 Bearer，两者只凭一次性+限时启动码即可工作（见 access_code.go）。
+	root.HandleFunc("/access/claim", capture.handleAccessClaim)
+	root.HandleFunc("/setup.sh", capture.handleSetupScript)
 	// Web UI 静态资源（免鉴权）兜在 "/" 上：命中嵌入文件才返回静态，其余请求
 	// （含 /mcp 等 API 与未知路径）原样进入鉴权链，语义与集成前一致。
 	root.Handle("/", serveWebOrAPI(mustWebUIFS(), authed))

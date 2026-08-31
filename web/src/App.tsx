@@ -193,7 +193,7 @@ export default function App() {
 
   // 首页「我的项目 → 以该项目抓包」：把项目的默认端口/插件预填进开始抓包弹窗。
   const handleStartProject = useCallback((p: ProjectInfo) => {
-    setProjectPrefill({ port: p.port && p.port > 0 ? p.port : undefined, plugin: p.plugin || undefined });
+    setProjectPrefill({ port: p.default_port && p.default_port > 0 ? p.default_port : undefined, plugin: p.default_plugin || undefined });
     setStartOpen(true);
   }, []);
 

@@ -208,8 +208,8 @@ export function MyCapturePage({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{p.name}</p>
                     <p className="truncate text-[11px] text-muted-foreground">
-                      {p.plugin ? `插件 ${p.plugin}` : "默认插件未设置"}
-                      {p.port ? ` · 端口 ${p.port}` : ""}
+                      {p.default_plugin ? `插件 ${p.default_plugin}` : "默认插件未设置"}
+                      {p.default_port ? ` · 端口 ${p.default_port}` : ""}
                     </p>
                   </div>
                   <button

@@ -39,7 +39,14 @@ import type { QueryCaptureTableResult } from "@/types/table-browser";
 import type { ListConnectionsResult, GetConnectionDetailResult, ListConnectionStreamsResult, ListConnectionFramesResult } from "@/types/connection";
 import type { GetProxyConfigResult, UpdateProxyConfigResult, ProxyConfigUpdateVars } from "@/types/proxy";
 import type { GetAgentDownloadOptionsResult } from "@/types/agent";
-import type { ListProjectsResult, ProjectResult } from "@/types/project";
+import type {
+  ListProjectsResult,
+  ProjectResult,
+  ProjectRole,
+  ProjectPlugin,
+  ProjectRule,
+  GetProjectResult,
+} from "@/types/project";
 
 /** 查询 session 列表 */
 export function useSessions() {
@@ -435,6 +442,78 @@ export function useDeleteProject() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
+  });
+}
+
+/** get_project：查询单个项目的详情与最近会话。 */
+export function useProject(id?: string) {
+  return useQuery({
+    queryKey: ["project", id],
+    queryFn: () =>
+      id
+        ? mcpClient.callTool<GetProjectResult>("get_project", { id })
+        : Promise.resolve(null),
+    enabled: !!id,
+  });
+}
+
+/** set_session_project：把会话绑定到某个项目。成功后失效 sessions 缓存。 */
+export function useSetSessionProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { session_id: string; project_id?: string }) =>
+      mcpClient.callTool<{ ok?: boolean }>("set_session_project", v),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
+  });
+}
+
+/** add_project_member：向项目添加成员。 */
+export function useAddProjectMember(projectId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { user: string; role: ProjectRole }) =>
+      mcpClient.callTool<{ ok?: boolean }>("add_project_member", {
+        project_id: projectId, ...v,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["project", projectId] }),
+  });
+}
+
+/** remove_project_member：从项目移除成员。 */
+export function useRemoveProjectMember(projectId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { user: string }) =>
+      mcpClient.callTool<{ ok?: boolean }>("remove_project_member", {
+        project_id: projectId, ...v,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["project", projectId] }),
+  });
+}
+
+/** set_project_plugins：设置项目的解码插件集合。 */
+export function useSetProjectPlugins(projectId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { plugins: ProjectPlugin[] }) =>
+      mcpClient.callTool<{ ok?: boolean }>("set_project_plugins", {
+        project_id: projectId,
+        plugins: JSON.stringify(v.plugins),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["project", projectId] }),
+  });
+}
+
+/** set_project_rules：设置项目的解析规则集合。 */
+export function useSetProjectRules(projectId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { rules: ProjectRule[] }) =>
+      mcpClient.callTool<{ ok?: boolean }>("set_project_rules", {
+        project_id: projectId,
+        rules: JSON.stringify(v.rules),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["project", projectId] }),
   });
 }
 

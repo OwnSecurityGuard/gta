@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useStartCapture, useBeginCaptureRun, useRegisteredPlugins, useListInterfaces } from "@/hooks/use-mcp";
+import { groupParsers, GROUP_LABEL } from "@/lib/parsers";
 import { toast } from "@/components/ui/toast";
 import { X, Check, Play, Network, Copy } from "lucide-react";
 
@@ -50,6 +51,8 @@ export function StartCaptureDialog({
   // start_capture 不支持按会话切换网卡，故这里只读展示，帮助用户判断“为何没抓到环回流量”）。
   const { data: ifacesData } = useListInterfaces();
   const interfaces = ifacesData?.interfaces ?? [];
+  // 已注册插件归组（Godot/Unity/HTTP/自定义），供普通用户以卡片而非下拉选择解析器。
+  const pluginGroups = groupParsers(plugins);
 
   useEffect(() => {
     if (open) {
@@ -266,24 +269,41 @@ export function StartCaptureDialog({
           </div>
 
           <div>
-            <label className="text-sm font-medium">解码插件（可选）</label>
-            <select
-              className="mt-1.5 h-9 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-              value={plugin}
-              onChange={(e) => setPlugin(e.target.value)}
-            >
-              <option value="">不指定（仅抓包）</option>
-              {plugins.map((p) => (
-                <option key={p.instance_id} value={p.name} disabled={!p.online}>
-                  {p.name}（{p.protocol}）{p.online ? "" : " — 离线"}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {plugins.length === 0
-                ? "当前没有已注册的插件，可留空仅抓包，或先启动插件使其注册到 Pipeline。"
-                : "留空则只抓包存储原始包；指定插件可在抓包同时解码协议事件（仅在线插件可选）。"}
-            </p>
+            <label className="text-sm font-medium">解码解析器（可选）</label>
+            {pluginGroups.order.length === 0 ? (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                当前没有已注册的解析器，可留空仅抓包；或先启动解析器插件使其注册到 Pipeline。
+              </p>
+            ) : (
+              <>
+                <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                  {pluginGroups.order.map((g) =>
+                    pluginGroups.byGroup[g].map((opt) => (
+                      <button
+                        key={opt.plugin}
+                        type="button"
+                        aria-pressed={plugin === opt.plugin}
+                        disabled={!opt.online}
+                        onClick={() => setPlugin(plugin === opt.plugin ? "" : opt.plugin)}
+                        className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors ${
+                          plugin === opt.plugin
+                            ? "border-primary/60 bg-primary/10 text-foreground"
+                            : "border-border bg-background text-muted-foreground"
+                        } ${opt.online ? "cursor-pointer hover:bg-muted/60" : "cursor-not-allowed opacity-50"}`}
+                      >
+                        <span className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] uppercase">
+                          {GROUP_LABEL[g] ?? g}
+                        </span>
+                        <span className="truncate">{opt.label}</span>
+                      </button>
+                    )),
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {plugin ? "已选择：留空为不指定（仅抓包）。" : "点击选择一个解析器；离线解析器置灰不可选。"}
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -228,12 +228,15 @@ export function useStartCapture() {
       /** nic | proxy */
       source?: string;
       listenAddr?: string;
+      /** 从项目一键抓包时绑定的项目 id，抓包会话归属到该项目 */
+      projectId?: string;
     }) =>
       mcpClient.callTool<StartCaptureResult>("start_capture", {
         port: vars.port,
         plugin: vars.plugin ?? "",
         pcap_file: vars.pcapFile,
         source: vars.source ?? "nic",
+        project_id: vars.projectId ?? "",
         listen_addr: vars.source === "proxy" ? (vars.listenAddr ?? "127.0.0.1:9090") : undefined,
       }),
     onSuccess: () => {

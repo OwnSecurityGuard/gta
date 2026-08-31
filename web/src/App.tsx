@@ -15,6 +15,7 @@ import { StartCaptureDialog } from "@/components/start-capture-dialog";
 import { ProxyConfigDialog } from "@/components/proxy-config-dialog";
 import { AgentDownloadDialog } from "@/components/agent-download-dialog";
 import { MyCapturePage } from "@/components/my-capture-page";
+import { ProjectPage } from "@/components/project-page";
 import { Button } from "@/components/ui/button";
 import { Sun, Moon, Settings, Play, Square, Cable, KeyRound, Download, ChevronDown, Check } from "lucide-react";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
@@ -73,8 +74,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>("home");
   // 「更多」下拉是否展开（普通用户把高级视图藏在这里）。
   const [moreOpen, setMoreOpen] = useState(false);
-  // 从项目「一键抓包」带入的默认端口/插件，传给 StartCaptureDialog 预填。
-  const [projectPrefill, setProjectPrefill] = useState<{ port?: number; plugin?: string }>({});
+  // 从项目「一键抓包」带入的默认端口/插件/项目id，传给 StartCaptureDialog 预填。
+  const [projectPrefill, setProjectPrefill] = useState<{ port?: number; plugin?: string; projectId?: string }>({});
+  // 正在查看的项目详情（切换到 ProjectPage 而非首页）。
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   // 从连接详情点击 flow_id 跳转时预填到「行为」Tab 的 flow_id
   const [tracePrefill, setTracePrefill] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -191,9 +194,30 @@ export default function App() {
     setStartOpen(true);
   }, []);
 
-  // 首页「我的项目 → 以该项目抓包」：把项目的默认端口/插件预填进开始抓包弹窗。
+  // 首页「我的项目 → 以该项目抓包」：把项目的默认端口/插件/项目id 预填进开始抓包弹窗。
   const handleStartProject = useCallback((p: ProjectInfo) => {
-    setProjectPrefill({ port: p.default_port && p.default_port > 0 ? p.default_port : undefined, plugin: p.default_plugin || undefined });
+    setProjectPrefill({
+      port: p.default_port && p.default_port > 0 ? p.default_port : undefined,
+      plugin: p.default_plugin || undefined,
+      projectId: p.id,
+    });
+    setStartOpen(true);
+  }, []);
+
+  // 首页「我的项目 → 进入」：切换到项目详情页。
+  const handleOpenProject = useCallback((projectId: string) => {
+    setSelectedProjectId(projectId);
+    setActiveTab("home");
+  }, []);
+
+  // 项目详情页「返回」：退回首页「我的抓包」。
+  const handleBackFromProject = useCallback(() => {
+    setSelectedProjectId(null);
+  }, []);
+
+  // 项目详情页「开始抓包」：带项目 id 打开开始抓包弹窗（端口/插件按项目默认值）。
+  const handleProjectPageStart = useCallback((p: { id: string; name: string }) => {
+    setProjectPrefill({ projectId: p.id });
     setStartOpen(true);
   }, []);
 
@@ -452,15 +476,24 @@ export default function App() {
 
         {/* 数据表格 */}
         <div className="min-h-0 flex-1 overflow-hidden">
-          {activeTab === "home" && (
-            <MyCapturePage
-              onStartDefault={handleStartDefault}
-              onStartProject={handleStartProject}
-              onAgentDownload={() => setAgentDownloadOpen(true)}
-              onProxy={() => setProxyConfigOpen(true)}
-              onSelectSession={handleHomeSelectSession}
-            />
-          )}
+          {activeTab === "home" &&
+            (selectedProjectId ? (
+              <ProjectPage
+                projectId={selectedProjectId}
+                onBack={handleBackFromProject}
+                onSelectSession={handleHomeSelectSession}
+                onStartProject={handleProjectPageStart}
+              />
+            ) : (
+              <MyCapturePage
+                onStartDefault={handleStartDefault}
+                onStartProject={handleStartProject}
+                onAgentDownload={() => setAgentDownloadOpen(true)}
+                onProxy={() => setProxyConfigOpen(true)}
+                onSelectSession={handleHomeSelectSession}
+                onOpenProject={handleOpenProject}
+              />
+            ))}
           {activeTab === "decoded" && (
             <div className="h-full overflow-auto p-4 gta-scroll">
               <EventTable sessionId={selectedSessionId} filter={filter} />
@@ -518,6 +551,7 @@ export default function App() {
         onClose={() => setStartOpen(false)}
         initialPort={projectPrefill.port}
         initialPlugin={projectPrefill.plugin}
+        initialProjectId={projectPrefill.projectId}
         onStarted={(sessionId) => {
           setSelectedSessionId(sessionId);
           setFilter("");

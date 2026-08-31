@@ -7,7 +7,15 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
 	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
+
+	"gta/pkg/auth"
 )
 
 const accessCodeSchema = `
@@ -130,4 +138,75 @@ func newAccessCode() string {
 		parts[i] = string(s)
 	}
 	return "GTA-" + parts[0] + "-" + parts[1]
+}
+
+// handleCreateAccessCode 为当前用户生成一个启动码（可选绑项目/插件/端口/平台/回连地址）。
+func (m *mcpCapture) handleCreateAccessCode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	owner, _ := m.ownerScope(ctx)
+	code := newAccessCode()
+	port := handleProjectArgPort(req)
+	plugin := req.GetString("plugin", "")
+	platform := req.GetString("platform", "")
+	projectID := req.GetString("project_id", "")
+	server := strings.TrimSpace(req.GetString("server", ""))
+
+	rec := &accessCode{
+		Code:      code,
+		Owner:     owner,
+		ProjectID: projectID,
+		Plugin:    plugin,
+		Port:      port,
+		Server:    server,
+		Platform:  platform,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+	if err := m.accessCodes.Create(ctx, rec); err != nil {
+		return nil, fmt.Errorf("create access code: %w", err)
+	}
+	slog.Info("access code created", "owner", owner, "code", code)
+	return successResult(map[string]any{
+		"code": code, "owner": owner, "project_id": projectID,
+		"plugin": plugin, "port": port, "platform": platform, "expires_at": rec.ExpiresAt.Format(time.RFC3339),
+	}), nil
+}
+
+// handleListAccessCodes 列出当前用户（或 admin 全部）启动码。
+func (m *mcpCapture) handleListAccessCodes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	owner, all := m.ownerScope(ctx)
+	codes, err := m.accessCodes.listForOwner(ctx, owner, all)
+	if err != nil {
+		return nil, err
+	}
+	return successResult(map[string]any{"codes": codes}), nil
+}
+
+// ownerSecret 返回某 owner 的静态 token（供 claim 烧进 agent 配置）；匿名模式下为空。
+func (m *mcpCapture) ownerSecret(owner string) string {
+	return m.tokensByOwner[owner]
+}
+
+// loadTokensByOwner 从 GTA_AUTH_TOKENS 解析 owner->token（"alice=gta_xxx:admin" 取 "gta_xxx"）。
+// 复刻 auth.ParseTokens 的格式但不改动 auth 包（后者只暴露 token->owner 单一方向）。
+func loadTokensByOwner() map[string]string {
+	m := map[string]string{}
+	for _, seg := range strings.Split(os.Getenv(auth.EnvTokens), ",") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		eq := strings.IndexByte(seg, '=')
+		if eq < 0 {
+			continue
+		}
+		owner := strings.TrimSpace(seg[:eq])
+		tok := strings.TrimSpace(seg[eq+1:])
+		if i := strings.LastIndexByte(tok, ':'); i >= 0 {
+			tok = tok[:i]
+		}
+		if owner != "" && tok != "" {
+			m[owner] = tok
+		}
+	}
+	return m
 }

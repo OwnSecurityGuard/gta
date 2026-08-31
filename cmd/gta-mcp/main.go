@@ -107,6 +107,9 @@ type mcpCapture struct {
 	sessionMgr  *sessionManager
 	runRegistry *RunRegistry
 	projects    *projectStore
+	// 启动码（GTA-XXXX）存取；ownerSecret 用的 token 表在装配处解析填充。
+	accessCodes   *accessCodeStore
+	tokensByOwner map[string]string
 
 	// gRPC client 连接 gta-pipeline
 	pipelineClient pb.CaptureControlClient
@@ -409,6 +412,13 @@ func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mc
 		return nil, fmt.Errorf("init project store: %w", err)
 	}
 
+	// 启动码表（access_codes）落在同一个 control.sqlite。
+	accessCodes := newAccessCodeStore(controlStore.DB())
+	if err := accessCodes.Init(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("init access code store: %w", err)
+	}
+
 	m := &mcpCapture{
 		iface:          iface,
 		pluginsDir:     pluginsDir,
@@ -417,6 +427,8 @@ func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mc
 		sessionMgr:     newSessionManager(workDir),
 		runRegistry:    runRegistry,
 		projects:       projects,
+		accessCodes:    accessCodes,
+		tokensByOwner:  loadTokensByOwner(),
 		pipelineClient: client,
 		grpcConn:       conn,
 		pdClient:       pdClient,
@@ -2965,6 +2977,16 @@ func main() {
 	s.AddTool(mcp.NewTool("list_projects",
 		mcp.WithDescription("List capture projects visible to the current user (admin sees all owners' projects; normal users only see their own and projects they are a member of)."),
 	), capture.handleListProjects)
+
+	// 启动码接入：生成/列出 GTA-XXXX 码，成员在目标机输入即可自动注册并回连抓包。
+	s.AddTool(mcp.NewTool("create_access_code",
+		mcp.WithDescription("Generate an access code (GTA-XXXX-XXXX) bound to the current user. A member enters this code when first starting gta-agent to auto-register and connect. Optional: project_id, plugin, port, platform, server."),
+		mcp.WithString("project_id"), mcp.WithString("plugin"), mcp.WithNumber("port"),
+		mcp.WithString("platform"), mcp.WithString("server"),
+	), capture.handleCreateAccessCode)
+	s.AddTool(mcp.NewTool("list_access_codes",
+		mcp.WithDescription("List access codes visible to the current user (global admin sees all)."),
+	), capture.handleListAccessCodes)
 
 	s.AddTool(mcp.NewTool("get_project",
 		mcp.WithDescription("Get a single capture project with its metadata and recent sessions."),

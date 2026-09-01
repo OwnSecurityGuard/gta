@@ -24,6 +24,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
 	"gta/docs"
@@ -608,19 +610,44 @@ func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequ
 
 	resp, err := m.pipelineClient.StopCapture(ctx, &pb.StopCaptureRequest{SessionId: sessionID})
 	if err != nil {
-		return errorResult(fmt.Errorf("stop capture: %w", err)), nil
+		// pipeline 侧已无此会话（典型：pipeline 重启后内存态丢失，或会话已在
+		// 服务端停止，而 metadata.json 仍是 running）。停止是幂等操作：本地
+		// 标记 stopped 而非报错，否则用户会陷入「页面显示运行中、停止却失败」
+		// 的状态死锁。其它错误照常透出。
+		if status.Code(err) != codes.FailedPrecondition {
+			return errorResult(fmt.Errorf("stop capture: %w", err)), nil
+		}
+		slog.Warn("stop_capture: no active capture on pipeline, marking stopped locally", "session_id", sessionID, "error", err)
+		resp = &pb.StopCaptureResponse{}
 	}
 
-	// 更新 session 元数据（如果 sessionMgr 中有记录）
-	if sess, err := m.sessionMgr.readCurrent(owner); err == nil && sess != nil && sess.SessionID == sessionID {
+	// 更新会话元数据：优先 current 会话，否则按 session_id 读取——显式停止
+	// 非当前会话也要落盘终态，否则列表会一直显示 running。
+	sess, serr := m.sessionMgr.readCurrent(owner)
+	if serr != nil || sess == nil || sess.SessionID != sessionID {
+		s2, s2err := m.sessionMgr.readSessionMetadata(sessionID, owner)
+		if s2err != nil {
+			s2 = nil
+		}
+		sess = s2
+	}
+	if sess != nil {
 		sess.Status = "stopped"
 		sess.StoppedAt = time.Now().Format(time.RFC3339)
-		sess.RawPackets = resp.GetRawPackets()
-		sess.Events = resp.GetEvents()
-		sess.Metrics = resp.GetMetrics()
-		sess.DecodeErrors = resp.GetDecodeErrors()
-		sess.DurationSec = resp.GetDurationSec()
-		m.sessionMgr.writeCurrent(*sess)
+		// 幂等路径（pipeline 无此会话）resp 计数为 0：保留元数据已有计数，
+		// 只有用真实停止结果（非零）才覆盖，避免把历史计数清零。
+		if resp.GetRawPackets() > 0 || resp.GetEvents() > 0 || resp.GetMetrics() > 0 || resp.GetDecodeErrors() > 0 {
+			sess.RawPackets = resp.GetRawPackets()
+			sess.Events = resp.GetEvents()
+			sess.Metrics = resp.GetMetrics()
+			sess.DecodeErrors = resp.GetDecodeErrors()
+		}
+		if resp.GetDurationSec() > 0 {
+			sess.DurationSec = resp.GetDurationSec()
+		}
+		if cur, cerr := m.sessionMgr.readCurrent(owner); cerr == nil && cur != nil && cur.SessionID == sessionID {
+			m.sessionMgr.writeCurrent(*sess)
+		}
 		m.sessionMgr.writeSessionMetadata(sess.SessionID, *sess)
 	}
 
@@ -2248,8 +2275,10 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 	// 避免 gta-mcp 与 gta-pipeline 的 workDir 漂移、或 metadata.json 缺失时，
 	// running 会话被降级逻辑误标为 stopped（端口/插件/网卡也随之丢失）。
 	liveByID := map[string]map[string]any{}
+	liveListOK := false
 	if m.pipelineClient != nil {
 		if resp, lerr := m.pipelineClient.ListCaptureSessions(ctx, &pb.ListCaptureSessionsRequest{}); lerr == nil {
+			liveListOK = true
 			for _, s := range resp.GetSessions() {
 				liveByID[s.GetSessionId()] = map[string]any{
 					"state":  s.GetState(),
@@ -2266,11 +2295,44 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 	// 返回所有会话（包括已停止的离线会话），running 的用 live 信息覆盖
 	out := []map[string]any{}
 	seen := map[string]bool{}
+	// liveStatusCache 缓存 running 会话的实时计数（GetCaptureStatus gRPC）。
+	// metadata.json 的 raw_packets/events 只在会话停止时落盘，运行中恒为启动
+	// 时的 0——不补的话前端「最近会话」卡片会一直显示 0 events / 0 packets。
+	// running 会话通常个位数，逐个查询成本可忽略；失败时静默降级用 metadata 值。
+	liveStatusCache := map[string]*pb.GetCaptureStatusResponse{}
+	fetchLiveStatus := func(sessionID string) *pb.GetCaptureStatusResponse {
+		if m.pipelineClient == nil {
+			return nil
+		}
+		if st, ok := liveStatusCache[sessionID]; ok {
+			return st
+		}
+		var st *pb.GetCaptureStatusResponse
+		if resp, err := m.pipelineClient.GetCaptureStatus(ctx, &pb.GetCaptureStatusRequest{SessionId: sessionID}); err == nil {
+			st = resp
+		} else {
+			slog.Warn("list_all_sessions: live status unavailable, falling back to metadata counters", "error", err, "session_id", sessionID)
+		}
+		liveStatusCache[sessionID] = st
+		return st
+	}
 	for _, sess := range sessions {
 		status := sess.Status
 		port := sess.Port
 		plugin := sess.Plugin
 		iface := sess.Interface
+		rawPackets := sess.RawPackets
+		events := sess.Events
+		decodeErrors := sess.DecodeErrors
+		// 状态校正：live 列表成功返回、但其中没有这个「running」会话——
+		// 说明 pipeline 侧会话已不存在（典型：pipeline 重启后内存态丢失），
+		// metadata.json 的 running 是过期的。显示层直接判 stopped，与
+		// stop_capture 的幂等语义配套，消除「显示运行中但停止报错」的死锁。
+		if liveListOK && status == "running" {
+			if _, ok := liveByID[sess.SessionID]; !ok {
+				status = "stopped"
+			}
+		}
 		if live, ok := liveByID[sess.SessionID]; ok {
 			if state, _ := live["state"].(string); state != "" {
 				status = state
@@ -2283,6 +2345,14 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 			}
 			if iv, _ := live["iface"].(string); iv != "" {
 				iface = iv
+			}
+			// 运行中的会话用实时计数覆盖（停止后 metadata 已是终值，无需覆盖）。
+			if status == "running" {
+				if st := fetchLiveStatus(sess.SessionID); st != nil {
+					rawPackets = st.GetRawCount()
+					events = st.GetEventCount()
+					decodeErrors = st.GetDecodeErrors()
+				}
 			}
 		}
 		if !matchStatus(status) {
@@ -2302,10 +2372,10 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 			"pcap_file":     sess.PCAPFile,
 			"source":        sess.Source,
 			"listen_addr":   sess.ListenAddr,
-			"raw_packets":   sess.RawPackets,
-			"events":        sess.Events,
+			"raw_packets":   rawPackets,
+			"events":        events,
 			"metrics":       sess.Metrics,
-			"decode_errors": sess.DecodeErrors,
+			"decode_errors": decodeErrors,
 			"duration_sec":  sess.DurationSec,
 			"db_path":       sess.DBPath,
 		})

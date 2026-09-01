@@ -62,7 +62,7 @@ type captureTask struct {
 	logger *slog.Logger // 带 session_id 等上下文字段的 logger
 
 	// Protocol Behavior Resolver（可选）：protocolCfg 非空时在 Start 时构建。
-	protocolCfg     *protocolconfig.File
+	protocolCfg      *protocolconfig.File
 	protocolResolver *protocolresolver.ProtocolResolver
 	corrStore        *protocolcorrelation.Store
 
@@ -90,6 +90,7 @@ type taskStats struct {
 	EventCount   int64
 	MetricCount  int64
 	DecodeErrors int64
+	DecodeDrops  int64 // 解码队列满时的丢包数（仅实时抓包模式；raw 已持久化）
 	PacketsIn    uint64
 	PacketsOut   uint64
 	BytesIn      uint64
@@ -98,6 +99,21 @@ type taskStats struct {
 	Errors       uint64
 	Err          string
 }
+
+// 解码流水线参数：capture 与解码解耦的核心配置。
+const (
+	// decodeQueueSize 是 capture→解码 有界队列容量；实时模式满时丢包保抓包。
+	decodeQueueSize = 1024
+	// decodedQueueSize 是 解码→后处理 有界队列容量。
+	decodedQueueSize = 64
+	// decodeWindow 是同时在途的解码请求数（流水线深度）。
+	decodeWindow = 16
+	// decodeWaitTimeout 是单个解码 Future 的最长等待（防插件挂死阻塞排空）。
+	decodeWaitTimeout = 30 * time.Second
+	// undecodedRingMax 是无解码器期间待补解码包的滑动窗口上限；超出丢最旧
+	// （raw 已持久化，可经离线 decode_raw 补救）。
+	undecodedRingMax = 2048
+)
 
 // Start CAS Created→Running，只允许一次。重复调用返回 ErrAlreadyStarted。
 // 非幂等：成功后启动 run goroutine。
@@ -159,17 +175,20 @@ func (t *captureTask) run() {
 	// engine 需提前声明（flush 闭包引用），稍后在 dispatcher 创建后赋值。
 	// 早退路径（无 tcp 插件/dispatcher 错误）下 engine 为 nil，flush 需 nil guard。
 	var (
-		source       capture.Source
-		engine       *analyze.Engine
-		baseline     *state.BaselineManager
-		raws         []event.Packet
-		events       []*event.Event
-		enrichedSCs  []store.EnrichedStateChange
-		metrics      []event.Metric
-		rawCount     int64
-		eventCount   int64
-		metricCount  int64
-		decodeErrors int64
+		source      capture.Source
+		engine      *analyze.Engine
+		baseline    *state.BaselineManager
+		raws        []event.Packet
+		events      []*event.Event
+		enrichedSCs []store.EnrichedStateChange
+		metrics     []event.Metric
+		rawCount    int64
+		eventCount  int64
+		metricCount int64
+
+		// decodeErrs / decodeDropN 由 decode worker goroutine 并发递增，用原子计数。
+		decodeErrs  atomic.Int64
+		decodeDropN atomic.Int64
 	)
 
 	// flush 是闭包，捕获 source 和局部计数器，每次调用后更新 t.statsSnap。
@@ -221,7 +240,8 @@ func (t *captureTask) run() {
 			RawCount:     rawCount,
 			EventCount:   eventCount,
 			MetricCount:  metricCount,
-			DecodeErrors: decodeErrors,
+			DecodeErrors: decodeErrs.Load(),
+			DecodeDrops:  decodeDropN.Load(),
 		}
 		if source != nil {
 			st := source.Stats()
@@ -271,9 +291,117 @@ func (t *captureTask) run() {
 	//     使 A 项目会话只认插件 A、B 项目会话只认插件 B，多项目并行各用各插件；
 	//     名查不到时退化按协议 hint（Find）兼容老用法。
 	//   - 未指定插件名时，沿用原行为：按 tcp 协议 hint 取第一个在线插件。
-	var dispatcher *decode.Dispatcher
 	var decoderClient pb.DecoderClient // 当前 dispatcher 绑定的 client 指针，用于检测插件是否变化
 	var lastResolve time.Time
+
+	// —— 解码流水线：capture 主循环与解码解耦 ——
+	//
+	// 主循环（本 goroutine）只负责：读包 → raw 缓冲 →（无解码器时）undecoded 滑动缓存
+	// → 投递 decodeCh；并消费 decodedCh 做协议富化 / 状态投影 / 规则聚合。
+	// 后处理只在主循环 goroutine 执行，写缓冲无并发访问，事件全局保序。
+	//
+	// decode worker（独立 goroutine）消费 decodeCh，经 Dispatcher.Submit 以
+	// decodeWindow 个在途请求流水线化解码，按提交顺序 Wait 并把事件发 decodedCh，
+	// 单包解码 RTT 不再阻塞抓包。
+	//
+	// disp 是当前解码器的原子指针：主循环（build/drop 时写）与 worker（每包读）并发访问。
+	var disp atomic.Pointer[decode.Dispatcher]
+	// undecoded 缓存无解码器期间的 tcp 包：解码器接入后按序回灌补解码（方案3）。
+	// 超过 undecodedRingMax 时丢最旧（raw 已持久化，可离线 decode_raw 补救）。
+	var undecoded []event.Packet
+
+	decodeCh := make(chan event.Packet, decodeQueueSize)
+	decodedCh := make(chan []*event.Event, decodedQueueSize)
+
+	// processDecoded 把一批解码事件做协议富化 / 状态投影 / 规则聚合，追加到写缓冲。
+	processDecoded := func(evs []*event.Event) {
+		for _, ev := range evs {
+			if ev == nil {
+				continue
+			}
+			t.logger.Debug("decoded packet v2", "event_id", ev.Identity.ID, "event_type", ev.Identity.Type, "session", ev.Identity.SessionID)
+			// Protocol Behavior Resolver：把 JSON 解释为通信语义（identity/role/correlation/delivery/error）。
+			t.enrichProtocol(ev)
+			events = append(events, ev)
+
+			// State 层投影：从 _state_changes 提取并做 before/after 基线富化
+			scChanges, err := baseline.Apply(ev, t.sessionID)
+			if err != nil {
+				t.logger.Error("state projection", "event_id", ev.Identity.ID, "error", err)
+			} else {
+				enrichedSCs = append(enrichedSCs, scChanges...)
+			}
+
+			ms, err := engine.Process(t.ctx, ev)
+			if err != nil {
+				t.logger.Error("analyze event", "event_id", ev.Identity.ID, "error", err)
+				continue
+			}
+			metrics = append(metrics, ms...)
+		}
+	}
+
+	// decode worker：流水线化解码（decodeWindow 个在途），按提交顺序交付事件。
+	go func() {
+		defer close(decodedCh)
+		var window []*decode.Future
+
+		// 解码失败可能因插件重启：通知主循环立即重解析
+		// （等价旧同步循环中出错路径的 resolveDecoder(true)）。
+		signalReresolve := func() {
+			select {
+			case t.reresolve <- struct{}{}:
+			default:
+			}
+		}
+		drainHead := func() {
+			f := window[0]
+			wctx, wcancel := context.WithTimeout(context.Background(), decodeWaitTimeout)
+			evs, err := f.Wait(wctx)
+			wcancel()
+			window = window[1:]
+			if err != nil {
+				t.logger.Debug("decode failed", "error", err)
+				decodeErrs.Add(1)
+				signalReresolve()
+				return
+			}
+			if len(evs) == 0 {
+				return
+			}
+			decodedCh <- evs
+		}
+
+		for pkt := range decodeCh {
+			d := disp.Load()
+			if d == nil {
+				continue // 解码器已下线：raw 已入缓冲持久化，仅跳过解码
+			}
+			f, err := d.Submit(pkt)
+			if err != nil {
+				t.logger.Debug("decode submit failed", "error", err)
+				decodeErrs.Add(1)
+				signalReresolve()
+				continue
+			}
+			window = append(window, f)
+			for len(window) >= decodeWindow {
+				drainHead()
+			}
+		}
+		// decodeCh 关闭（shutdown）：按序排空在途窗口后退出。
+		for len(window) > 0 {
+			drainHead()
+		}
+	}()
+
+	// shutdownDecode 停止解码流水线并排空剩余事件（主循环各退出路径恰好调用一次）。
+	shutdownDecode := func() {
+		close(decodeCh)
+		for evs := range decodedCh {
+			processDecoded(evs)
+		}
+	}
 
 	// 订阅插件注册表事件（注册/注销/上下线），变化时立即重解析解码器（0 延迟）。
 	// 配合 SetSessionPlugin 的 reresolve 通道，使解码侧无需等待 3s 节流或 1s tick。
@@ -282,7 +410,7 @@ func (t *captureTask) run() {
 
 	resolveDecoder := func(force bool) {
 		now := time.Now()
-		if !force && dispatcher != nil && now.Sub(lastResolve) < 3*time.Second {
+		if !force && disp.Load() != nil && now.Sub(lastResolve) < 3*time.Second {
 			return // 已有解码器且未到节流周期，跳过
 		}
 		lastResolve = now
@@ -291,22 +419,23 @@ func (t *captureTask) run() {
 		if !ok {
 			found = nil
 		}
-		switch decoderAction(found, decoderClient, dispatcher != nil) {
+		switch decoderAction(found, decoderClient, disp.Load() != nil) {
 		case "idle":
 			t.logger.Debug("no decoder plugin available yet, will retry", "plugin", t.getPlugin())
 			return
 		case "drop":
 			t.logger.Warn("decoder plugin went offline, dropping decoder; capture will store raw packets only", "plugin", t.getPlugin())
-			dispatcher.Close()
-			dispatcher = nil
+			if d := disp.Swap(nil); d != nil {
+				_ = d.Close()
+			}
 			decoderClient = nil
 			return
 		case "keep":
 			return
 		case "build":
 			// 插件变化（新注册 / 重启 / 替换）：关闭旧 dispatcher，建立新流。
-			if dispatcher != nil {
-				dispatcher.Close()
+			if d := disp.Swap(nil); d != nil {
+				_ = d.Close()
 			}
 			d, err := decode.NewDispatcher(found, t.sessionID, t.logger, sr, decode.WithServerPort(t.port))
 			if err != nil {
@@ -314,11 +443,27 @@ func (t *captureTask) run() {
 				decoderClient = nil
 				return
 			}
-			dispatcher = d
+			disp.Store(d)
 			decoderClient = found
 			t.logger.Info("decoder attached via hot-reload", "plugin", t.getPlugin())
 			// Semantic Contract v1 §13：规则聚合字段 ↔ manifest aggregatable/groupable 对齐（仅告警）。
 			t.checkAggregationContract(found)
+
+			// 补解码：解码器刚接入，把无解码器期间缓存的包按序回灌（方案3）。
+			// 与 decodedCh 消费交织，避免与 decode worker 相互阻塞。
+			for len(undecoded) > 0 {
+				select {
+				case decodeCh <- undecoded[0]:
+					undecoded = undecoded[1:]
+				case evs := <-decodedCh:
+					processDecoded(evs)
+				case <-t.ctx.Done():
+					t.logger.Warn("replay of undecoded packets interrupted by shutdown", "remaining", len(undecoded))
+					undecoded = nil
+					return
+				}
+			}
+			undecoded = nil // 释放缓存的原始包字节
 		}
 	}
 	engine = analyze.NewEngine(t.rules, t.logger)
@@ -354,17 +499,22 @@ func (t *captureTask) run() {
 			t.logger.Debug("plugin registry event, re-resolving decoder", "type", evt.Type, "plugin", t.getPlugin())
 			resolveDecoder(true)
 		case <-t.ctx.Done():
+			shutdownDecode()
 			fctx, fcancel := context.WithTimeout(context.Background(), 10*time.Second)
 			flush(fctx, true)
 			fcancel()
-			t.logger.Info("capture stopped", "raw", rawCount, "events", eventCount, "metrics", metricCount)
+			t.logger.Info("capture stopped", "raw", rawCount, "events", eventCount, "metrics", metricCount, "decode_drops", decodeDropN.Load())
 			return
 		case <-tick.C:
 			resolveDecoder(false)
 			flush(t.ctx, false)
+		case evs := <-decodedCh:
+			// 解码完成的事件：协议富化 / 状态投影 / 规则聚合（主循环执行，事件保序）。
+			processDecoded(evs)
 		case pkt, ok := <-pktCh:
 			if !ok {
 				t.logger.Info("packet source closed, flushing remaining data")
+				shutdownDecode()
 				fctx, fcancel := context.WithTimeout(context.Background(), 10*time.Second)
 				flush(fctx, true)
 				fcancel()
@@ -376,45 +526,42 @@ func (t *captureTask) run() {
 			}
 			raws = append(raws, pkt)
 			resolveDecoder(false)
-			if dispatcher == nil {
-				continue // 无解码器，只存 raw packets
+			if disp.Load() == nil {
+				// 无解码器：raw 照常持久化；tcp 包进 undecoded 滑动缓存，
+				// 待解码器接入后回灌补解码（方案3）。
+				if pkt.Protocol == "tcp" {
+					if len(undecoded) >= undecodedRingMax {
+						undecoded = undecoded[1:]
+					}
+					undecoded = append(undecoded, pkt)
+				}
+				continue
 			}
 			if pkt.Protocol != "tcp" {
 				t.logger.Debug("skipped non-tcp packet", "protocol", pkt.Protocol)
 				continue
 			}
-			evs, err := dispatcher.DecodeV2(t.ctx, pkt)
-			if err != nil {
-				t.logger.Debug("decode failed", "error", err, "src", pkt.Src, "dst", pkt.Dst)
-				decodeErrors++
-				// 解码失败时强制重新解析解码器：若插件已重启并重新注册，立即切换，
-				// 不必等待心跳超时（默认 30s）。
-				resolveDecoder(true)
+			if t.pcapFile != "" {
+				// pcap 回放：无实时约束，解码队列满时背压等待（不丢包）；
+				// 等待期间继续消费 decodedCh，避免与 decode worker 相互阻塞。
+				sent := false
+				for !sent {
+					select {
+					case decodeCh <- pkt:
+						sent = true
+					case evs := <-decodedCh:
+						processDecoded(evs)
+					case <-t.ctx.Done():
+						sent = true
+					}
+				}
 				continue
 			}
-			for _, ev := range evs {
-				if ev == nil {
-					continue
-				}
-				t.logger.Debug("decoded packet v2", "event_id", ev.Identity.ID, "event_type", ev.Identity.Type, "session", ev.Identity.SessionID)
-				// Protocol Behavior Resolver：把 JSON 解释为通信语义（identity/role/correlation/delivery/error）。
-				t.enrichProtocol(ev)
-				events = append(events, ev)
-
-				// State 层投影：从 _state_changes 提取并做 before/after 基线富化
-				scChanges, err := baseline.Apply(ev, t.sessionID)
-				if err != nil {
-					t.logger.Error("state projection", "event_id", ev.Identity.ID, "error", err)
-				} else {
-					enrichedSCs = append(enrichedSCs, scChanges...)
-				}
-
-				ms, err := engine.Process(t.ctx, ev)
-				if err != nil {
-					t.logger.Error("analyze event", "event_id", ev.Identity.ID, "error", err)
-					continue
-				}
-				metrics = append(metrics, ms...)
+			// 实时抓包：解码队列满时丢包保抓包（raw 已入缓冲，可离线 decode_raw 补救）。
+			select {
+			case decodeCh <- pkt:
+			default:
+				decodeDropN.Add(1)
 			}
 		}
 	}

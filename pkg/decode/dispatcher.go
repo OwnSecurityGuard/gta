@@ -2,20 +2,53 @@ package decode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/capture"
 	"gta/pkg/event"
-	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/schema"
 )
 
-// pendingInput 缓冲一个 input_id 的中间结果。
+// ErrDispatcherClosed 在流已关闭后提交请求时返回。
+var ErrDispatcherClosed = errors.New("decode dispatcher closed")
+
+// pendingInput 缓冲一个 input_id 的请求上下文与中间结果。
 type pendingInput struct {
+	req     *pb.DecodeRequest
+	connID  string
+	source  string
 	results []*pb.DecodeResponseV2
+	future  *Future
+}
+
+// Future 是一次异步解码的完成句柄，由 Dispatcher.Submit 返回。
+// Wait 阻塞直到解码完成/出错/ctx 取消；结果事件保持与提交顺序无关，
+// 调用方按自身需要的顺序 Wait 即可实现保序消费。
+type Future struct {
+	done   chan struct{}
+	events []*event.Event
+	err    error
+}
+
+// resolve 由 recvLoop 调用，恰好一次。
+func (f *Future) resolve(events []*event.Event, err error) {
+	f.events, f.err = events, err
+	close(f.done)
+}
+
+// Wait 阻塞直到解码完成、出错或 ctx 取消。
+func (f *Future) Wait(ctx context.Context) ([]*event.Event, error) {
+	select {
+	case <-f.done:
+		return f.events, f.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // causationIndex 维护 input_id → EventID 的最近 N 项映射。
@@ -60,11 +93,17 @@ func (c *causationIndex) Get(inputID string) (event.EventID, bool) {
 
 // Dispatcher 把 Packet 发给插件并产出 Event。
 // 内部维护一条持久的 gRPC DecodeV2 双向流。
+//
+// 流水线模式：Submit 提交请求立即返回 Future，recvLoop goroutine 负责
+// 接收响应并按 input_id 归还结果，因此支持多个在途请求（multi-in-flight），
+// 单包解码 RTT 不再阻塞后续提交。gRPC stream 的 Send/Recv 分别由
+// Submit 调用方（mu 保护）与 recvLoop 独占，符合 gRPC 并发约束。
 type Dispatcher struct {
 	client    pb.DecoderClient
 	streamV2  pb.Decoder_DecodeV2Client // V2 流（MsgPack）
 	sessionID string                    // 所屬 capture session ID，寫入 Event Identity
-	mu        sync.Mutex
+	mu        sync.Mutex                // 保护 pending map、closed 与 Send 串行化
+	closed    bool
 	logger    *slog.Logger // 带 session_id 等上下文的 logger
 
 	pending      map[string]*pendingInput
@@ -112,19 +151,24 @@ func NewDispatcher(client pb.DecoderClient, sessionID string, logger *slog.Logge
 	for _, opt := range opts {
 		opt(d)
 	}
+	go d.recvLoop()
 	return d, nil
 }
 
 // DecodeV2 发送单个 packet payload 并返回 Event 列表（0..N 个事件）。
+// 同步便捷封装：等价于 Submit + Future.Wait。需要流水线并发的调用方应直接用 Submit。
 func (d *Dispatcher) DecodeV2(ctx context.Context, pkt event.Packet) ([]*event.Event, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	return d.decodeV2Locked(ctx, pkt)
+	f, err := d.Submit(pkt)
+	if err != nil {
+		return nil, err
+	}
+	return f.Wait(ctx)
 }
 
-// decodeV2Locked 使用 V2 协议（MsgPack）解码，支持 0..N 结果，调用方需持有锁。
-func (d *Dispatcher) decodeV2Locked(ctx context.Context, pkt event.Packet) ([]*event.Event, error) {
+// Submit 异步提交一个包进行解码，立即返回 Future。
+// Send 与 pending 注册在 mu 内完成；Recv 由独立的 recvLoop goroutine 处理，
+// 因此多个 Submit 可同时在途（in-flight），互不阻塞。
+func (d *Dispatcher) Submit(pkt event.Packet) (*Future, error) {
 	inputID := string(event.NewEventID())
 	// 优先使用 Packet 自带的稳定 ID 作为 raw_packet_id；未分配时回退到 inputID。
 	packetID := pkt.ID
@@ -152,31 +196,65 @@ func (d *Dispatcher) decodeV2Locked(ctx context.Context, pkt event.Packet) ([]*e
 		TimestampNs:  pkt.Timestamp.UnixNano(),
 	}
 
+	f := &Future{done: make(chan struct{})}
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return nil, ErrDispatcherClosed
+	}
 	if err := d.streamV2.Send(req); err != nil {
+		d.mu.Unlock()
 		return nil, fmt.Errorf("send decode v2 request: %w", err)
 	}
+	d.pending[inputID] = &pendingInput{req: req, connID: connID, source: source, future: f}
+	d.mu.Unlock()
+	return f, nil
+}
 
-	d.pending[inputID] = &pendingInput{}
-
+// recvLoop 独占 streamV2 的 Recv 端：接收响应、按 input_id 聚合，
+// Done 时把结果事件 resolve 给对应 Future。流错误时唤醒所有等待者。
+func (d *Dispatcher) recvLoop() {
 	for {
 		resp, err := d.streamV2.Recv()
 		if err != nil {
-			delete(d.pending, inputID)
-			return nil, fmt.Errorf("receive decode v2 response: %w", err)
+			d.failAllPending(fmt.Errorf("receive decode v2 response: %w", err))
+			return
 		}
 
-		if resp.InputId != "" && resp.InputId != inputID {
-			d.logger.Warn("unexpected input_id in response", "expected", inputID, "got", resp.InputId)
+		inputID := resp.InputId
+		if inputID == "" {
+			d.logger.Warn("decode response without input_id, dropped")
 			continue
 		}
 
-		if resp.Done {
-			p := d.pending[inputID]
-			delete(d.pending, inputID)
-			return d.convertResultsToEvents(req, p.results, connID, source), nil
+		d.mu.Lock()
+		p, ok := d.pending[inputID]
+		if !ok {
+			d.mu.Unlock()
+			d.logger.Warn("unexpected input_id in response", "input_id", inputID)
+			continue
 		}
+		if resp.Done {
+			delete(d.pending, inputID)
+		} else {
+			p.results = append(p.results, resp)
+		}
+		d.mu.Unlock()
 
-		d.pending[inputID].results = append(d.pending[inputID].results, resp)
+		if resp.Done {
+			p.future.resolve(d.convertResultsToEvents(p.req, p.results, p.connID, p.source), nil)
+		}
+	}
+}
+
+// failAllPending 把底层流错误传播给所有在途 Future 并清空 pending。
+func (d *Dispatcher) failAllPending(err error) {
+	d.mu.Lock()
+	pending := d.pending
+	d.pending = make(map[string]*pendingInput)
+	d.mu.Unlock()
+	for _, p := range pending {
+		p.future.resolve(nil, err)
 	}
 }
 
@@ -243,12 +321,24 @@ func (d *Dispatcher) convertResultsToEvents(req *pb.DecodeRequest, results []*pb
 	return events
 }
 
-// Close 关闭底层 gRPC 流。
+// Close 关闭底层 gRPC 流，并把所有在途 Future 立即失败（ErrDispatcherClosed），
+// 防止调用方在流销毁后无限等待。
 func (d *Dispatcher) Close() error {
-	if d.streamV2 != nil {
-		return d.streamV2.CloseSend()
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return nil
 	}
-	return nil
+	d.closed = true
+	pending := d.pending
+	d.pending = make(map[string]*pendingInput)
+	err := d.streamV2.CloseSend()
+	d.mu.Unlock()
+
+	for _, p := range pending {
+		p.future.resolve(nil, ErrDispatcherClosed)
+	}
+	return err
 }
 
 // inferDirection 根据 src/dst 端口推断通信方向。

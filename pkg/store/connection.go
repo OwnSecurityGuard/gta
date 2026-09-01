@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,20 +96,29 @@ type ConnectionFrame struct {
 // QueryConnections 按 conn_id 聚合返回连接列表（最新在前）。
 // 数据主源为 raw_packets（原始帧，连接必然有帧）；event_index 仅用于补充解码事件统计。
 // capture.sqlite 为单 session 库，raw_packets 无 session_id 列，故仅按 conn_id 分组。
+// 端地址取连接首帧的 src/dst（TCP 由客户端发起，首帧方向即 client→server）；
+// 不能用 MIN(src)/MIN(dst)——双向流的两个方向各出现一次，字符串最小值会把
+// client/server 都折叠到同一端点。
 func (s *SQLiteStore) QueryConnections(ctx context.Context, sessionID string, limit, offset int) ([]ConnectionSummary, error) {
 	query := `
-		SELECT conn_id,
-		       MIN(timestamp) AS first_ts,
-		       MAX(timestamp) AS last_ts,
-		       COUNT(*) AS frame_count,
-		       MIN(src) AS src,
-		       MIN(dst) AS dst,
-		       MIN(protocol) AS protocol,
-		       MIN(metadata) AS metadata
-		FROM raw_packets
-		WHERE conn_id IS NOT NULL AND conn_id != ''
-		GROUP BY conn_id
-		ORDER BY MAX(timestamp) DESC`
+		SELECT r.conn_id,
+		       r.first_ts,
+		       r.last_ts,
+		       r.frame_count,
+		       (SELECT f.src FROM raw_packets f WHERE f.conn_id = r.conn_id ORDER BY f.timestamp ASC, f.rowid ASC LIMIT 1) AS src,
+		       (SELECT f.dst FROM raw_packets f WHERE f.conn_id = r.conn_id ORDER BY f.timestamp ASC, f.rowid ASC LIMIT 1) AS dst,
+		       (SELECT f.protocol FROM raw_packets f WHERE f.conn_id = r.conn_id ORDER BY f.timestamp ASC, f.rowid ASC LIMIT 1) AS protocol,
+		       (SELECT f.metadata FROM raw_packets f WHERE f.conn_id = r.conn_id ORDER BY f.timestamp ASC, f.rowid ASC LIMIT 1) AS metadata
+		FROM (
+			SELECT conn_id,
+			       MIN(timestamp) AS first_ts,
+			       MAX(timestamp) AS last_ts,
+			       COUNT(*) AS frame_count
+			FROM raw_packets
+			WHERE conn_id IS NOT NULL AND conn_id != ''
+			GROUP BY conn_id
+		) r
+		ORDER BY r.last_ts DESC`
 	query, args := applyLimitOffset(query, nil, limit, offset)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -478,7 +489,8 @@ func parsePacketTime(s string) time.Time {
 
 // endpointsFromMeta 从帧 metadata 还原 client/server/source，缺失时回退到 src/dst。
 func endpointsFromMeta(metaJSON, src, dst string) (client, server, source string) {
-	client, server, source = src, dst, ""
+	client, server = orientByPort(src, dst)
+	source = ""
 	if metaJSON == "" {
 		return client, server, source
 	}
@@ -496,4 +508,29 @@ func endpointsFromMeta(metaJSON, src, dst string) (client, server, source string
 		source = v
 	}
 	return client, server, source
+}
+
+// orientByPort 在无代理元数据（client_addr/server_addr）时按端口取向：
+// 临时客户端口总是高位（OS 从 49152+ 分配），端口低的一侧视为 server。
+// 首帧方向不可靠——中途加入的抓包首个观测包方向是随机的。
+// 无法解析端口时退化为 (src, dst) 原样返回。
+func orientByPort(src, dst string) (client, server string) {
+	sp, serr := parsePort(src)
+	dp, derr := parsePort(dst)
+	if serr != nil || derr != nil {
+		return src, dst
+	}
+	if sp < dp {
+		return dst, src // src 侧端口低 → src 是 server
+	}
+	return src, dst
+}
+
+// parsePort 提取 "ip:port" 形式地址串的端口部分。
+func parsePort(addr string) (int, error) {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(port)
 }

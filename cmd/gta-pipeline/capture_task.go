@@ -521,9 +521,14 @@ func (t *captureTask) run() {
 				return
 			}
 			// 在入缓冲与解码前为原始包分配稳定 ID，确保 raw_packet_id 能定位到 raw_packets 表的真实记录。
-			if pkt.ID == "" {
-				pkt.ID = string(event.NewEventID())
-			}
+		if pkt.ID == "" {
+			pkt.ID = string(event.NewEventID())
+		}
+		// 派生 conn_id：移动代理在 Metadata 携带真实 conn_id（优先保留）；
+		// agent / 本地网卡抓包没有，按规范五元组（双向排序）派生，使
+		// raw_packets 落库与解码事件上下文都带连接标识——Connections 页面
+		// 依赖 raw_packets.conn_id 聚合，缺失时整个页面为空。
+		deriveConnID(&pkt)
 			raws = append(raws, pkt)
 			resolveDecoder(false)
 			if disp.Load() == nil {
@@ -620,6 +625,30 @@ func (t *captureTask) resolveDecoderClient() (pb.DecoderClient, *schema.Registry
 		return nil, nil, false
 	}
 	return t.registry.FindFor(t.owner, "tcp")
+}
+
+// deriveConnID 为无连接标识的包派生 conn_id（幂等：已有则保留）。
+// 移动代理在 Packet.Metadata 携带真实 conn_id；agent / 本地网卡抓包没有，
+// 按 TCP 五元组双向排序生成规范键（同一连接两个方向得到相同 conn_id），
+// 写入 Metadata["conn_id"] 供 AppendRawPackets 落库与解码事件上下文使用。
+func deriveConnID(pkt *event.Packet) {
+	if pkt.Protocol != "tcp" {
+		return
+	}
+	if c, ok := pkt.Metadata["conn_id"].(string); ok && c != "" {
+		return
+	}
+	if !pkt.Src.IsValid() || !pkt.Dst.IsValid() {
+		return
+	}
+	a, b := pkt.Src.String(), pkt.Dst.String()
+	if b < a {
+		a, b = b, a
+	}
+	if pkt.Metadata == nil {
+		pkt.Metadata = map[string]any{}
+	}
+	pkt.Metadata["conn_id"] = "tcp:" + a + "<->" + b
 }
 
 // decoderAction 给定一次 registry.Find 的结果与当前 dispatcher 状态，

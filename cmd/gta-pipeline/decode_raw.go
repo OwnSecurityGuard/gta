@@ -371,7 +371,7 @@ func rawRowToPacket(r store.RawPacketRow) (event.Packet, error) {
 	if protocol == "" {
 		protocol = "tcp"
 	}
-	return event.Packet{
+	pkt := event.Packet{
 		ID:        r.ID,
 		Timestamp: r.Timestamp,
 		Raw:       r.Payload,
@@ -380,5 +380,9 @@ func rawRowToPacket(r store.RawPacketRow) (event.Packet, error) {
 		Dst:       dst,
 		Protocol:  protocol,
 		Metadata:  map[string]any{},
-	}, nil
+	}
+	// 与实时路径（capture_task）一致地派生 conn_id，保证离线补解码产生的
+	// 事件也能按连接聚合（Connections 页面的 event_count）。
+	deriveConnID(&pkt)
+	return pkt, nil
 }

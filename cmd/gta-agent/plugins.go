@@ -44,6 +44,7 @@ type pluginSupervisor struct {
 	registryAddr string
 	token        string
 	bind         []string // 非空时仅托管这些名字的本地插件（下载形态固化白名单）
+	killer       *childKiller
 
 	mu   sync.Mutex
 	pids map[string]int // plugin name -> 当前 pid（0 表示未运行）
@@ -92,6 +93,13 @@ func (s *pluginSupervisor) run(ctx context.Context, wg *sync.WaitGroup) int {
 	if len(plugins) == 0 {
 		slog.Info("no local plugins discovered", "dir", s.dir)
 		return 0
+	}
+	// 建立子进程绑杀机制（Windows Job Object / Unix Pdeathsig）。
+	// 建立失败仅降级（退回优雅停机路径），不阻断插件托管。
+	if k, err := newChildKiller(); err == nil {
+		s.killer = k
+	} else {
+		slog.Warn("child killer unavailable, orphan plugins possible on force kill", "error", err)
 	}
 	for _, p := range plugins {
 		// bind 为 nil 时不过滤（命令行形态托管全部本地插件）；
@@ -184,11 +192,23 @@ func (s *pluginSupervisor) startAndWait(ctx context.Context, p *plugindev.Discov
 		// 阻断插件继承 agent 的 stdio（Windows 下 cmd.SysProcAttr 不需要额外处理）。
 		cmd.Stdin = nil
 	}
+	// Unix 的 Pdeathsig 必须在 Start 前设置；失败仅告警（优雅路径仍可用）。
+	if s.killer != nil {
+		if err := s.killer.prepare(cmd); err != nil {
+			slog.Warn("prepare child killer for plugin", "plugin", p.Name, "error", err)
+		}
+	}
 	if err := cmd.Start(); err != nil {
 		if logFile != nil {
 			_ = logFile.Close()
 		}
 		return fmt.Errorf("start: %w", err)
+	}
+	// Windows 在进程启动后加入 Job Object；失败仅告警（优雅路径仍可用）。
+	if s.killer != nil {
+		if err := s.killer.attach(cmd); err != nil {
+			slog.Warn("attach plugin to job object", "plugin", p.Name, "pid", cmd.Process.Pid, "error", err)
+		}
 	}
 	slog.Info("plugin started", "plugin", p.Name, "pid", cmd.Process.Pid, "log", logPath)
 	s.setPID(p.Name, cmd.Process.Pid)

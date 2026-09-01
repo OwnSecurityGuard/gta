@@ -337,7 +337,7 @@ export function useSessionTimeline(
 // ===== 会话增强（状态 / 删除 / 网卡）=====
 
 /** get_session_status：查询指定会话的实时状态（gRPC 优先，失败降级元数据）。 */
-export function useSessionStatus(sessionId: string | null) {
+export function useSessionStatus(sessionId: string | null, refetchInterval = 5000) {
   return useQuery({
     queryKey: ["sessionStatus", sessionId],
     queryFn: () =>
@@ -345,7 +345,7 @@ export function useSessionStatus(sessionId: string | null) {
         session_id: sessionId ?? undefined,
       }),
     enabled: !!sessionId,
-    refetchInterval: 5000,
+    refetchInterval,
   });
 }
 

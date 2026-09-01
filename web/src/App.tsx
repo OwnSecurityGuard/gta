@@ -16,6 +16,7 @@ import { ProxyConfigDialog } from "@/components/proxy-config-dialog";
 import { AgentDownloadDialog } from "@/components/agent-download-dialog";
 import { MyCapturePage } from "@/components/my-capture-page";
 import { ProjectPage } from "@/components/project-page";
+import { SessionOverviewPage } from "@/components/session-overview-page";
 import { Button } from "@/components/ui/button";
 import { Sun, Moon, Settings, Play, Square, Cable, KeyRound, Download, ChevronDown, Check } from "lucide-react";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
@@ -24,11 +25,12 @@ import { useAuthError } from "@/hooks/use-auth";
 import { toast } from "@/components/ui/toast";
 import type { ProjectInfo } from "@/types/project";
 
-type ViewTab = "home" | "connections" | "timeline" | "analytics" | "decoded" | "runs" | "data" | "plugins" | "raw";
+type ViewTab = "home" | "overview" | "connections" | "timeline" | "analytics" | "decoded" | "runs" | "data" | "plugins" | "raw";
 
-/** 一级视图：普通用户最常用的入口（我的抓包 / 连接 / 时间线 / 分析）。 */
+/** 一级视图：普通用户最常用的入口（我的抓包 / 会话概览 / 连接 / 时间线 / 分析）。 */
 const PRIMARY_TABS: { id: ViewTab; label: string }[] = [
   { id: "home", label: "我的抓包" },
+  { id: "overview", label: "概览" },
   { id: "connections", label: "连接" },
   { id: "timeline", label: "时间线" },
   { id: "analytics", label: "分析" },
@@ -215,16 +217,24 @@ export default function App() {
     setSelectedProjectId(null);
   }, []);
 
-  // 项目详情页「开始抓包」：带项目 id 打开开始抓包弹窗（端口/插件按项目默认值）。
-  const handleProjectPageStart = useCallback((p: { id: string; name: string }) => {
-    setProjectPrefill({ projectId: p.id });
-    setStartOpen(true);
-  }, []);
+  // 项目详情页「开始抓包」：带项目默认端口/插件/项目 id 打开开始抓包弹窗，
+  // 抓包会话自动归属该项目（Project → Capture → Session 主流程无断点）。
+  const handleProjectPageStart = useCallback(
+    (p: { id: string; name: string; port?: number; plugin?: string }) => {
+      setProjectPrefill({
+        projectId: p.id,
+        port: p.port && p.port > 0 ? p.port : undefined,
+        plugin: p.plugin || undefined,
+      });
+      setStartOpen(true);
+    },
+    [],
+  );
 
-  // 从首页「最近会话」卡片进入会话详情并跳到「连接」主分析入口。
+  // 从首页「最近会话」卡片进入会话详情，默认落在「概览」（会话工作区入口）。
   const handleHomeSelectSession = useCallback((sessionId: string) => {
     handleSelectSession(sessionId);
-    setActiveTab("connections");
+    setActiveTab("overview");
   }, [handleSelectSession]);
 
   // Tab 键导航：左右方向键在 tablist 中移动焦点
@@ -494,6 +504,12 @@ export default function App() {
                 onOpenProject={handleOpenProject}
               />
             ))}
+          {activeTab === "overview" && (
+            <SessionOverviewPage
+              sessionId={selectedSessionId}
+              onNavigate={(tab) => setActiveTab(tab)}
+            />
+          )}
           {activeTab === "decoded" && (
             <div className="h-full overflow-auto p-4 gta-scroll">
               <EventTable sessionId={selectedSessionId} filter={filter} />
@@ -555,8 +571,9 @@ export default function App() {
         onStarted={(sessionId) => {
           setSelectedSessionId(sessionId);
           setFilter("");
-          // 抓包成功即跳到「连接」主分析入口，用户无需回侧边栏找会话。
-          setActiveTab("connections");
+          // 抓包成功即进入「概览」（会话工作区默认入口），
+          // 概览页可看到实时统计与最近连接/事件，并可一键跳到连接/时间线分析。
+          setActiveTab("overview");
         }}
         onRunLinked={(runId, sessionId) => {
           setLinkedRunId(runId);

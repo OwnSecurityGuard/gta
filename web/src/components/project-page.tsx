@@ -3,6 +3,7 @@
 // 展示项目身份（名称/game/创建者/描述）、运行状态（派生自最近会话）、成员、
 // 解码插件与规则（关联 chips，管理员可增删），以及最近会话入口。不做复杂管理后台，
 // 仅提供轻量的关联 chips + 增删表单 + 一键抓包。
+// 插件关联从「已注册插件」中选择（真实资源），而不是自由输入字符串。
 import { useState } from "react";
 import { ArrowLeft, Play, Plus, X } from "lucide-react";
 import {
@@ -11,6 +12,7 @@ import {
   useRemoveProjectMember,
   useSetProjectPlugins,
   useSetProjectRules,
+  useRegisteredPlugins,
 } from "@/hooks/use-mcp";
 import { useIdentity } from "@/hooks/use-auth";
 import { toast } from "@/components/ui/toast";
@@ -24,8 +26,8 @@ interface ProjectPageProps {
   projectId: string;
   onBack: () => void;
   onSelectSession: (sessionId: string) => void;
-  /** 从项目一键抓包 */
-  onStartProject: (p: { id: string; name: string }) => void;
+  /** 从项目一键抓包（带项目默认端口/插件，抓包会话自动归属该项目） */
+  onStartProject: (p: { id: string; name: string; port?: number; plugin?: string }) => void;
 }
 
 function statusDot(status?: string) {
@@ -58,27 +60,37 @@ export function ProjectPage({
   const recentSessions: ProjectRecentSession[] =
     data?.recent_sessions ?? project?.recent_sessions ?? [];
 
-  // 管理员判权：项目创建者本人 或 全局管理员。
+  // 管理员判权（与后端 CanManage 语义一致）：
+  // 项目创建者本人（owner）、项目内 admin 角色成员、或全局管理员。
   const identity = useIdentity();
   const isProjectAdmin =
     (project?.created_by != null && project.created_by === identity?.owner) ||
-    identity?.isAdmin === true;
+    identity?.isAdmin === true ||
+    (project?.members?.some((m) => m.user === identity?.owner && m.role === "admin") ?? false);
 
   // —— 增删成员 / 插件 / 规则 ——
   const addMember = useAddProjectMember(projectId);
   const removeMember = useRemoveProjectMember(projectId);
   const setPlugins = useSetProjectPlugins(projectId);
   const setRules = useSetProjectRules(projectId);
+  const members = project?.members ?? [];
+  const plugins = project?.plugins ?? [];
+  const rules = project?.rules ?? [];
+  const running = recentSessions.some((s) => s.status === "running");
+
+  // 已注册插件（真实资源）供关联选择；按名称去重，已关联的不再出现在候选里。
+  const { data: registeredPluginsData } = useRegisteredPlugins();
+  const registeredPluginNames: string[] = [];
+  for (const rp of registeredPluginsData?.plugins ?? []) {
+    if (!registeredPluginNames.includes(rp.name)) registeredPluginNames.push(rp.name);
+  }
+  const addedPluginNames = new Set(plugins.map((pl) => pl.name));
+  const candidatePlugins = registeredPluginNames.filter((n) => !addedPluginNames.has(n));
 
   const [memberUser, setMemberUser] = useState("");
   const [memberRole, setMemberRole] = useState<ProjectRole>("member");
   const [pluginName, setPluginName] = useState("");
   const [ruleName, setRuleName] = useState("");
-
-  const members = project?.members ?? [];
-  const plugins = project?.plugins ?? [];
-  const rules = project?.rules ?? [];
-  const running = recentSessions.some((s) => s.status === "running");
 
   function handleAddMember() {
     const user = memberUser.trim();
@@ -108,8 +120,9 @@ export function ProjectPage({
   function handleAddPlugin() {
     const name = pluginName.trim();
     if (!name) return;
+    // 关联已注册插件：id 直接用插件名（稳定、可对照注册表），不再前端造随机 id。
     setPlugins.mutate(
-      { plugins: [...plugins, { id: uid(), name }] },
+      { plugins: [...plugins, { id: name, name }] },
       {
         onSuccess: () => {
           setPluginName("");
@@ -219,8 +232,15 @@ export function ProjectPage({
               variant="default"
               size="sm"
               className="h-8 shrink-0"
-              onClick={() => onStartProject({ id: project.id, name: project.name })}
-              title="以该项目开始抓包"
+              onClick={() =>
+                onStartProject({
+                  id: project.id,
+                  name: project.name,
+                  port: project.default_port,
+                  plugin: project.default_plugin,
+                })
+              }
+              title="以该项目开始抓包（自动带入默认端口/插件，会话归属本项目）"
             >
               <Play className="h-4 w-4" />
               开始抓包
@@ -325,22 +345,39 @@ export function ProjectPage({
             )}
 
             {isProjectAdmin && (
-              <div className="mt-3 grid gap-2 border-t border-border pt-3 sm:grid-cols-[1fr_auto]">
-                <input
-                  value={pluginName}
-                  onChange={(e) => setPluginName(e.target.value)}
-                  placeholder="插件名称"
-                  className="h-9 rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddPlugin}
-                  disabled={setPlugins.isPending || !pluginName.trim()}
-                  className="inline-flex h-9 items-center justify-center gap-1 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  添加
-                </button>
+              <div className="mt-3 border-t border-border pt-3">
+                {candidatePlugins.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {registeredPluginNames.length === 0
+                      ? "当前没有已注册的插件。先在「插件」页启动解析器，使其注册到 Pipeline 后再关联。"
+                      : "所有已注册插件均已关联到本项目。"}
+                  </p>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <select
+                      value={pluginName}
+                      onChange={(e) => setPluginName(e.target.value)}
+                      aria-label="选择已注册插件"
+                      className="h-9 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                    >
+                      <option value="">选择已注册插件…</option>
+                      {candidatePlugins.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddPlugin}
+                      disabled={setPlugins.isPending || !pluginName.trim()}
+                      className="inline-flex h-9 items-center justify-center gap-1 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      添加
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

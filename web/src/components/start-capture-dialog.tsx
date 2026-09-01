@@ -2,10 +2,11 @@ import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { useStartCapture, useBeginCaptureRun, useRegisteredPlugins, useListInterfaces } from "@/hooks/use-mcp";
+import { useStartCapture, useBeginCaptureRun, useRegisteredPlugins, useListInterfaces, useAgentDownloadOptions, useSessionStatus } from "@/hooks/use-mcp";
+import { useAuthToken } from "@/hooks/use-auth";
 import { groupParsers, GROUP_LABEL } from "@/lib/parsers";
 import { toast } from "@/components/ui/toast";
-import { X, Check, Play, Network, Copy, ChevronDown } from "lucide-react";
+import { X, Check, Play, Network, Copy, ChevronDown, Loader2 } from "lucide-react";
 
 interface StartCaptureDialogProps {
   open: boolean;
@@ -37,9 +38,9 @@ export function StartCaptureDialog({
   // 从项目一键抓包时带入的项目 id（本次抓包会话归属到此项目）。
   const [projectId, setProjectId] = useState("");
   const [started, setStarted] = useState(false);
-  // agent 源启动成功后保持弹窗打开：成员机需要带真实会话ID的完整 gta-agent 命令
-  // （--session/--iface 缺一则只托管插件、不抓包推流），故展示可复制命令而非自动关窗。
-  const [agentCommand, setAgentCommand] = useState<string | null>(null);
+  // agent 源启动成功后保持弹窗打开：进入「等待设备 → 设备已连接」闭环，
+  // 直到轮询发现该会话有数据流入（Agent 已推流）才提示进入分析。
+  const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
   // 高级设置折叠：Interface/BPF 等技术细节默认收起，普通用户只看 端口 + 解析器。
   const [showAdvanced, setShowAdvanced] = useState(false);
   const start = useStartCapture();
@@ -56,10 +57,28 @@ export function StartCaptureDialog({
   // 已注册插件归组（Godot/Unity/HTTP/自定义），供普通用户以卡片而非下拉选择解析器。
   const pluginGroups = groupParsers(plugins);
 
+  // Agent 接入闭环：真实的服务端回连地址（来自 get_agent_download_options）与
+  // 当前访问令牌，用于生成成员机可直接复制执行的 gta-agent 完整命令。
+  const { data: agentOptions } = useAgentDownloadOptions();
+  const authToken = useAuthToken();
+  // 等待设备期间 2s 轮询会话实时状态：packets_in/raw_count > 0 即 Agent 已推流。
+  const { data: agentLiveStatus } = useSessionStatus(agentSessionId, 2000);
+  const agentPacketsIn =
+    (agentLiveStatus?.packets_in ?? 0) + (agentLiveStatus?.raw_count ?? 0);
+  const agentConnected = agentSessionId != null && agentPacketsIn > 0;
+  const agentSessionClosed = agentSessionId != null && agentLiveStatus?.state === "closed";
+
+  function buildAgentCommand(sessionId: string): string {
+    const host = agentOptions?.host || "<服务端IP>";
+    const registryPort = agentOptions?.registry_port || "9091";
+    const tokenArg = authToken ? ` --token ${authToken}` : "";
+    return `gta-agent --server ${host}:${registryPort}${tokenArg} --session ${sessionId} --iface <本机网卡>`;
+  }
+
   useEffect(() => {
     if (open) {
       setStarted(false);
-      setAgentCommand(null);
+      setAgentSessionId(null);
       // 打开时应用项目预填：有初始端口/插件才覆盖默认值，否则回到默认。
       if (initialPort && initialPort > 0) setPort(String(initialPort));
       if (initialPlugin) setPlugin(initialPlugin);
@@ -68,6 +87,16 @@ export function StartCaptureDialog({
     // 仅在每次打开时读取一次预填（把 initialPort/initialPlugin 当作当次快照）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Agent 连接成功提示（只弹一次：等待 → 已连接的边沿）。
+  const [agentConnectedNotified, setAgentConnectedNotified] = useState(false);
+  useEffect(() => {
+    if (agentConnected && !agentConnectedNotified) {
+      setAgentConnectedNotified(true);
+      toast.success("设备已连接", "Agent 正在推流，数据开始产生");
+    }
+    if (agentSessionId == null) setAgentConnectedNotified(false);
+  }, [agentConnected, agentConnectedNotified, agentSessionId]);
 
   function handleStart() {
     const p = parseInt(port, 10);
@@ -93,9 +122,9 @@ export function StartCaptureDialog({
           // 仅本机网卡抓包联动（有明确端口可生成 BPF 过滤）；agent 源的窗口由 agent 侧另行开启。
           if (source !== "nic") {
             // agent 抓包推流要求成员机以 --session/--iface 启动 gta-agent：
-            // 不自动关窗，展示含真实会话ID的完整命令供复制。
+            // 进入「等待设备」闭环（轮询会话状态直到 Agent 推流），不自动关窗。
             setStarted(true);
-            setAgentCommand(`gta-agent --server <服务端>:9091 --token <令牌> --session ${sessionId} --iface <本机网卡>`);
+            setAgentSessionId(sessionId);
             return;
           }
           const dbPath = data?.db_path ?? "";
@@ -131,9 +160,9 @@ export function StartCaptureDialog({
     );
   }
 
-  // 统一关闭路径：清掉 agent 命令状态再回调（重新打开时 useEffect 亦会兜底重置）。
+  // 统一关闭路径：清掉 agent 等待状态再回调（重新打开时 useEffect 亦会兜底重置）。
   function handleClose() {
-    setAgentCommand(null);
+    setAgentSessionId(null);
     onClose();
   }
 
@@ -165,29 +194,54 @@ export function StartCaptureDialog({
         </>
       }
     >
-      {agentCommand ? (
-        // agent 源成功态：展示含真实会话ID的完整启动命令，供成员机复制执行。
+      {agentSessionId ? (
+        // agent 源成功态：等待设备 → 设备已连接 的闭环展示。
         <div className="space-y-3">
+          {agentSessionClosed ? (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2.5 text-sm text-muted-foreground">
+              <X className="h-4 w-4 shrink-0" />
+              会话已结束（可能在成员机侧被停止）。
+            </div>
+          ) : agentConnected ? (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-700 dark:text-emerald-300">
+              <Check className="h-4 w-4 shrink-0" />
+              设备已连接，正在抓包推流
+              <span className="ml-auto font-mono text-xs">
+                {agentPacketsIn.toLocaleString()} packets ·{" "}
+                {(agentLiveStatus?.event_count ?? 0).toLocaleString()} events
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2.5 text-sm">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+              等待设备连接…
+              <span className="ml-auto text-xs text-muted-foreground">
+                在成员机运行下方命令后，Agent 将自动开始推流
+              </span>
+            </div>
+          )}
+
           <p className="text-sm">
-            会话已创建，请在成员机运行以下命令（agent 将抓取本机流量并推流到此会话）
+            会话已创建（<span className="font-mono text-xs">{agentSessionId}</span>
+            ），请在成员机运行以下命令：
           </p>
           <div className="rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-foreground break-all">
-            {agentCommand}
+            {buildAgentCommand(agentSessionId)}
           </div>
           <div className="flex items-center justify-end gap-2">
             <Button
               variant="outline"
               onClick={() => {
-                void navigator.clipboard.writeText(agentCommand);
-                toast.success("已复制");
+                void navigator.clipboard.writeText(buildAgentCommand(agentSessionId));
+                toast.success("已复制启动命令");
               }}
             >
               <Copy className="h-4 w-4" />
-              复制
+              复制命令
             </Button>
             <Button onClick={handleClose}>
               <Check className="h-4 w-4" />
-              完成
+              {agentConnected ? "进入会话分析" : "完成"}
             </Button>
           </div>
         </div>
@@ -225,11 +279,9 @@ export function StartCaptureDialog({
             </div>
             {source === "agent" && (
               <p className="mt-1.5 text-xs text-muted-foreground">
-                需在成员机运行{" "}
-                <code className="font-mono">
-                  gta-agent --server &lt;服务端&gt;:9091 --token &lt;令牌&gt; --session &lt;会话ID&gt; --iface &lt;本机网卡&gt;
-                </code>
-                ，agent 会抓取本机流量并推流到此会话（端口可留空，若填写端口，仅作记录用途）；会话ID 在启动后可从顶栏复制。
+                启动后会生成成员机可直接复制的完整 Agent 命令（自动填入服务端地址与令牌），
+                并在页面上等待设备连接——Agent 上线推流后自动变为「已连接」。
+                端口可留空（仅作记录用途）。
               </p>
             )}
           </div>

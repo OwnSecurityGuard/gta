@@ -111,6 +111,32 @@ func startSupervisor(t *testing.T, sup *pluginSupervisor, expect int) context.Ca
 	}
 }
 
+// TestSuperviseRelativePluginDir 复现默认 --plugin-dir=plugins（相对路径）形态：
+// Windows 上 cmd.Dir 为相对路径时 CreateProcess 报 ERROR_PATH_NOT_FOUND，
+// 插件永远起不来。supervisor 必须先把 Binary/Dir 固化为绝对路径再拉起。
+func TestSuperviseRelativePluginDir(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "plugins")
+	outPath := filepath.Join(t.TempDir(), "env.txt")
+	buildFakePlugin(t, root, "rel", outPath, "stay")
+
+	// 切到 base 目录用相对路径发现插件（测试期间与其它测试串行执行）。
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(base); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWD) }()
+
+	sup := &pluginSupervisor{dir: "plugins", registryAddr: "h:9091", token: ""}
+	stop := startSupervisor(t, sup, 1)
+	defer stop()
+
+	waitForFileContent(t, outPath, "registry=h:9091\ntunnel=1", 10*time.Second)
+}
+
 func TestSpawnEnvPropagationFull(t *testing.T) {
 	dir := t.TempDir()
 	outPath := filepath.Join(t.TempDir(), "env.txt")

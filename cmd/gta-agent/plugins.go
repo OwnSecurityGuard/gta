@@ -100,6 +100,15 @@ func (s *pluginSupervisor) run(ctx context.Context, wg *sync.WaitGroup) int {
 			slog.Info("skip plugin not in bind list", "name", p.Name)
 			continue
 		}
+		// 固化为绝对路径：--plugin-dir 常以相对路径传入（默认 "plugins"），
+		// 而 Windows CreateProcess 的 lpCurrentDirectory（cmd.Dir）必须是绝对
+		// 路径，相对值直接 ERROR_PATH_NOT_FOUND（fork/exec 失败、插件无限重启）。
+		if abs, err := filepath.Abs(p.Binary); err == nil {
+			p.Binary = abs
+		}
+		if abs, err := filepath.Abs(p.Dir); err == nil {
+			p.Dir = abs
+		}
 		slog.Info("hosting local plugin", "name", p.Name, "binary", p.Binary)
 		wg.Add(1)
 		go func(p *plugindev.DiscoveredPlugin) {

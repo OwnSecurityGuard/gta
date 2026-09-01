@@ -39,7 +39,7 @@ func seededBetaProject() *project {
 }
 
 // TestProjectMembershipVisibility 验证成员可见性：创建者与成员可见，外部不可见，
-// admin 可见全部；CanManage 仅创建者（非 admin）成立。
+// admin 可见全部；CanManage 仅创建者与 admin 角色成员（非全局 admin）成立。
 func TestProjectMembershipVisibility(t *testing.T) {
 	ps := newTestProjectStore(t)
 	ctx := context.Background()

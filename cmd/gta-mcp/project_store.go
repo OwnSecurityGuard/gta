@@ -182,9 +182,20 @@ func visibleTo(p *project, owner string) bool {
 	return false
 }
 
-// CanManage 判断 owner 是否可管理项目：全局 admin 或项目创建者。
+// CanManage 判断 owner 是否可管理项目：全局 admin、项目创建者，或项目内 admin 角色成员。
+// 角色层级：global admin > project owner(created_by) > project admin > project member；
+// member 角色仅可查看/使用项目（开始抓包、查看会话、分析数据），不具管理权。
+// Owner 不单列角色字段：created_by 即 owner，成员角色用 members[].role 表达。
 func (ps *projectStore) CanManage(p *project, owner string, all bool) bool {
-	return all || p.CreatedBy == owner
+	if all || p.CreatedBy == owner {
+		return true
+	}
+	for _, mbr := range p.Members {
+		if mbr.User == owner && mbr.Role == roleAdmin {
+			return true
+		}
+	}
+	return false
 }
 
 // projectRowScanner 抽象 sql.Row / sql.Rows 的 Scan 方法。

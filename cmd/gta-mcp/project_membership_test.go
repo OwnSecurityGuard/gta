@@ -140,6 +140,55 @@ func TestProjectMemberCannotManage(t *testing.T) {
 	}
 }
 
+// TestProjectAdminRoleCanManage 验证 admin 角色成员具备管理权（P0 权限语义修复）：
+// alice 把 bob 加为 admin 角色成员后，bob 可以设置插件、添加成员；
+// member 角色成员（carol）仍不可管理。
+func TestProjectAdminRoleCanManage(t *testing.T) {
+	m, _ := newProjectMCP(t)
+	id := createProjectAs(t, m, "alice")
+
+	// alice 添加 bob 为 admin 角色成员、carol 为 member 角色成员。
+	areq := mcp.CallToolRequest{}
+	areq.Params.Arguments = map[string]any{"project_id": id, "user": "bob", "role": "admin"}
+	if res, err := m.handleAddProjectMember(ctxOwner("alice"), areq); err != nil {
+		t.Fatal(err)
+	} else if text := resultText(t, res); strings.Contains(text, `"ok":false`) {
+		t.Fatalf("add member failed: %s", text)
+	}
+	creq := mcp.CallToolRequest{}
+	creq.Params.Arguments = map[string]any{"project_id": id, "user": "carol", "role": "member"}
+	if _, err := m.handleAddProjectMember(ctxOwner("alice"), creq); err != nil {
+		t.Fatal(err)
+	}
+
+	// bob（admin 角色）可以 set_project_plugins。
+	preq := mcp.CallToolRequest{}
+	preq.Params.Arguments = map[string]any{"project_id": id, "plugins": `[{"id":"http","name":"http"}]`}
+	if res, err := m.handleSetProjectPlugins(ctxOwner("bob"), preq); err != nil {
+		t.Fatal(err)
+	} else if text := resultText(t, res); strings.Contains(text, "forbidden") {
+		t.Errorf("bob (project admin role) should manage plugins: %s", text)
+	}
+
+	// bob（admin 角色）可以添加成员。
+	dreq := mcp.CallToolRequest{}
+	dreq.Params.Arguments = map[string]any{"project_id": id, "user": "dave", "role": "member"}
+	if res, err := m.handleAddProjectMember(ctxOwner("bob"), dreq); err != nil {
+		t.Fatal(err)
+	} else if text := resultText(t, res); strings.Contains(text, "forbidden") {
+		t.Errorf("bob (project admin role) should add members: %s", text)
+	}
+
+	// carol（member 角色）不可管理。
+	erreq := mcp.CallToolRequest{}
+	erreq.Params.Arguments = map[string]any{"project_id": id, "plugins": `[]`}
+	if res, err := m.handleSetProjectPlugins(ctxOwner("carol"), erreq); err != nil {
+		t.Fatal(err)
+	} else if text := resultText(t, res); !strings.Contains(text, "forbidden") {
+		t.Errorf("carol (member role) must not manage: %s", text)
+	}
+}
+
 // TestProjectCreatorCanManage 验证创建者可添加成员、设置插件。
 func TestProjectCreatorCanManage(t *testing.T) {
 	m, _ := newProjectMCP(t)

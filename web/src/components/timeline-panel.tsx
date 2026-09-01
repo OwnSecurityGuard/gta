@@ -727,6 +727,27 @@ function RpcCall({
           </span>
         )}
       </button>
+
+      {/* 失败解释：面向调试，直接回答「为什么这次请求失败」。 */}
+      {respStatus === "error" && (
+        <div className="border-t border-red-200/60 bg-red-50/60 px-3 py-2 dark:border-red-900/30 dark:bg-red-950/20">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300">
+            <OctagonX className="h-3.5 w-3.5" />
+            为什么这次请求失败
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-red-700/90 dark:text-red-300/90">
+            <span className="font-mono tabular-nums">
+              失败原因：{respErr?.code ? respErr.code : "服务器返回错误状态（无错误码）"}
+            </span>
+            {latency !== undefined && (
+              <span className="font-mono tabular-nums">耗时：{latency}ms</span>
+            )}
+            <span className="text-red-600/70 dark:text-red-300/70">
+              发送 {formatTimestampFull(req.timestamp)} → 响应 {formatTimestampFull(resp.timestamp)}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

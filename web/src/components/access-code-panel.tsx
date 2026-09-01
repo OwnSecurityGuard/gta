@@ -10,6 +10,7 @@ import {
   Clock,
 } from "lucide-react";
 import { useAgentDownloadOptions, useCreateAccessCode, useProjects } from "@/hooks/use-mcp";
+import { DeviceStatusList } from "@/components/device-status";
 import { toast } from "@/components/ui/toast";
 import type { CreateAccessCodeResult } from "@/types/access-code";
 
@@ -154,6 +155,17 @@ export function AccessCodePanel() {
 
   return (
     <div className="space-y-4">
+      {/* 0. 我的设备：接入状态闭环（生成启动码后，这里实时反映 等待接入 → 已连接 → 正在抓包）。 */}
+      <div>
+        <label className="flex items-center gap-1.5 text-sm font-medium">
+          <MonitorSmartphone className="h-3.5 w-3.5 text-muted-foreground" />
+          我的设备
+        </label>
+        <div className="mt-1.5">
+          <DeviceStatusList />
+        </div>
+      </div>
+
       {/* 1. 选择平台 + 端口 */}
       <div className="space-y-3">
         <div>

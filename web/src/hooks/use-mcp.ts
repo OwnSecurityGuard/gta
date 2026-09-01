@@ -800,6 +800,8 @@ export function useAccessCodes() {
     queryKey: ["accessCodes"],
     queryFn: () => mcpClient.callTool<ListAccessCodesResult>("list_access_codes"),
     staleTime: 10_000,
+    // 「我的设备」接入闭环靠轮询驱动：认领/会话状态变化需在数秒内反映到页面。
+    refetchInterval: 4_000,
   });
 }
 

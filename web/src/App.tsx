@@ -419,7 +419,7 @@ export default function App() {
               size="sm"
               className="h-8"
               onClick={() => setStartOpen(true)}
-              title="开始抓包（本机网卡 / 远程 agent）"
+              title="开始抓包（服务器网卡 / 远程 Agent）"
               aria-label="开始抓包"
             >
               <Play className="h-4 w-4" />

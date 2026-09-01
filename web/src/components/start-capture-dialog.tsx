@@ -5,7 +5,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { useStartCapture, useBeginCaptureRun, useRegisteredPlugins, useListInterfaces } from "@/hooks/use-mcp";
 import { groupParsers, GROUP_LABEL } from "@/lib/parsers";
 import { toast } from "@/components/ui/toast";
-import { X, Check, Play, Network, Copy } from "lucide-react";
+import { X, Check, Play, Network, Copy, ChevronDown } from "lucide-react";
 
 interface StartCaptureDialogProps {
   open: boolean;
@@ -40,6 +40,8 @@ export function StartCaptureDialog({
   // agent 源启动成功后保持弹窗打开：成员机需要带真实会话ID的完整 gta-agent 命令
   // （--session/--iface 缺一则只托管插件、不抓包推流），故展示可复制命令而非自动关窗。
   const [agentCommand, setAgentCommand] = useState<string | null>(null);
+  // 高级设置折叠：Interface/BPF 等技术细节默认收起，普通用户只看 端口 + 解析器。
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const start = useStartCapture();
   // 抓包成功后自动开启行为窗口：begin_capture_run 会读取 MCP 侧 current.json
   // （start_capture 已在服务端同步写入），从而复用同一 session_id，实现抓取↔窗口联动。
@@ -200,8 +202,8 @@ export function StartCaptureDialog({
             >
               {(
                 [
-                  { id: "nic", label: "本机网卡" },
-                  { id: "agent", label: "远程 agent" },
+                  { id: "nic", label: "服务器网卡" },
+                  { id: "agent", label: "远程 Agent" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -242,31 +244,42 @@ export function StartCaptureDialog({
               className="mt-1.5 font-mono"
             />
           </div>
-          {/* 可用网卡（只读参考）：捕获网卡在 MCP 启动时由 -iface 固定，不可按会话切换。 */}
-          <div>
-            <label className="flex items-center gap-1.5 text-sm font-medium">
-              <Network className="h-3.5 w-3.5 text-muted-foreground" />
-              可用网卡（参考）
-            </label>
-            {interfaces.length === 0 ? (
-              <p className="mt-1 text-xs text-muted-foreground">暂无可列举的网卡。</p>
-            ) : (
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {interfaces.map((iface) => (
-                  <span
-                    key={iface.name}
-                    className="rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
-                    title={iface.name}
-                  >
-                    {iface.name}
-                  </span>
-                ))}
-              </div>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">
-              网卡在 MCP 启动时由 <code className="font-mono">-iface</code> 固定，本对话框不切换网卡。
-            </p>
-          </div>
+          {/* 高级设置（默认收起）：Interface 等技术细节，普通用户只需选端口 + 解析器。 */}
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
+            高级设置
+          </button>
+          {showAdvanced && (
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-medium">
+                <Network className="h-3.5 w-3.5 text-muted-foreground" />
+                可用网卡（参考）
+              </label>
+              {interfaces.length === 0 ? (
+                <p className="mt-1 text-xs text-muted-foreground">暂无可列举的网卡。</p>
+              ) : (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {interfaces.map((iface) => (
+                    <span
+                      key={iface.name}
+                      className="rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                      title={iface.name}
+                    >
+                      {iface.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">
+                网卡在 MCP 启动时由 <code className="font-mono">-iface</code> 固定，本对话框不切换网卡。
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="text-sm font-medium">解码解析器（可选）</label>

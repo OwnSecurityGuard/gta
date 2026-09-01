@@ -4,16 +4,18 @@
 // 最近会话（一眼看出哪个值得进去看）。Session 不再是第一概念，只是后台会话的实现载体。
 import { useState } from "react";
 import {
-  MonitorPlay,
   Laptop,
   Smartphone,
+  Server,
   Plus,
   Trash2,
   Play,
   ChevronRight,
+  ChevronDown,
   Dot,
   FolderGit2,
 } from "lucide-react";
+import { DeviceStatusList } from "@/components/device-status";
 import { useSessions, useProjects, useCreateProject, useDeleteProject } from "@/hooks/use-mcp";
 import type { ProjectInfo } from "@/types/project";
 import { toast } from "@/components/ui/toast";
@@ -29,7 +31,7 @@ function sourceLabel(source: string) {
     case "agent":
       return "远程 Agent";
     default:
-      return "本机抓包";
+      return "服务器抓包";
   }
 }
 
@@ -74,6 +76,8 @@ export function MyCapturePage({
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPort, setNewPort] = useState("");
+  // 高级入口：把「服务器本机抓包」收进折叠，普通用户第一屏只看到两条主路径。
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   function handleCreate() {
     const name = newName.trim();
@@ -106,34 +110,23 @@ export function MyCapturePage({
           </p>
         </header>
 
-        {/* 开始抓包：三条来源 */}
+        {/* 开始抓包：两条主路径 + 高级服务器抓包 */}
         <section>
           <div className="rounded-2xl border border-border bg-card/60 p-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-foreground">开始一次抓包</h2>
-              <span className="text-[11px] text-muted-foreground">选择抓包来源</span>
+              <h2 className="text-sm font-medium text-foreground">开始抓包</h2>
+              <span className="text-[11px] text-muted-foreground">选择接入方式</span>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <button
-                type="button"
-                onClick={onStartDefault}
-                className="group rounded-xl border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/40"
-              >
-                <MonitorPlay className="h-6 w-6 text-primary" />
-                <p className="mt-2.5 text-sm font-medium">本机抓包</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  网卡 + 端口，抓本机指定服务的流量
-                </p>
-              </button>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={onAgentDownload}
                 className="group rounded-xl border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/40"
               >
                 <Laptop className="h-6 w-6 text-primary" />
-                <p className="mt-2.5 text-sm font-medium">远程电脑</p>
+                <p className="mt-2.5 text-sm font-medium">我的电脑</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  下载 Agent，在另一台电脑上抓包上报
+                  在我的电脑上运行 GTA Agent，接入后开始抓包
                 </p>
               </button>
               <button
@@ -144,10 +137,44 @@ export function MyCapturePage({
                 <Smartphone className="h-6 w-6 text-primary" />
                 <p className="mt-2.5 text-sm font-medium">手机代理</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  常驻代理服务，手机扫码即可接入抓包
+                  手机通过代理接入 GTA，扫码即可抓包
                 </p>
               </button>
             </div>
+
+            {/* 高级：服务器本机网卡抓包（服务端管理用，普通用户无需面对） */}
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              aria-expanded={showAdvanced}
+              className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
+              高级
+            </button>
+            {showAdvanced && (
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={onStartDefault}
+                  className="group rounded-xl border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/40"
+                >
+                  <Server className="h-6 w-6 text-muted-foreground" />
+                  <p className="mt-2.5 text-sm font-medium">服务器抓包</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    直接在 GTA 服务器网卡上抓包（面向服务端管理）
+                  </p>
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* 我的设备：接入状态闭环 */}
+        <section>
+          <h2 className="text-sm font-medium text-foreground">我的设备</h2>
+          <div className="mt-3">
+            <DeviceStatusList onSelectSession={onSelectSession} />
           </div>
         </section>
 

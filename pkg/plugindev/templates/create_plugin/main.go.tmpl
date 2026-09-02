@@ -1,0 +1,119 @@
+package main
+
+import (
+	"os"
+
+	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
+	"github.com/OwnSecurityGuard/gta-plugin-sdk"
+	"github.com/OwnSecurityGuard/gta-plugin-sdk/event"
+{{- if .FramingAvailable }}
+	"github.com/OwnSecurityGuard/gta-plugin-sdk/framing"
+{{- end }}
+)
+
+func main() {
+	// gta-agent 托管模式：agent 注入 GTA_TUNNEL=1 / GTA_AUTH_TOKEN 环境变量，
+	// 插件以隧道模式注册到共享 pipeline（无本地回拨端点）。
+	// 未设置环境变量时 opts 取零值，行为与 RunRegisterLoop 完全一致（本地 socket 注册）。
+	//
+	// 隧道与非隧道都必须带 token：两种模式只是「谁拨谁」不同，Register 走的是
+	// 同一条鉴权链路。曾在这里写成「仅隧道分支传 opts、否则走 RunRegisterLoop」，
+	// 导致本地直连插件的 GTA_AUTH_TOKEN 被丢弃，在开启鉴权的 pipeline
+	// （GTA_AUTH_TOKENS 非空）上必然注册失败。
+	sdk.RunRegisterLoopWithOptions(decodePacket, sdk.RegisterOptions{
+		Tunnel:    os.Getenv("GTA_TUNNEL") != "",
+		AuthToken: os.Getenv("GTA_AUTH_TOKEN"),
+	})
+}
+
+{{- if .FramingAvailable }}
+
+// decodePacket 是核心解码函数，签名匹配 sdk.DecodeFuncV2。
+// 输入：req.Payload（链路层字节）+ req.LinkType（参考 contract.yaml link_types 剥离）
+// 输出：通过 stream.Send 发送 DecodeResponseV2 结果（MsgPack 编码），最后发送 done=true。
+func decodePacket(req *pb.DecodeRequest, stream pb.Decoder_DecodeV2Server) error {
+	defer func() { _ = recover() }()
+
+	// 1) 按 link_type 剥离链路层封装，得到 L7 应用字节。pcap 类源必须走这一步。
+	seg, ok := framing.ExtractL7(req.GetPayload(), req.GetLinkType())
+	if !ok || len(seg.Payload) == 0 {
+		return done(stream, req) // 非 IP / 纯 ACK / 握手包：无可解码内容
+	}
+
+	// 2) TCP 重组：跨分段、乱序、重传的报文在此拼回连续字节流。
+	ra := framing.NewReassembler()
+	s := ra.Push(seg)
+	for {
+		buf := s.Bytes()
+		if len(buf) == 0 {
+			break
+		}
+		n := parseOneMessage(buf) // 返回已消费的字节数；0 表示消息不完整，等待下一段
+		if n == 0 {
+			break
+		}
+		s.Consume(n)
+		if err := emit(buf[:n], stream, req); err != nil {
+			return err
+		}
+	}
+	return done(stream, req)
+}
+
+// parseOneMessage 解析一个完整应用层消息，返回消耗的字节数（0 = 不完整）。
+// TODO: 在此实现你的协议解析（如按长度前缀 / 分隔符 / 固定头切分）。
+func parseOneMessage(buf []byte) int { return 0 }
+
+func emit(payload []byte, stream pb.Decoder_DecodeV2Server, req *pb.DecodeRequest) error {
+	payloadVal := event.ValueObject(map[string]event.Value{
+		// TODO: 填写业务字段
+	})
+	data, err := payloadVal.MarshalMsgpack()
+	if err != nil {
+		return err
+	}
+	return stream.Send(&pb.DecodeResponseV2{
+		InputId:        req.GetInputId(),
+		EventType:      "unknown",
+		SchemaId:       "unknown.v1",
+		PayloadMsgpack: data,
+	})
+}
+
+// done 告知 pipeline 该 input_id 已处理完毕。
+func done(stream pb.Decoder_DecodeV2Server, req *pb.DecodeRequest) error {
+	return stream.Send(&pb.DecodeResponseV2{InputId: req.GetInputId(), Done: true})
+}
+
+{{- else }}
+
+// decodePacket 是核心解码函数，签名匹配 sdk.DecodeFuncV2。
+//
+// 注意：当前固定引用的 gta-plugin-sdk 版本【不包含】framing 包
+// （create_plugin 返回 framing_available=false）。因此这里不提供 link_type
+// 剥离与 TCP 重组工具。对 pcap 类源，DecodeRequest.payload 仍是完整链路层帧——
+// 请改用含 framing 的 SDK 版本（framing.ExtractL7 / framing.NewReassembler），
+// 或在此自行实现链路层剥离与字节流重组，再解析业务字段。
+func decodePacket(req *pb.DecodeRequest, stream pb.Decoder_DecodeV2Server) error {
+	defer func() { _ = recover() }()
+
+	// TODO: 解析 req.Payload（链路层字节）+ req.LinkType（参考 contract.yaml link_types 剥离）
+	payload := event.ValueObject(map[string]event.Value{
+		// TODO: 填写业务字段
+	})
+	msgpackData, err := payload.MarshalMsgpack()
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&pb.DecodeResponseV2{
+		InputId:        req.GetInputId(),
+		EventType:      "unknown",
+		SchemaId:       "unknown.v1",
+		PayloadMsgpack: msgpackData,
+	}); err != nil {
+		return err
+	}
+	return stream.Send(&pb.DecodeResponseV2{InputId: req.GetInputId(), Done: true})
+}
+
+{{- end }}

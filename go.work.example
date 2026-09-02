@@ -1,0 +1,11 @@
+// 本文件是 go.work 的示例模板，供本地开发使用。
+// 用法：复制为 go.work（已被 .gitignore 忽略），按实际路径调整 SDK 路径。
+//
+// 仅在需要本地调试 gta-plugin-sdk 时才需要 go.work；
+// 正常构建只依赖 go.mod 中已发布的 SDK 版本。
+go 1.25.5
+
+use (
+	./
+	../gta-plugin-sdk
+)

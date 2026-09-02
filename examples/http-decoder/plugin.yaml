@@ -1,0 +1,147 @@
+# http-decoder — HTTP/1.1 解码插件清单与语义契约声明
+#
+# 解码 examples/http 的 client<->server 流量：HTTP 请求/响应 + JSON 信封
+#   {"header":{"cmd":<message id>},"body":{"seq":<correlation>,"error_code":<error>}}
+# 语义字段与 pkg/protocol 的 protocol.yaml（message.definitions / push / error）
+# 保持一致，供前端验证 message id / role / seq correlation / push / error 五类格式。
+
+api_version: gta.decoder/v2
+name: http-decoder
+protocol: http
+protocol_version: "1.1"
+type: decoder
+hints:
+  - http
+  - json
+  - tcp
+  - port:8984
+capabilities:
+  decode: true
+  schema: true
+  state: true
+contract:
+  name: gta.plugin
+  version: 1
+schemas:
+  - id: http.request
+    version: 1
+    name: HTTP request (envelope)
+    description: One parsed HTTP request with the header/body envelope semantics (cmd/msg_name/role/seq/push/error).
+    strict: true
+    fields:
+      flow_id:
+        type: string
+        semantic: entity_id
+        entity:
+          type: flow
+        description: Direction-independent TCP flow identifier (FlowKey.Canonical).
+      method:
+        type: string
+        description: HTTP request method (GET, POST, ...).
+      path:
+        type: string
+        description: URL path of the request.
+      requests:
+        type: int64
+        description: Number of requests decoded on this flow so far (state carrier).
+      cmd:
+        type: int64
+        queryable: true
+        description: Message id extracted from header.cmd (1001 LoginRequest, 2001 PlayerNotify).
+      msg_name:
+        type: string
+        queryable: true
+        description: Symbolic message name mapped from cmd (LoginRequest / PlayerNotify / unknown).
+      role:
+        type: string
+        queryable: true
+        description: Communication role (request | push).
+      is_push:
+        type: bool
+        description: True when cmd==2001 or seq==0 (push rule).
+      seq:
+        type: int64
+        queryable: true
+        description: Seq correlation key extracted from body.seq (0 for push).
+      body_text:
+        type: string
+        description: Complete request body text (truncated at 64KB, see body_truncated).
+      body_truncated:
+        type: bool
+        description: True when the captured body exceeded 64KB and was truncated.
+  - id: http.response
+    version: 1
+    name: HTTP response (envelope)
+    description: One parsed HTTP response with the header/body envelope semantics (cmd/msg_name/role/seq/error).
+    strict: true
+    fields:
+      flow_id:
+        type: string
+        semantic: entity_id
+        entity:
+          type: flow
+        description: Direction-independent TCP flow identifier (FlowKey.Canonical).
+      status:
+        type: int64
+        queryable: true
+        description: HTTP status code.
+      responses:
+        type: int64
+        description: Number of responses decoded on this flow so far (state carrier).
+      cmd:
+        type: int64
+        queryable: true
+        description: Message id extracted from header.cmd (1002 LoginResponse, 2001 PlayerNotify).
+      msg_name:
+        type: string
+        queryable: true
+        description: Symbolic message name mapped from cmd (LoginResponse / PlayerNotify / unknown).
+      role:
+        type: string
+        queryable: true
+        description: Communication role (response | push).
+      is_push:
+        type: bool
+        description: True when cmd==2001 or seq==0 (push rule).
+      seq:
+        type: int64
+        queryable: true
+        description: Seq correlation key extracted from body.seq (echoed from the request when present).
+      error_code:
+        type: int64
+        queryable: true
+        description: Error semantic extracted from body.error_code (0 = success, non-zero = failure).
+      is_error:
+        type: bool
+        description: True when error_code != 0.
+      body_text:
+        type: string
+        description: Complete response body text (truncated at 64KB, see body_truncated).
+      body_truncated:
+        type: bool
+        description: True when the captured body exceeded 64KB and was truncated.
+states:
+  - subject: http_request
+    schema: http.request
+    version: 1
+    id_field: flow_id
+    paths:
+      - requests
+  - subject: http_response
+    schema: http.response
+    version: 1
+    id_field: flow_id
+    paths:
+      - responses
+meta:
+  author: opencode
+  description: >-
+    HTTP/1.1 decoder for the examples/http client<->server traffic. Reassembles
+    the per-flow TCP stream (framing.ExtractL7 + Reassembler), parses HTTP
+    requests and responses, and extracts the JSON envelope semantics
+    (header.cmd / body.seq / body.error_code) to cover the five semantic
+    formats: message id, request/response role, seq correlation, push rule and
+    error. Body text is captured up to 64KB with a body_truncated flag.
+  game: http-demo
+  transport: http-json
+  decoded_directions: [client_to_server, server_to_client]

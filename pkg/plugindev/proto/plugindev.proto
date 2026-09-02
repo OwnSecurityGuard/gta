@@ -1,0 +1,225 @@
+syntax = "proto3";
+
+package gta.plugindev;
+
+option go_package = "gta/pkg/plugindev/proto";
+
+// PluginDev is the Developer Plane control surface. It owns the filesystem and
+// subprocesses for scaffolding, building, discovering, activating and
+// deactivating decoder plugins. gta-mcp is a pure forwarder to this service; in
+// production the service runs as the standalone gta-plugin-dev binary,
+// physically isolating all development capabilities from the runtime.
+service PluginDev {
+  // Scaffold renders the create_plugin skeleton and writes it under the
+  // server's configured plugins directory as <name>/.
+  rpc Scaffold(ScaffoldRequest) returns (ScaffoldResponse);
+  // ListPlugins returns plugins discovered on disk under the server's
+  // configured plugins directory.
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
+  // Build compiles a scaffolded plugin project, returning structured errors.
+  rpc Build(BuildRequest) returns (BuildResponse);
+  // Activate launches a local plugin binary and registers it with the runtime.
+  rpc Activate(ActivateRequest) returns (ActivateResponse);
+  // Deactivate stops a plugin process the Developer Plane launched.
+  rpc Deactivate(DeactivateRequest) returns (DeactivateResponse);
+  // Status returns the Developer Plane portion of a plugin's dual-state view
+  // (artifact from disk, the dev-launched process, and the last attempt).
+  rpc Status(StatusRequest) returns (StatusResponse);
+  // Explain attributes the most recent failed build or activation for a plugin
+  // (design §2.3 / P3a). It reads the Developer Plane's last_attempt and
+  // produces structured findings (category + optional rule_id + why + fix). On a
+  // failed build/activate the Developer Plane also auto-runs Explain and stores
+  // the result so Status can surface explain_ref immediately.
+  rpc Explain(ExplainRequest) returns (ExplainResponse);
+}
+
+message ScaffoldRequest {
+  string name = 1;
+  string protocol = 2;
+  string protocol_version = 3;
+  repeated string hints = 4;
+  // output_dir 严格指定生成目录：文件直接写入该目录（go.mod/main.go/plugin.yaml）。
+  // 留空则回退到服务端配置的 plugins 目录下的 <name>/。MCP 层会把用户传入的
+  // output_dir 透传到这里，确保「严格遵守输出目录」且返回实际路径。
+  string output_dir = 5;
+}
+
+message ScaffoldResponse {
+  string name = 1;
+  string output_dir = 2;
+  repeated string created = 3;
+  // sdk_version 是脚手架固定引用的 gta-plugin-sdk 版本（与开发指南/SDK 同版本发布）。
+  string sdk_version = 4;
+  // framing_available 标记当前 SDK 版本是否包含 framing 包。为 false 时生成的
+  // main.go 不会 import framing，并显式标注「framing 不可用」，避免引用缺失的导入。
+  bool framing_available = 5;
+}
+
+message ListPluginsRequest {}
+
+message DiscoveredPlugin {
+  string name = 1;
+  string binary = 2;
+  string dir = 3;
+}
+
+message ListPluginsResponse {
+  repeated DiscoveredPlugin plugins = 1;
+}
+
+message BuildRequest {
+  string name = 1;
+  int32 timeout_sec = 2;
+}
+
+message BuildError {
+  string file = 1;
+  int32 line = 2;
+  int32 col = 3;
+  string message = 4;
+}
+
+message BuildResponse {
+  bool ok = 1;
+  repeated BuildError errors = 2;
+  string output = 3;
+}
+
+message ActivateRequest {
+  string name = 1;
+  string registry_addr = 2;
+}
+
+message ActivateResponse {
+  string instance_id = 1;
+  bool ok = 2;
+  string message = 3;
+}
+
+message DeactivateRequest {
+  string name = 1;
+}
+
+message DeactivateResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message StatusRequest {
+  string name = 1;
+}
+
+// ArtifactState is the Developer Plane's disk-derived view of the code.
+message ArtifactState {
+  string state = 1;        // unknown | scaffolded | compiled | validated
+  string source_dir = 2;
+  string binary_path = 3;
+  bool binary_stale = 4;
+}
+
+// DevProcess is the Developer Plane's view of the process it launched.
+message DevProcess {
+  bool launched = 1;
+  int64 pid = 2;
+  string instance_id = 3;
+  bool alive = 4;
+  int64 launched_at_unix = 5;
+}
+
+// LastAttempt is the most recent build/activate/deactivate outcome, used for
+// failure attribution (design §2.3).
+message LastAttempt {
+  string action = 1;       // build | activate | deactivate
+  bool ok = 2;
+  int64 at_unix = 3;
+  int64 duration_ms = 4;
+  repeated BuildError errors = 5;
+  string message = 6;
+  string explain_ref = 7;  // P3a: points at a plugin.explain conclusion
+}
+
+message StatusResponse {
+  string name = 1;
+  ArtifactState artifact = 2;
+  DevProcess dev_process = 3;
+  LastAttempt last_attempt = 4;
+}
+
+// ExplainRequest asks for the attribution of a plugin's most recent failure.
+message ExplainRequest {
+  string name = 1;
+  // Optional: which attempt to explain (build | activate | deactivate |
+  // verify). If empty, the latest recorded attempt is explained.
+  string action = 2;
+  // Optional: an inline verify result to attribute (decode-class failures,
+  // P3b). When set, action is treated as "verify" and the result is classified
+  // directly. When omitted on a verify request, the most recent result
+  // recorded by plugin.verify (P4) via RecordVerify is used.
+  VerifyResult verify = 3;
+}
+
+// ExplainFinding is one attributed cause of failure.
+message ExplainFinding {
+  // Set for build failures (the structured compiler diagnostic). Nil for
+  // activation/process failures, which carry their cause in `why`.
+  BuildError error = 1;
+  // Machine category, e.g. undefined-symbol | type-mismatch | import | module |
+  // syntax | binary-missing | process-crash | already-active | start-failed.
+  string category = 2;
+  // Optional SDK contract rule_id (SSOT: contract.yaml rules: section) so the
+  // AI can cross-reference the same vocabulary used by brief/verify.
+  string rule_id = 3;
+  // Human explanation of why this failure happened.
+  string why = 4;
+  // Actionable corrective step.
+  string fix = 5;
+}
+
+// ExplainResponse is the conclusion of a plugin.explain invocation. Its `ref`
+// is what last_attempt.explain_ref points back to.
+message ExplainResponse {
+  string ref = 1;          // explain_ref, e.g. expl_<id>
+  string name = 2;
+  string action = 3;
+  int64 at_unix = 4;
+  string summary = 5;
+  repeated ExplainFinding findings = 6;
+  string next_action = 7;  // human-readable next step
+}
+
+// VerifyResult is the output of plugin.verify (P4): SDK contract violations,
+// gta-side quality statistics, and an overall verdict. plugin.explain (P3b)
+// consumes it to attribute decode-class failures (all-unknown / wrong framing /
+// suspected encryption / suspected missing reassembly).
+message VerifyResult {
+  repeated Violation violations = 1;
+  QualityStats quality = 2;
+  string verdict = 3; // pass | warn | fail
+}
+
+// Violation is a single SDK contract rule the verify corpus tripped. rule_id is
+// the shared vocabulary defined in contract.yaml (rules: section) and reused by
+// brief / verify / explain.
+message Violation {
+  string rule_id = 1;
+  string topic = 2;
+  string severity = 3;
+  string statement = 4;
+  string doc_ref = 5;
+  int32 count = 6;
+  string sample = 7;
+}
+
+// QualityStats holds the corpus-level signals plugin.explain classifies. All
+// fields are optional; a missing QualityStats means no statistical evidence is
+// available and explain falls back to violations only.
+message QualityStats {
+  int32 total_inputs = 1;
+  int32 unknown_inputs = 2;
+  double unknown_ratio = 3;
+  int32 correlated_inputs = 4;
+  int32 long_packet_errors = 5;
+  double entropy_estimate = 6;
+  double schema_versioned_ratio = 7;
+  int32 decode_errors = 8;
+}

@@ -1,0 +1,73 @@
+api_version: gta.decoder/v2
+name: godot-gateway
+protocol: godot-gateway
+protocol_version: "1"
+type: decoder
+hints:
+  - http
+  - json
+  - rest
+  - port:8088
+  - godot
+  - mmo
+  - ekonia
+# === 能力位（spec v3 §6）：声明 decode + schema，宿主据此校验/索引 payload ===
+capabilities:
+  decode: true
+  schema: true
+# === 语义契约版本块（spec v3 §3）===
+contract:
+  name: gta.plugin
+  version: 1
+# === schema 声明（宿主 ToSchemaRegistry 实际消费此段，不再读废弃的 event:）===
+# 字段均为 best-effort 解码，可变载荷标 optional:true；strict:false 使未知字段仅 WARN。
+schemas:
+  - id: godot_gateway.request
+    version: 1
+    name: Godot gateway client request
+    description: Client->gateway HTTP/1.1 REST request on the Godot Tiny MMO (Ekonia) auth/routing link.
+    strict: false
+    fields:
+      endpoint:          { type: string, queryable: true, description: Inferred gateway endpoint (handshake/login/world_enter/...). }
+      method:            { type: string, queryable: true }
+      path:              { type: string, queryable: true }
+      account_username:  { type: string, queryable: true, optional: true }
+      account_password:  { type: string, sensitive: true, optional: true }
+      client_version:    { type: string, optional: true }
+      world_id:          { type: string, optional: true }
+      account_id:        { type: int64, queryable: true, optional: true }
+      token:             { type: string, sensitive: true, optional: true }
+      character_id:      { type: string, optional: true }
+      character_name:    { type: string, optional: true }
+      skin:              { type: int64, optional: true }
+  - id: godot_gateway.response
+    version: 1
+    name: Godot gateway server response
+    description: Gateway->client HTTP/1.1 REST response on the Godot Tiny MMO (Ekonia) auth/routing link.
+    strict: false
+    fields:
+      endpoint:          { type: string, queryable: true }
+      endpoint_inferred: { type: bool }
+      status_code:       { type: int64, queryable: true }
+      error_name:        { type: string, optional: true }
+      error_message:     { type: string, optional: true }
+      ok:                { type: bool, optional: true }
+      world_address:     { type: string, optional: true }
+      world_port:        { type: int64, optional: true }
+      auth_token:        { type: string, sensitive: true, optional: true }
+      session_id:        { type: string, optional: true }
+      account_name:      { type: string, optional: true }
+      account_id:        { type: int64, queryable: true, optional: true }
+      worlds:            { type: array, optional: true }
+      characters:        { type: array, optional: true }
+meta:
+  author: opencode
+  description: >-
+    Decoder for the Godot Tiny MMO (Ekonia) client<->gateway auth/routing traffic.
+    The gateway speaks plain HTTP/1.1 REST with JSON bodies on 127.0.0.1:8088
+    (dev). Decodes all 8 /v1/* endpoints, expanding wire-short keys (a-u, a-p,
+    t-id, w-id, c-id, c-v) into readable fields and mapping server error codes to
+    names. Uses framing.ExtractL7 + Reassembler for loopback frames.
+  game: godot-tiny-mmo
+  transport: http-json
+  decoded_directions: [client_to_server, server_to_client]

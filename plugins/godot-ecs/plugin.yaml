@@ -1,0 +1,116 @@
+api_version: gta.decoder/v2
+name: godot-ecs
+protocol: godot-ecs
+protocol_version: "1"
+type: decoder
+hints:
+  - tcp
+  - json
+  - length-prefixed
+  - port:9250
+  - godot
+  - ecs
+# === 能力位（spec v3 §6）：声明 decode + schema ===
+capabilities:
+  decode: true
+  schema: true
+# === 语义契约版本块（spec v3 §3）===
+contract:
+  name: gta.plugin
+  version: 1
+# === schema 声明（宿主 ToSchemaRegistry 实际消费此段）===
+# 协议真源：Godot 客户端 op/net_client.gd + ecs-server/internal/{transport,ecsx}
+#   帧格式 [4B 大端长度 N][N 字节 JSON]，判别字段 "t"。
+# 全部 strict:false（未知字段仅 WARN）；条件字段一律 optional:true，避免 absent 被判 ERROR。
+schemas:
+  - id: godot_ecs.welcome
+    version: 1
+    name: ECS welcome (server -> client)
+    description: 连接建立时服务端下发的握手帧，告知客户端自身实体 ID、世界边界与广播频率。
+    strict: false
+    fields:
+      id:    { type: int64, queryable: true, description: 服务端分配的实体 ID }
+      hz:    { type: int64, queryable: true, description: 服务端模拟/广播频率 }
+      npcs:  { type: int64, queryable: true, optional: true, description: 服务端漫游 NPC 数量 }
+      min_x: { type: float64, optional: true, unit: m }
+      max_x: { type: float64, optional: true, unit: m }
+      min_z: { type: float64, optional: true, unit: m }
+      max_z: { type: float64, optional: true, unit: m }
+  - id: godot_ecs.pos
+    version: 1
+    name: ECS player position report (client -> server)
+    description: 客户端以 20Hz 上报的本地玩家位置/朝向/移动状态（客户端权威）。
+    strict: false
+    fields:
+      x:   { type: float64, unit: m }
+      y:   { type: float64, unit: m }
+      z:   { type: float64, unit: m }
+      yaw: { type: float64, unit: rad }
+      mv:  { type: bool, queryable: true, description: 是否处于移动状态 }
+      ts:  { type: int64, optional: true, description: 客户端时间戳，仅在 ping 帧携带 }
+  - id: godot_ecs.ping
+    version: 1
+    name: ECS ping (client -> server)
+    strict: false
+    fields:
+      ts: { type: int64, queryable: true, description: 客户端发起时间戳 }
+  - id: godot_ecs.pong
+    version: 1
+    name: ECS pong (server -> client)
+    strict: false
+    fields:
+      ts:   { type: int64, queryable: true, description: 回显的客户端时间戳，用于 RTT }
+      tick: { type: int64, queryable: true, description: 服务端当前帧号 }
+  - id: godot_ecs.state
+    version: 1
+    name: ECS world snapshot (server -> client)
+    description: 服务端 30Hz 广播的全量世界快照，含所有玩家与 NPC 实体状态。
+    strict: false
+    fields:
+      tick:      { type: int64, queryable: true, description: 服务端模拟帧号 }
+      ent_count: { type: int64, queryable: true, optional: true, description: 快照内实体数 }
+      # 注意：queryable 只对顶层标量子字段生效。数组元素不可查询——宿主投影是
+      # 「一个事件一行标量」，GetByPath 下不了数组下标（见 pkg/event/value.go）。
+      # 需要按实体维度查询时，另开扁平化的 per-entity 事件或做聚合字段。
+      ents:
+        type: array
+        optional: true
+        description: 实体状态数组（玩家 + 服务端漫游 NPC）
+        items:
+          type: object
+          fields:
+            id:      { type: int64, description: 网络实体 ID，NPC 从 10000 起 }
+            x:       { type: float64, optional: true, unit: m }
+            y:       { type: float64, optional: true, unit: m }
+            z:       { type: float64, optional: true, unit: m }
+            yaw:     { type: float64, optional: true, unit: rad }
+            mv:      { type: bool, optional: true, description: 移动状态 }
+            ph:      { type: float64, optional: true, description: 行走循环相位，驱动动画 }
+            near:    { type: int64, optional: true, description: 邻近实体数（半径 6m） }
+            nearest: { type: int64, optional: true, description: 最近邻实体 ID }
+            dist:    { type: float64, optional: true, unit: m, description: 与最近邻的距离 }
+  - id: godot_ecs.unknown
+    version: 1
+    name: ECS unrecognized frame (raw fallback)
+    description: 判别字段 "t" 未识别时的兜底事件，保留原始 JSON 以便排查协议演进。
+    strict: false
+    fields:
+      msg_type: { type: string, queryable: true, description: 原始 t 字段值 }
+      raw:      { type: string, optional: true, description: 原始 JSON 文本（截断至 4KB） }
+meta:
+  author: workbuddy
+  description: >-
+    Decoder for the Godot "op" client <-> ecs-server world sync traffic on
+    127.0.0.1:9250. The link is plain TCP carrying length-prefixed JSON frames
+    ([4B big-endian length N][N bytes UTF-8 JSON]), discriminated by the "t"
+    field. Client->server carries pos (20Hz position report, client-authoritative)
+    and ping; server->client carries welcome (assigned entity id, world bounds,
+    tick rate), pong (echoed ts + server tick) and state (30Hz full world
+    snapshot of every player and NPC: id, position, yaw, moving flag, walk phase,
+    neighbour count, nearest neighbour and distance). Uses framing.ExtractL7 +
+    Reassembler so frames spanning several TCP segments survive; direction is
+    determined by the server port (9250) and falls back to message-type
+    inference for proxy-class inputs.
+  game: godot-op-ecs
+  transport: tcp-length-prefixed-json
+  decoded_directions: [client_to_server, server_to_client]

@@ -1,0 +1,12 @@
+# 统一源码行尾为 LF，避免 CRLF 工作区导致 gofmt 全量误报与无意义 diff。
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.proto text eol=lf
+*.md text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.json text eol=lf

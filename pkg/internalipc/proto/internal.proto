@@ -1,0 +1,430 @@
+syntax = "proto3";
+
+package gta.internalipc;
+option go_package = "gta/pkg/internalipc/proto";
+
+// CaptureControl 由 gta-pipeline 进程提供，gta-mcp 作为 client 调用。
+// 仅控制面 unary RPC，无 streaming。数据面走 SQLite。
+service CaptureControl {
+  // StartCapture 启动一次抓包会话。
+  rpc StartCapture(StartCaptureRequest) returns (StartCaptureResponse);
+  // StopCapture 停止当前抓包会话。
+  rpc StopCapture(StopCaptureRequest) returns (StopCaptureResponse);
+  // GetCaptureStatus 查询抓包状态与统计。
+  rpc GetCaptureStatus(GetCaptureStatusRequest) returns (GetCaptureStatusResponse);
+  // ListCaptureSessions 列出当前活跃的抓包会话。
+  rpc ListCaptureSessions(ListCaptureSessionsRequest) returns (ListCaptureSessionsResponse);
+  // ListInterfaces 列出可用网卡。
+  rpc ListInterfaces(ListInterfacesRequest) returns (ListInterfacesResponse);
+  // DecodeRawPackets 用指定插件对离线会话的 raw_packets 批量解码，
+  // 结果写入该 session 的 events 表。
+  rpc DecodeRawPackets(DecodeRawPacketsRequest) returns (DecodeRawPacketsResponse);
+  // ListPlugins 列出当前已注册的插件摘要。
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
+  // GetPluginManifest 获取指定插件的 manifest bytes（plugin.yaml 原始内容）。
+  rpc GetPluginManifest(GetPluginManifestRequest) returns (GetPluginManifestResponse);
+  // DeregisterPlugin 注销指定插件（按 instance_id 或 name）。
+  rpc DeregisterPlugin(DeregisterPluginRequest) returns (DeregisterPluginResponse);
+  // SetSessionPlugin 运行中热切换某抓包会话的解码插件绑定。
+  // 切换后立即触发解码器重解析，无需停止再重启抓包。
+  rpc SetSessionPlugin(SetSessionPluginRequest) returns (SetSessionPluginResponse);
+  // WatchPlugins 服务端流式推送插件注册表状态变化（register/deregister/online/offline）。
+  // 用于前端即时刷新插件面板、以及抓包侧即时感知插件上下线，避免轮询延迟。
+  rpc WatchPlugins(WatchPluginsRequest) returns (stream PluginEvent);
+  // TestPlugin 用指定插件对离线会话的 raw_packets 解码并采样返回，用于验证插件解码质量。
+  // 原始包字节仅进程内使用，绝不回传前端；结果不落库（隔离测试，不污染会话真实解码数据）。
+  // 该能力不暴露原始包，因此无需 --enable-raw-debug 门控。
+  rpc TestPlugin(TestPluginRequest) returns (TestPluginResponse);
+  // Verify 用指定插件对离线会话的 raw_packets 解码并做契约+质量校验，
+  // 产出 violations（引 SDK checker，带 rule_id）+ quality（gta 统计）+ verdict。
+  // 仅统计不落库；validated 证明写入 Developer Plane 的 Tracker（跨平面）。
+  rpc Verify(VerifyRequest) returns (VerifyResponse);
+  // SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
+  // 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
+  rpc SampleBytes(SampleBytesRequest) returns (SampleBytesResponse);
+  // GetRegistryAddr 返回插件应连接注册中心地址（即 -registry-addr 的值，如 :9091）。
+  // gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
+  // 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
+  rpc GetRegistryAddr(GetRegistryAddrRequest) returns (GetRegistryAddrResponse);
+  // GetProxyConfig 返回当前代理抓包服务器配置与运行时状态（agent 子进程 + 代理会话）。
+  rpc GetProxyConfig(GetProxyConfigRequest) returns (GetProxyConfigResponse);
+  // UpdateProxyConfig 应用新的代理抓包服务器配置：持久化 proxy.json、热重启
+  // gta-singbox-agent、并确保代理抓包会话常驻（免手动开始抓包）。
+  rpc UpdateProxyConfig(UpdateProxyConfigRequest) returns (UpdateProxyConfigResponse);
+}
+
+// DecodeRawPacketsRequest 离线解码请求。
+// session_id 指定待解码的会话；plugin 指定解码插件（必填）。
+// protocol/src/dst/limit 为可选过滤条件，限定解码范围。
+// clear_existing 为 true 时先清空该 session 的 events 再写入。
+message DecodeRawPacketsRequest {
+  string session_id = 1;
+  string plugin = 2;
+  string protocol = 3;
+  string src = 4;
+  string dst = 5;
+  int64 limit = 6;
+  bool clear_existing = 7;
+}
+
+// DecodeRawPacketsResponse 离线解码结果统计。
+message DecodeRawPacketsResponse {
+  int64 total_raw = 1;       // 符合过滤条件的原始包总数
+  int64 decoded = 2;         // 成功解码数
+  int64 decode_errors = 3;   // 解码失败数
+}
+
+// TestPluginRequest 插件测试请求（隐私安全：不回传原始包）。
+message TestPluginRequest {
+  string session_id = 1;     // 原始包来源会话（仅离线/stopped）
+  string plugin = 2;         // 被测插件名（按名路由，可不同于会话原插件）
+  string protocol = 3;       // 可选过滤：协议
+  string src = 4;            // 可选过滤：源 ip:port
+  string dst = 5;            // 可选过滤：目的 ip:port
+  int64 limit = 6;           // 测试包上限，0=全部
+  int64 sample_limit = 7;    // 返回的解码事件采样上限（建议默认 50）
+}
+
+// TestEventLite 采样解码事件（插件解出来的相关数据，不含原始字节）。
+message TestEventLite {
+  string id = 1;
+  int64 timestamp_unix = 2;
+  string type = 3;
+  string schema_id = 4;
+  string data_json = 5;      // 拍平后的关键 data.* 字段 JSON（可能截断）
+}
+
+// TestErrorLite 单个解码失败样例（仅含定位信息，不含原始字节）。
+message TestErrorLite {
+  string raw_packet_id = 1;
+  string src = 2;
+  string dst = 3;
+  string error = 4;
+}
+
+// TestPluginResponse 插件测试结果：计数 + 类型分布 + 采样事件 + 错误样例。
+message TestPluginResponse {
+  int64 total_raw = 1;
+  int64 decoded = 2;
+  int64 decode_errors = 3;
+  map<string, int64> type_histogram = 4;   // 事件类型 → 计数（全量）
+  repeated TestEventLite sample_events = 5;
+  repeated TestErrorLite error_samples = 6;
+}
+
+// VerifyRequest 插件验证请求（契约+质量校验）。参数与 TestPlugin 同源：
+// 指定会话 + 插件，可选 protocol/src/dst/limit 过滤。
+message VerifyRequest {
+  string session_id = 1;
+  string plugin = 2;
+  string protocol = 3;
+  string src = 4;
+  string dst = 5;
+  int64 limit = 6;        // 0 = 全部
+}
+
+// VerifyViolation 单条契约违规（源自 SDK contract checker，带 rule_id）。
+message VerifyViolation {
+  string rule_id = 1;
+  string topic = 2;
+  string severity = 3;
+  string statement = 4;
+  string doc_ref = 5;
+  int32 count = 6;
+  string sample = 7;
+}
+
+// VerifyQuality gta 侧语料级统计（与 plugin.explain 共享判据）。
+message VerifyQuality {
+  int64 total_inputs = 1;
+  int64 unknown_inputs = 2;
+  double unknown_ratio = 3;
+  int64 correlated_inputs = 4;
+  int64 long_packet_errors = 5;
+  double entropy_estimate = 6;
+  double schema_versioned_ratio = 7;
+  int64 decode_errors = 8;
+}
+
+// VerifyResponse 验证结论：violations + quality + verdict，外加溯源字段。
+message VerifyResponse {
+  string verdict = 1;                 // pass | warn | fail
+  repeated VerifyViolation violations = 2;
+  VerifyQuality quality = 3;
+  string verify_run_id = 4;
+  string session_id = 5;
+  int64 at_unix = 6;
+}
+
+// SampleBytesRequest 取证取样请求。limit/max_bytes 为请求值，服务端封顶
+// （20 包 / 64 字节），审计记真实返回量。
+message SampleBytesRequest {
+  string session_id = 1;
+  string plugin = 2;          // 仅用于审计 actor 标注
+  int64 limit = 3;            // 请求包上限（服务端封顶 20）
+  int32 max_bytes = 4;        // 每包字节上限（服务端封顶 64）
+}
+
+// SampledPacket 单个原始包的事实快照（无解释）。
+message SampledPacket {
+  string raw_packet_id = 1;
+  string src = 2;
+  string dst = 3;
+  int64 length = 4;
+  string hex = 5;             // 截断后的 hexdump
+  double entropy = 6;         // 该包熵估计（bits/byte）
+  int32 first_byte = 7;
+}
+
+// SampleBytesResponse 取证事实 + 审计回执。
+message SampleBytesResponse {
+  string session_id = 1;
+  int64 requested_packets = 2;
+  int64 returned_packets = 3;
+  int64 returned_bytes = 4;
+  bool truncated = 5;
+  repeated SampledPacket packets = 6;
+  map<int32, int64> length_histogram = 7;        // 长度桶 → 计数
+  map<int32, int64> first_byte_distribution = 8; // 首字节 → 计数
+  double mean_entropy = 9;                        // 整体熵估计
+  int64 audit_id = 10;                            // plugin_debug_access 行 id
+}
+
+message PcapLiveConfig {
+  string device = 1;
+  string bpf = 2;
+  int32 snap_len = 3;
+  bool promisc = 4;
+}
+
+message PcapFileConfig {
+  string path = 1;
+}
+
+// MobileSourceConfig 启动移动代理抓包（gta-singbox-agent 推送）。
+// 监听地址形如 "127.0.0.1:9090"（tcp）或 "unix:///tmp/gta-mobile.sock"（unix）。
+message MobileSourceConfig {
+  string listen_addr = 1;   // gRPC 服务监听地址，agent 连这里
+}
+
+message StartCaptureRequest {
+  string session_id = 1;
+  string plugin = 2;
+  int32 port = 3;
+  oneof source {
+    PcapLiveConfig live = 4;
+    PcapFileConfig file = 5;
+    MobileSourceConfig mobile = 6;
+  }
+  // agent 为 true 时本会话订阅 agent capture source（gta-agent 经 AgentIngest
+  // 按 session_id 推送原始帧）。可与 oneof source 组合（同时抓网卡等）；
+  // 单独为 true 且无 oneof source 时表示纯 agent 会话。
+  bool agent = 7;
+  // 调用方身份（gta-mcp 从 HTTP auth ctx 提取后透传，见 ListPluginsRequest）。
+  // pipeline 用它记录会话归属（ControlStore SessionMeta.Owner / captureTask.owner）。
+  string owner = 8;
+  bool all_owners = 9;
+  // 会话归属的项目（projects.id），可选。gta-mcp 从 HTTP 入参透传。
+  string project_id = 10;
+}
+
+message StartCaptureResponse {
+  string session_id = 1;
+  string state = 2;
+  string db_path = 3;
+}
+
+message StopCaptureRequest {
+  string session_id = 1;
+}
+
+message StopCaptureResponse {
+  string state = 1;
+  int64 raw_packets = 2;
+  int64 events = 3;
+  int64 metrics = 4;
+  int64 decode_errors = 5;
+  double duration_sec = 6;
+}
+
+message GetCaptureStatusRequest {
+  string session_id = 1;
+}
+
+message GetCaptureStatusResponse {
+  string state = 1;
+  string source_name = 2;
+  uint64 packets_in = 3;
+  uint64 packets_out = 4;
+  uint64 bytes_in = 5;
+  uint64 bytes_out = 6;
+  uint64 drops = 7;
+  uint64 errors = 8;
+  string err = 9;
+  int64 raw_count = 10;
+  int64 event_count = 11;
+  int64 metric_count = 12;
+  int64 decode_errors = 13;
+  // agent_connected：agent 源会话当前是否有活跃推流连接。
+  // true 只代表"连上了"，不代表有流量 —— 连上但 raw_count 为 0 是极常见的
+  // 状态，UI 必须能区分二者并给出不同指引。非 agent 源恒为 false；
+  // pipeline 未注入 agent 活性源时无法判定，按 false 处理。
+  bool agent_connected = 14;
+  // agent_last_seen_unix：最近一次收到该会话 agent 数据包的 Unix 秒。
+  // 0 表示从未收到过数据，用于区分"一直没流量"与"曾经有、现在停了"。
+  int64 agent_last_seen_unix = 15;
+}
+
+message ListInterfacesRequest {}
+
+message ListInterfacesResponse {
+  repeated string names = 1;
+}
+
+message ListCaptureSessionsRequest {}
+
+message ListCaptureSessionsResponse {
+  repeated CaptureSessionSummary sessions = 1;
+}
+
+message CaptureSessionSummary {
+  string session_id = 1;
+  string state = 2;
+  string source_name = 3;
+  int32 port = 4;
+  string plugin = 5;
+  string interface = 6;
+  string pcap_file = 7;
+  int64 started_at_unix = 8;
+}
+
+// ---- Plugin Management ----
+
+// ListPluginsRequest 列出已注册插件。owner/all_owners 来自调用方身份
+// （gta-mcp 从 HTTP auth ctx 提取后透传）：非 admin 只见自己的 + 匿名注册的
+// 插件；all_owners=true（admin）见全部；两者均空 = 匿名/本地语境（只见匿名插件）。
+message ListPluginsRequest {
+  string owner = 1;
+  bool all_owners = 2;
+}
+
+// PluginSummary 插件注册摘要。
+message PluginSummary {
+  string instance_id = 1;
+  string name = 2;
+  string protocol = 3;
+  string type = 4;
+  string api_version = 5;
+  string socket_path = 6;
+  bool online = 7;
+  int64 last_heartbeat_unix = 8;
+  string owner = 9; // 注册方属主（空串 = 匿名/系统插件）
+}
+
+message ListPluginsResponse {
+  repeated PluginSummary plugins = 1;
+}
+
+message GetPluginManifestRequest {
+  string name = 1; // 插件名，留空返回所有
+  string owner = 2; // 调用方属主（owner 作用域查找，见 ListPluginsRequest）
+  bool all_owners = 3; // admin：任意 owner 的插件均可查
+}
+
+message GetPluginManifestResponse {
+  bytes manifest = 1; // plugin.yaml 原始 bytes
+  string name = 2;
+}
+
+message DeregisterPluginRequest {
+  string instance_id = 1; // 优先使用 instance_id
+  string name = 2;        // 备选：按 name 注销所有匹配实例
+}
+
+message DeregisterPluginResponse {
+  bool ok = 1;
+  string instance_id = 2;
+  string name = 3;
+}
+
+// SetSessionPluginRequest 运行中热切换解码插件绑定请求。
+// session_id 指定目标抓包会话；plugin 为新的解码插件名（按名精确路由）。
+message SetSessionPluginRequest {
+  string session_id = 1;
+  string plugin = 2;
+}
+
+// SetSessionPluginResponse 热切换结果。
+message SetSessionPluginResponse {
+  bool ok = 1;
+  string session_id = 2;
+  string plugin = 3;     // 切换后的实际绑定插件名
+  string message = 4;    // 错误信息或状态说明
+}
+
+// ---- Plugin Event Stream ----
+
+// WatchPluginsRequest 订阅插件事件流（无参数）。
+message WatchPluginsRequest {}
+
+// PluginEvent 插件注册表状态变化通知。
+// type 取值：register（新注册）| deregister（主动注销）| online（离线→在线）| offline（在线→离线）。
+message PluginEvent {
+  string type = 1;             // register | deregister | online | offline
+  string instance_id = 2;      // 插件实例 ID
+  string name = 3;             // 插件名（manifest.name）
+  bool online = 4;             // 事件后是否在线
+  int64 timestamp_unix = 5;    // 事件发生时间（Unix 秒）
+}
+
+// GetRegistryAddrRequest 无参数。
+message GetRegistryAddrRequest {}
+
+// GetRegistryAddrResponse 返回插件应连接的注册中心地址。
+// registry_addr 即 gta-pipeline 的 -registry-addr（如 :9091），插件启动时必须
+// 将其填入 GTA_REGISTRY_ADDR 才能向运行时注册。空字符串表示 pipeline 未配置注册中心。
+message GetRegistryAddrResponse {
+  string registry_addr = 1;
+}
+
+// GetProxyConfigRequest 无参数，返回 pipeline 当前的代理抓包服务器配置。
+message GetProxyConfigRequest {}
+
+// ProxyConfigState 是代理抓包服务器的配置 + 运行时状态快照。
+message ProxyConfigState {
+  string listen_addr = 1;    // agent HTTP CONNECT 代理监听地址（手机连这里）
+  string server_addr = 2;    // mobile Source gRPC 监听地址（agent 推这里）
+  bool agent_running = 3;    // gta-singbox-agent 子进程是否存活
+  int32 agent_pid = 4;       // agent 子进程 PID（未运行时为 0）
+  bool session_running = 5;  // 代理抓包会话是否运行中
+  string session_id = 6;     // 代理抓包会话 id（未运行时为空）
+  string config_path = 7;    // 配置文件绝对路径
+  string plugin = 8;         // 代理抓包会话绑定的解码插件名（空=仅抓原始包）
+  repeated string include_hosts = 9;  // 连接筛选：仅抓取目标主机在此列表内的连接
+  repeated int32 include_ports = 10;  // 连接筛选：仅抓取目标端口在此列表内的连接
+  int64 active_conns = 11;   // 当前活跃手机连接数（open - close）
+  uint64 total_conns = 12;   // 累计打开连接数
+  int64 last_data_unix = 13; // 最近一次收到数据的 unix 毫秒（0=从未）
+  uint64 total_bytes = 14;   // 累计接收应用层字节
+}
+
+message GetProxyConfigResponse {
+  ProxyConfigState state = 1;
+}
+
+// UpdateProxyConfigRequest 新的代理抓包服务器配置。
+// listen_addr 必填（host:port）；其余字段可空（走默认值，等价于不修改）。
+// include_hosts/include_ports 为空表示不筛选（抓取全部连接）。
+message UpdateProxyConfigRequest {
+  string listen_addr = 1;
+  string server_addr = 2;
+  string plugin = 3;
+  repeated string include_hosts = 4;
+  repeated int32 include_ports = 5;
+}
+
+message UpdateProxyConfigResponse {
+  bool ok = 1;
+  string message = 2;        // 错误信息或状态说明
+  ProxyConfigState state = 3; // 应用后的最新状态
+}

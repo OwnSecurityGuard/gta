@@ -1,0 +1,80 @@
+# docker-compose.yml（T15）——团队服务端：gta-pipeline + gta-mcp，共用同一镜像与 /data 卷。
+#
+# 共享存储说明：两个服务挂同一 /data 卷，共享同一份 control.sqlite 与会话库。
+# 这是有意设计：pipeline 是事件/会话元数据的唯一写入方（Runtime Plane），mcp
+# 主要读 + 少量会话管理写。SQLite 以 WAL + busy_timeout=5000 打开（见
+# pkg/store/sqlite.go、pkg/store/session_store.go），跨进程读写安全并发。
+# 仍建议单实例部署 pipeline 与 mcp 各一个，不要横向扩容多副本。
+#
+# 用法：
+#   cp .env.example .env   # 至少设置 GTA_AUTH_TOKENS
+#   docker compose up -d
+#
+# 配置（T10 统一配置）：容器内 GTA_HOME=/data，各监听地址用 GTA_* 环境变量覆盖
+# （与 pkg/config/app.go 对齐）；端口映射用 .env 里的 GTA_*_PORT 变量调整。
+
+services:
+  pipeline:
+    build:
+      context: .
+      args:
+        VERSION: ${GTA_VERSION:-dev}
+        GIT_COMMIT: ${GTA_GIT_COMMIT:-unknown}
+        # 前端「原始包」调试页开关（构建期注入 web/，默认关闭）
+        VITE_ENABLE_RAW_DEBUG: ${VITE_ENABLE_RAW_DEBUG:-0}
+    image: gta-server:${GTA_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      GTA_HOME: /data
+      # 鉴权 token 表（必填）：格式 owner=token，逗号分隔，
+      # 例如 alice=gta_tok_aaa:admin,bob=gta_tok_bbb（:admin 后缀授予管理员权限）。
+      # 裸 token 不带 owner 会被 ParseTokens 拒绝、容器起不来，见 .env.example。
+      GTA_AUTH_TOKENS: ${GTA_AUTH_TOKENS:?GTA_AUTH_TOKENS is required (see .env.example)}
+      # 监听地址：端口映射前保持容器内默认即可；一般无需覆盖
+      GTA_CONTROL_ADDR: ${GTA_CONTROL_ADDR:-:9888}
+      GTA_REGISTRY_ADDR: ${GTA_REGISTRY_ADDR:-:9091}
+      GTA_AGENT_INGEST_ADDR: ${GTA_AGENT_INGEST_ADDR:-:9092}
+    ports:
+      # CaptureControl gRPC：唯一合法客户端是 compose 网络内的 gta-mcp（owner 字段
+      # 在该端口上可被直连者伪造，见 cmd/gta-pipeline/main.go 信任边界注释），
+      # 因此默认只回环映射；确需从宿主机外访问再改。
+      - "127.0.0.1:${GTA_CONTROL_PORT:-9888}:9888"
+      - "${GTA_REGISTRY_PORT:-9091}:9091"   # PluginRegistry gRPC（插件注册）
+      - "${GTA_AGENT_INGEST_PORT:-9092}:9092" # AgentIngest gRPC（gta-agent 推流）
+    volumes:
+      - gta-data:/data
+    # -spawn-agent=false：容器内不拉起 gta-singbox-agent（手机代理流量不经服务端容器）。
+    command: ["-spawn-agent=false"]
+
+  mcp:
+    image: gta-server:${GTA_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      - pipeline
+    entrypoint: ["/usr/local/bin/gta-mcp"]
+    # 必须显式清空 command：只覆盖 entrypoint 时，镜像 CMD（["-spawn-agent=false"]）
+    # 会被原样追加给 gta-mcp，而 gta-mcp 没有该 flag，容器会以
+    # "flag provided but not defined: -spawn-agent" 退出并陷入 restart loop。
+    # 监听地址等配置一律走下面的 GTA_* 环境变量；这里只需把插件目录指到共享卷
+    # （默认 "plugins" 是相对路径，会锚到容器 CWD，落盘不到 gta-data 卷上）。
+    command: ["-plugins-dir=/data/plugins"]
+    environment:
+      GTA_HOME: /data
+      GTA_AUTH_TOKENS: ${GTA_AUTH_TOKENS:?GTA_AUTH_TOKENS is required (see .env.example)}
+      # 连接 pipeline 的 CaptureControl：compose 网络内用服务名
+      GTA_CONTROL_ADDR: pipeline:9888
+      # MCP HTTP/SSE 监听地址
+      GTA_MCP_ADDR: ${GTA_MCP_ADDR:-:8781}
+      # CORS 允许的 Origin（逗号分隔）；留空不返回 CORS 头（同源用法不受影响）
+      GTA_MCP_ALLOWED_ORIGINS: ${GTA_MCP_ALLOWED_ORIGINS:-}
+    ports:
+      - "${GTA_MCP_PORT:-8781}:8781" # MCP HTTP/SSE + Web UI（浏览器直接访问 http://<host>:8781）
+    volumes:
+      - gta-data:/data
+      # 远程 agent 预置产物（只读）：docker build 前先 `make build-agents` 在本机预置，
+      # 挂载到镜像默认的 GTA_AGENT_BIN_DIR=/opt/gta/agents（见 Dockerfile）。
+      # 「接入成员」页按此目录扫出的平台下发；缺产物平台会自动标为不可用，不影响其余功能。
+      - ./build/agents:/opt/gta/agents:ro
+
+volumes:
+  gta-data:

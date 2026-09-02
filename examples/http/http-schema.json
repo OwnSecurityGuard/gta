@@ -1,0 +1,13 @@
+{
+  "fields": {
+    "type": {"type": "string"},
+    "method": {"type": "string"},
+    "path": {"type": "string"},
+    "version": {"type": "string"},
+    "host": {"type": "string"},
+    "content_length": {"type": "string"},
+    "body_len": {"type": "number"},
+    "status": {"type": "string"},
+    "reason": {"type": "string"}
+  }
+}

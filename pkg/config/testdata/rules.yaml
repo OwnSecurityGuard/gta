@@ -1,0 +1,8 @@
+rules:
+  - name: test_count
+    filter: 'data.name == "login"'
+    aggregate:
+      type: count
+      window: 10s
+      group_by: []
+      output: login_count

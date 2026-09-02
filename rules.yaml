@@ -1,0 +1,15 @@
+rules:
+  - name: http_req_count
+    filter: 'data.type == "request"'
+    aggregate:
+      type: count
+      window: 10s
+      group_by: [data.method]
+      output: http_req_count
+  - name: http_req_rate
+    filter: 'data.type == "request"'
+    aggregate:
+      type: rate
+      window: 10s
+      group_by: []
+      output: http_req_rate

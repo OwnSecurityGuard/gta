@@ -1,0 +1,95 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      # pcap 采集层无构建标签，Linux 上需要 libpcap 头文件（cgo）。
+      - name: Install libpcap
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: |
+          set +e
+          go test -tags pcap ./... > /tmp/test.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            MSG=$(grep -A4 -E '^(--- FAIL|panic)|signal: killed|out of memory' /tmp/test.log | head -40 | sed 's/"/\\"/g' | tr '\n' ';')
+            echo "::error title=go test failures::$MSG"
+            exit $code
+          fi
+
+  # gen_tool_table 只依赖标准库（go/ast 解析 cmd/gta-mcp/main.go），
+  # 不 import gta-plugin-sdk，无需 go.work / SDK checkout，保持原样。
+  readme-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      # 钉死 README 工具表与 cmd/gta-mcp/main.go 的 AddTool 一致。
+      - name: Regenerate tool table
+        run: go run ./scripts/gen_tool_table
+      - name: No drift
+        run: git diff --exit-code README.md
+
+  # ============================================================================
+  # release（T16）：tag push（v*）时交叉编译全平台产物并上传 GitHub Release。
+  # 产物由 make release-matrix 生成（见 Makefile T14 注释：CGO_ENABLED=0 交叉
+  # 编译，windows/amd64、linux/amd64、linux/arm64、darwin/arm64 四平台 ×
+  # gta-pipeline/gta-mcp/gta-agent 三二进制）。
+  # ============================================================================
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      # release-matrix 前置依赖 web-build：gta-mcp 产物内嵌前端（需要 node）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # CGO_ENABLED=0 交叉编译，无需 libpcap-dev。
+      - name: Build release matrix
+        run: make release-matrix VERSION="${GITHUB_REF_NAME}" GIT_COMMIT="${GITHUB_SHA::7}"
+
+      - name: Package
+        run: |
+          cd bin/release
+          shopt -s nullglob
+          for f in *linux-* *darwin-*; do tar czf "$f.tar.gz" "$f"; done
+          for f in *windows-*; do zip -q "$f.zip" "$f"; done
+          sha256sum * > SHA256SUMS
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            bin/release/*.tar.gz
+            bin/release/*.zip
+            bin/release/SHA256SUMS

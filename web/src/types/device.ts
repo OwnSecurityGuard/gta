@@ -3,8 +3,6 @@
  * 不引入 Device Service —— 一条启动码即一台待/已接入的电脑，认领后通过 session 派生运行态。
  */
 
-import type { SessionPhaseView } from "@/lib/session-phase";
-
 /** 设备接入状态机。 */
 export type DeviceState = "waiting" | "connected" | "capturing" | "stopped";
 

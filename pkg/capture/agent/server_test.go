@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	"gta/pkg/auth"
@@ -259,7 +259,7 @@ func TestPushRejectsOwnerMismatch(t *testing.T) {
 	}
 }
 
-// 场景 3：匿名模式（未配置 token）→ owner 统一为 local，可推 owner=''/'local' 的会话。
+// 场景 3：匿名模式（未配置 token）→ owner 统一为 local，可推 owner=”/'local' 的会话。
 func TestPushAnonymousMode(t *testing.T) {
 	sessions := SessionOwnerCheckerFunc(func(sessionID string) (string, bool) {
 		return "", true // 老库会话 owner 为空

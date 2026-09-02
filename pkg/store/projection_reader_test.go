@@ -50,4 +50,3 @@ func TestSQLiteStore_QueryMetrics(t *testing.T) {
 		}
 	}
 }
-

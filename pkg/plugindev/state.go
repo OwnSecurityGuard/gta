@@ -34,10 +34,10 @@ func (p *launchedProc) alive() bool {
 // standalone gta-plugin-dev binary), so a package-level default instance is
 // sufficient.
 type Tracker struct {
-	mu         sync.Mutex
-	procs      map[string]*launchedProc
-	lastTry    map[string]*LastAttempt
-	validated  map[string]*ValidatedProof
+	mu          sync.Mutex
+	procs       map[string]*launchedProc
+	lastTry     map[string]*LastAttempt
+	validated   map[string]*ValidatedProof
 	lastExplain map[string]*ExplainResult
 	// lastVerify holds the most recent plugin.verify result per plugin so
 	// plugin.explain (P3b) can attribute it without the AI re-supplying the

@@ -6,8 +6,8 @@ import (
 
 	sdk "github.com/OwnSecurityGuard/gta-plugin-sdk"
 	sdkcontract "github.com/OwnSecurityGuard/gta-plugin-sdk/contract"
-	sdkschema "github.com/OwnSecurityGuard/gta-plugin-sdk/schema"
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
+	sdkschema "github.com/OwnSecurityGuard/gta-plugin-sdk/schema"
 
 	"gta/pkg/analyze"
 	"gta/pkg/plugin"

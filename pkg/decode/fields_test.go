@@ -53,10 +53,10 @@ func TestInferDirectionFromJSON_HTTP(t *testing.T) {
 	}{
 		{`{"data":{"type":"request","method":"POST"}}`, "client_to_server"},
 		{`{"data":{"type":"response","status":"200"}}`, "server_to_client"},
-		{`{"data":{"foo":"bar"}}`, ""},  // 非 HTTP
-		{``, ""},                        // 空
-		{`invalid`, ""},                 // 非法 JSON
-		{`{"foo":"bar"}`, ""},           // 无 data 键
+		{`{"data":{"foo":"bar"}}`, ""}, // 非 HTTP
+		{``, ""},                       // 空
+		{`invalid`, ""},                // 非法 JSON
+		{`{"foo":"bar"}`, ""},          // 无 data 键
 	}
 	for _, tt := range tests {
 		got := InferDirectionFromJSON([]byte(tt.json))

@@ -70,8 +70,8 @@ func scanEvent(sc eventScanner) (*event.Event, error) {
 			Source:    event.SourceID(source),
 			Timestamp: time.Unix(0, timestamp),
 		},
-		Trace: event.TraceContext{},
-		Context:  ctx,
+		Trace:   event.TraceContext{},
+		Context: ctx,
 		Payload: event.Payload{
 			SchemaID: schemaID,
 			Value:    payloadValue,

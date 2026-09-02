@@ -150,13 +150,13 @@ func (m *mcpCapture) handleGetAgentDownloadOptions(ctx context.Context, req mcp.
 	_, registryPort := splitHostPort(registry)
 	_, ingestPort := splitHostPort(ingest)
 	out := map[string]any{
-		"host":           lanIP(),
-		"registry_addr":  registry,
-		"ingest_addr":    ingest,
-		"registry_port":  registryPort,
-		"ingest_port":    ingestPort,
-		"platforms":      m.availableAgentPlatforms(),
-		"message":        "选择目标机器的操作系统下载 Agent。产物按「平台 + 运行时 sidecar 配置」打包为 zip：解压后双击运行 gta-agent(.exe) 即可免参数抓包上报。回连地址端口用 registry 端口（" + registryPort + "）；Agent 会自动把推流口取为 ingest 端口（" + ingestPort + "）。host 需为远端 Agent 可达的网段地址。",
+		"host":          lanIP(),
+		"registry_addr": registry,
+		"ingest_addr":   ingest,
+		"registry_port": registryPort,
+		"ingest_port":   ingestPort,
+		"platforms":     m.availableAgentPlatforms(),
+		"message":       "选择目标机器的操作系统下载 Agent。产物按「平台 + 运行时 sidecar 配置」打包为 zip：解压后双击运行 gta-agent(.exe) 即可免参数抓包上报。回连地址端口用 registry 端口（" + registryPort + "）；Agent 会自动把推流口取为 ingest 端口（" + ingestPort + "）。host 需为远端 Agent 可达的网段地址。",
 	}
 	return successResult(out), nil
 }

@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/expr-lang/expr/vm"
 	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
 	"gopkg.in/yaml.v3"
 )
 

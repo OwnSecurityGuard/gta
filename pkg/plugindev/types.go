@@ -18,14 +18,14 @@ import "time"
 // SDKVersion / FramingAvailable 由服务端从本包的常量注入，供模板渲染与结果返回，
 // 保证脚手架与已发布 SDK 同版本、并如实标注 framing 是否可用。
 type ScaffoldRequest struct {
-	Name            string
-	Protocol        string
-	ProtocolVersion string
-	Hints           []string
-	OutputDir       string // 严格指定的生成目录（MCP output_dir），为空则回退 Root/Name
-	Root            string // 服务端配置的 plugins 目录（回退用）
-	SDKVersion      string // 注入：脚手架固定引用的 SDK 版本
-	FramingAvailable bool  // 注入：当前 SDK 版本是否含 framing 包
+	Name             string
+	Protocol         string
+	ProtocolVersion  string
+	Hints            []string
+	OutputDir        string // 严格指定的生成目录（MCP output_dir），为空则回退 Root/Name
+	Root             string // 服务端配置的 plugins 目录（回退用）
+	SDKVersion       string // 注入：脚手架固定引用的 SDK 版本
+	FramingAvailable bool   // 注入：当前 SDK 版本是否含 framing 包
 }
 
 // ScaffoldResponse reports what Scaffold produced.
@@ -118,11 +118,11 @@ type ArtifactState struct {
 // plugin. It is empty (Launched=false) when the plugin was started externally
 // (systemd/k8s) — in that case runtime state comes from the registry instead.
 type DevProcess struct {
-	Launched      bool
-	PID           int
-	InstanceID    string
-	Alive         bool
-	LaunchedAt    time.Time
+	Launched   bool
+	PID        int
+	InstanceID string
+	Alive      bool
+	LaunchedAt time.Time
 }
 
 // LastAttempt is the most recent build/activate/deactivate outcome. It is how
@@ -130,12 +130,12 @@ type DevProcess struct {
 // here rather than modelled as states). P3a's explain_ref will point back to a
 // plugin.explain conclusion.
 type LastAttempt struct {
-	Action    string // build | activate | deactivate
-	OK        bool
-	At        time.Time
-	Duration  time.Duration
-	Errors    []*BuildError
-	Message   string
+	Action     string // build | activate | deactivate
+	OK         bool
+	At         time.Time
+	Duration   time.Duration
+	Errors     []*BuildError
+	Message    string
 	ExplainRef string
 }
 

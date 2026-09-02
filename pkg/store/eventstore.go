@@ -91,7 +91,7 @@ type SessionStore interface {
 
 // SessionOwnerFilter 描述会话查询的 owner 可见性。
 //
-// Owner 为空串表示匿名（本地单机用法）：只看 owner='' 的会话。
+// Owner 为空串表示匿名（本地单机用法）：只看 owner=” 的会话。
 // AllOwners 为 true（admin）时不过滤，可看到所有 owner 的会话。
 // 兼容约定：无过滤（ListSessions/GetSession）等价于 AllOwners=true，
 // 保证既有调用方行为完全不变。
@@ -219,7 +219,7 @@ type ColumnSchema struct {
 type SessionMeta struct {
 	// Owner 是会话归属者（pkg/auth 的 Principal.Owner）。
 	// 空串表示匿名（本地单机用法）。一等字段，持久化到 sessions.owner 列。
-	Owner        string         `json:"owner,omitempty"`
+	Owner string `json:"owner,omitempty"`
 	// ProjectID 是会话所属的项目（projects.id）。空串表示未归属任何项目。
 	// 一等字段，持久化到 sessions.project_id 列。
 	ProjectID    string         `json:"project_id,omitempty"`

@@ -59,16 +59,16 @@ func lanIP() string {
 // proxyStateJSON 是返回给前端的状态快照（含 LAN IP 与二维码连接地址）。
 // 不含分帧字段：帧边界判定由绑定插件按连接自行处理（见 mobile.MobileConfig）。
 type proxyStateJSON struct {
-	ListenAddr   string   `json:"listen_addr"`
-	ServerAddr   string   `json:"server_addr"`
-	AgentRunning bool     `json:"agent_running"`
-	AgentPID     int32    `json:"agent_pid"`
-	SessionRunning bool   `json:"session_running"`
-	SessionID    string   `json:"session_id"`
-	ConfigPath   string   `json:"config_path"`
-	Plugin       string   `json:"plugin"`
-	IncludeHosts []string `json:"include_hosts"`
-	IncludePorts []int32  `json:"include_ports"`
+	ListenAddr     string   `json:"listen_addr"`
+	ServerAddr     string   `json:"server_addr"`
+	AgentRunning   bool     `json:"agent_running"`
+	AgentPID       int32    `json:"agent_pid"`
+	SessionRunning bool     `json:"session_running"`
+	SessionID      string   `json:"session_id"`
+	ConfigPath     string   `json:"config_path"`
+	Plugin         string   `json:"plugin"`
+	IncludeHosts   []string `json:"include_hosts"`
+	IncludePorts   []int32  `json:"include_ports"`
 	// 运行时活动（常驻 mobile 会话的实时连接状态），0 表示未接线/无数据。
 	ActiveConns  int64  `json:"active_conns"`
 	TotalConns   uint64 `json:"total_conns"`

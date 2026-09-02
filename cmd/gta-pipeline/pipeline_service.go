@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
 	"gta/pkg/auth"
 	"gta/pkg/capture"
@@ -19,7 +20,6 @@ import (
 	"gta/pkg/internalipc/capturecontrol"
 	"gta/pkg/logging"
 	"gta/pkg/plugin"
-	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	protocolconfig "gta/pkg/protocol/config"
 	"gta/pkg/store"
 )

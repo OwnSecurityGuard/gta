@@ -213,7 +213,7 @@ func TestControlStore_ReconcileRunningSessions(t *testing.T) {
 
 // ===== T9: SessionMeta.Owner / owner 过滤 / 老库迁移 =====
 
-// 老库（无 owner 列）打开时应自动补列并回填 ''，既有会话归匿名且可正常读写。
+// 老库（无 owner 列）打开时应自动补列并回填 ”，既有会话归匿名且可正常读写。
 func TestControlStore_MigrateLegacyDBAddsOwner(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "control.db")
 	// 用旧 schema 手工建库：没有 owner 列，且预置一行会话

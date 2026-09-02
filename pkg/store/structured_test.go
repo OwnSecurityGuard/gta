@@ -172,12 +172,12 @@ func TestWriteEventsV2_EmptyPayload(t *testing.T) {
 			},
 			Trace: event.TraceContext{},
 			Payload: event.Payload{
-					SchemaID: "tcp.v1",
-					Value: event.Value{
-						Kind:   event.Object,
-						Object: map[string]event.Value{},
-					},
+				SchemaID: "tcp.v1",
+				Value: event.Value{
+					Kind:   event.Object,
+					Object: map[string]event.Value{},
 				},
+			},
 		},
 	}
 
@@ -373,4 +373,3 @@ func TestSchemaMigration_Idempotent(t *testing.T) {
 		t.Errorf("state_changes table not found after migration: %v", err)
 	}
 }
-

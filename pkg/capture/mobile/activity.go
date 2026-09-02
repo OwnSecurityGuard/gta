@@ -11,10 +11,10 @@ import (
 // capture_task run 的局部变量，控制面无法直接触达，追踪器作为共享
 // 探针跨越此边界。所有字段原子更新，Snapshot 无锁。
 type Activity struct {
-	activeConns   atomic.Int64  // 当前开放连接数（open +1 / close -1）
-	totalConns    atomic.Uint64 // 累计打开连接数
-	lastDataUnix  atomic.Int64  // 最近一次收到数据的 unix 毫秒（0=从未）
-	totalBytes    atomic.Uint64 // 累计接收应用层字节
+	activeConns  atomic.Int64  // 当前开放连接数（open +1 / close -1）
+	totalConns   atomic.Uint64 // 累计打开连接数
+	lastDataUnix atomic.Int64  // 最近一次收到数据的 unix 毫秒（0=从未）
+	totalBytes   atomic.Uint64 // 累计接收应用层字节
 }
 
 // NewActivity 创建零值活动追踪器。
@@ -23,10 +23,10 @@ func NewActivity() *Activity { return &Activity{} }
 // ActivitySnapshot 是追踪器的无锁读快照（与 proto ProxyConfigState 的
 // 活动字段一一对应）。
 type ActivitySnapshot struct {
-	ActiveConns   int64
-	TotalConns    uint64
-	LastDataUnix  int64
-	TotalBytes    uint64
+	ActiveConns  int64
+	TotalConns   uint64
+	LastDataUnix int64
+	TotalBytes   uint64
 }
 
 // Snapshot 返回当前活动快照；nil 接收者返回零值。

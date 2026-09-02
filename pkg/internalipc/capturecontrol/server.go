@@ -127,11 +127,11 @@ type TestPluginRequest struct {
 
 // TestEventLite 采样解码事件（插件解出来的相关数据，不含原始字节）。
 type TestEventLite struct {
-	ID           string
+	ID            string
 	TimestampUnix int64
-	Type         string
-	SchemaID     string
-	DataJSON     string // 拍平后的关键 data.* 字段 JSON（可能截断）
+	Type          string
+	SchemaID      string
+	DataJSON      string // 拍平后的关键 data.* 字段 JSON（可能截断）
 }
 
 // TestErrorLite 单个解码失败样例（仅含定位信息，不含原始字节）。
@@ -243,15 +243,15 @@ type SessionSummary struct {
 
 // PluginSummary 是 ListPlugins 返回的插件摘要。
 type PluginSummary struct {
-	InstanceID     string
-	Name           string
-	Protocol       string
-	Type           string
-	APIVersion     string
-	SocketPath     string
-	Online         bool
-	LastHeartbeat  time.Time
-	Owner          string
+	InstanceID    string
+	Name          string
+	Protocol      string
+	Type          string
+	APIVersion    string
+	SocketPath    string
+	Online        bool
+	LastHeartbeat time.Time
+	Owner         string
 }
 
 // Server 实现 pb.CaptureControlServer，委托给 CaptureEngine。
@@ -326,21 +326,21 @@ func (s *Server) GetCaptureStatus(ctx context.Context, req *pb.GetCaptureStatusR
 		return nil, err
 	}
 	return &pb.GetCaptureStatusResponse{
-		State:        res.State,
-		SourceName:   res.SourceName,
-		PacketsIn:    res.PacketsIn,
-		PacketsOut:   res.PacketsOut,
-		BytesIn:      res.BytesIn,
-		BytesOut:     res.BytesOut,
-		Drops:        res.Drops,
-		Errors:       res.Errors,
-		Err:          res.Err,
-		RawCount:           res.RawCount,
-		EventCount:         res.EventCount,
-		MetricCount:        res.MetricCount,
-		DecodeErrors:       res.DecodeErrors,
-		AgentConnected:     res.AgentConnected,
-		AgentLastSeenUnix:  res.AgentLastSeenUnix,
+		State:             res.State,
+		SourceName:        res.SourceName,
+		PacketsIn:         res.PacketsIn,
+		PacketsOut:        res.PacketsOut,
+		BytesIn:           res.BytesIn,
+		BytesOut:          res.BytesOut,
+		Drops:             res.Drops,
+		Errors:            res.Errors,
+		Err:               res.Err,
+		RawCount:          res.RawCount,
+		EventCount:        res.EventCount,
+		MetricCount:       res.MetricCount,
+		DecodeErrors:      res.DecodeErrors,
+		AgentConnected:    res.AgentConnected,
+		AgentLastSeenUnix: res.AgentLastSeenUnix,
 	}, nil
 }
 
@@ -519,10 +519,10 @@ func (s *Server) SetSessionPlugin(ctx context.Context, req *pb.SetSessionPluginR
 	plugin, err := s.engine.SetSessionPlugin(ctx, req.GetSessionId(), req.GetPlugin())
 	if err != nil {
 		return &pb.SetSessionPluginResponse{
-			Ok:         false,
-			SessionId:  req.GetSessionId(),
-			Plugin:     req.GetPlugin(),
-			Message:    err.Error(),
+			Ok:        false,
+			SessionId: req.GetSessionId(),
+			Plugin:    req.GetPlugin(),
+			Message:   err.Error(),
 		}, nil
 	}
 	return &pb.SetSessionPluginResponse{

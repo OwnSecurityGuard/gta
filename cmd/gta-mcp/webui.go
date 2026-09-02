@@ -10,6 +10,7 @@ import (
 
 // webui 是前端构建产物目录（make web-build / Dockerfile webui 阶段生成）。
 // 仓库只跟踪 .gitkeep：go:embed 要求目录非空，all: 前缀让点开头文件也被嵌入。
+//
 //go:embed all:webui
 var webUIEmbed embed.FS
 

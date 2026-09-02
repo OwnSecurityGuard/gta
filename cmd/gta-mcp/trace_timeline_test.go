@@ -13,7 +13,7 @@ func makeEv(id string, causation, correlation string, ts time.Time) *event.Event
 	ev := event.NewEventWithTrace("sess1", event.EventType("msg"), "game.demo.v1", "decoder",
 		event.ValueObject(map[string]event.Value{
 			"_meta": event.ValueObject(map[string]event.Value{
-				"msg_name": event.ValueString(id + "_msg"),
+				"msg_name":  event.ValueString(id + "_msg"),
 				"direction": event.ValueString("client_to_server"),
 			}),
 		}),
@@ -121,8 +121,8 @@ func TestBuildTimeline_ProtoProjection(t *testing.T) {
 			"direction": event.ValueString("client_to_server"),
 		}
 		proto := map[string]event.Value{
-			"message": event.ValueString(message),
-			"role":    event.ValueString(role),
+			"message":  event.ValueString(message),
+			"role":     event.ValueString(role),
 			"delivery": event.ValueString(role),
 		}
 		if corr != nil {
@@ -134,7 +134,7 @@ func TestBuildTimeline_ProtoProjection(t *testing.T) {
 		meta["protocol"] = event.ValueObject(proto)
 		return event.NewEventWithTrace("sess1", event.EventType("msg"), "game.demo.v1", "decoder",
 			event.ValueObject(map[string]event.Value{
-				"cmd":  event.ValueInt(1001),
+				"cmd":   event.ValueInt(1001),
 				"_meta": event.ValueObject(meta),
 			}),
 			event.TraceContext{}, event.EventContext{})

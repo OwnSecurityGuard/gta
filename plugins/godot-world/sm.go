@@ -24,14 +24,14 @@ import (
 )
 
 const (
-	cmdRemoteCall    = 0
-	cmdSimplifyPath  = 1
-	cmdConfirmPath   = 2
-	cmdRaw           = 3
-	cmdSpawn         = 4
-	cmdDespawn       = 5
-	cmdSync          = 6
-	cmdSYS           = 7
+	cmdRemoteCall   = 0
+	cmdSimplifyPath = 1
+	cmdConfirmPath  = 2
+	cmdRaw          = 3
+	cmdSpawn        = 4
+	cmdDespawn      = 5
+	cmdSync         = 6
+	cmdSYS          = 7
 )
 
 const sysCmdAuth = 0
@@ -51,12 +51,12 @@ type smPacket struct {
 	cmd     int
 	cmdName string
 	// SYS
-	sysCmd  int
+	sysCmd      int
 	authPayload []byte
 	// path cache
-	pscID   uint32
-	path    string
-	hash    string
+	pscID uint32
+	path  string
+	hash  string
 	// remote call
 	nodeIsPath bool
 	nodePath   string

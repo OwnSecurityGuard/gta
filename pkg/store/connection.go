@@ -30,9 +30,9 @@ type ConnectionSummary struct {
 	ConnID      string    `json:"conn_id"`
 	Client      string    `json:"client"`
 	Server      string    `json:"server"`
-	Protocol    string    `json:"protocol"`     // 原始网络协议（如 tcp）
-	EventType   string    `json:"event_type"`   // 连接内首个解码事件类型（如 http_req），可用于展示 HTTPS/HTTP
-	Source      string    `json:"source"`       // 抓包来源（mobile / pcap-live / ...）
+	Protocol    string    `json:"protocol"`   // 原始网络协议（如 tcp）
+	EventType   string    `json:"event_type"` // 连接内首个解码事件类型（如 http_req），可用于展示 HTTPS/HTTP
+	Source      string    `json:"source"`     // 抓包来源（mobile / pcap-live / ...）
 	StartTime   time.Time `json:"start_time"`
 	EndTime     time.Time `json:"end_time"`
 	DurationSec float64   `json:"duration_sec"`

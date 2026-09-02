@@ -198,7 +198,7 @@ func explainVerify(result *VerifyResult) []*ExplainFinding {
 			findings = append(findings, &ExplainFinding{
 				Category: "wrong-framing",
 				RuleID:   v.RuleID,
-				Why: "SDK 校验（" + v.RuleID + "）判定解码器把完整链路层帧当成了 L7：pcap 类来源交付的是带链路/网络/传输头的完整帧，需要先按 link_type 剥头、再按流重组，而不是直接当应用层字节解析",
+				Why:      "SDK 校验（" + v.RuleID + "）判定解码器把完整链路层帧当成了 L7：pcap 类来源交付的是带链路/网络/传输头的完整帧，需要先按 link_type 剥头、再按流重组，而不是直接当应用层字节解析",
 				Fix:      "用 framing.ExtractL7(payload, link_type) 按 link_type 剥头，再用 framing.NewReassembler 做 TCP 重组；只有 ProxyPayload(1001)/TLSPlaintext(1002) 才是纯 L7（见 contract.yaml payload-framing-by-link-type）",
 			})
 		}
@@ -219,14 +219,14 @@ func explainVerify(result *VerifyResult) []*ExplainFinding {
 		findings = append(findings, &ExplainFinding{
 			Category: "all-unknown",
 			RuleID:   "inspect-bytes-first",
-			Why: "解码器对全部 " + strconv.Itoa(q.TotalInputs) + " 个输入都未产出任何事件（全 unknown）。典型根因是剥头/重组缺失：把带链路层头的完整帧直接当 L7 解析，业务字节整体错位导致 0 命中",
-			Fix: "①先用 sample_bytes_plugin 看真实首字节确认 link_type 与帧结构；②用 framing.ExtractL7 按 link_type 剥头；③TCP 类协议接 framing.Reassembler 重组。不要假设 payload 已是 L7（只有 ProxyPayload/TLSPlaintext 才是）",
+			Why:      "解码器对全部 " + strconv.Itoa(q.TotalInputs) + " 个输入都未产出任何事件（全 unknown）。典型根因是剥头/重组缺失：把带链路层头的完整帧直接当 L7 解析，业务字节整体错位导致 0 命中",
+			Fix:      "①先用 sample_bytes_plugin 看真实首字节确认 link_type 与帧结构；②用 framing.ExtractL7 按 link_type 剥头；③TCP 类协议接 framing.Reassembler 重组。不要假设 payload 已是 L7（只有 ProxyPayload/TLSPlaintext 才是）",
 		})
 	} else if unknownRatio >= AllUnknownRatioThreshold {
 		findings = append(findings, &ExplainFinding{
 			Category: "all-unknown",
 			RuleID:   "inspect-bytes-first",
-			Why: fmt.Sprintf("%.0f%% 的输入未能解码（全 unknown），大概率解码器没按 link_type 剥头/重组，把完整帧当 L7 解析", unknownRatio*100),
+			Why:      fmt.Sprintf("%.0f%% 的输入未能解码（全 unknown），大概率解码器没按 link_type 剥头/重组，把完整帧当 L7 解析", unknownRatio*100),
 			Fix:      "先用 sample_bytes_plugin 看真实首字节；用 framing.ExtractL7 剥头 + framing.Reassembler 重组；TCP body 恒空往往是缺重组的信号",
 		})
 	}
@@ -249,8 +249,8 @@ func explainVerify(result *VerifyResult) []*ExplainFinding {
 		findings = append(findings, &ExplainFinding{
 			Category: "suspected-reassembly",
 			RuleID:   "tcp-reassembly-required",
-			Why: fmt.Sprintf("同一会话被切成 %d 个 input，但没有任何 correlation_key 串联，疑似缺流重组或粘包未切分", q.TotalInputs),
-			Fix: "按流重组后再按长度前缀/分隔符切分消息（用 framing.NewReassembler）；只有在确实可推断时才填 correlation_key（correlation-only-when-known）",
+			Why:      fmt.Sprintf("同一会话被切成 %d 个 input，但没有任何 correlation_key 串联，疑似缺流重组或粘包未切分", q.TotalInputs),
+			Fix:      "按流重组后再按长度前缀/分隔符切分消息（用 framing.NewReassembler）；只有在确实可推断时才填 correlation_key（correlation-only-when-known）",
 		})
 	}
 

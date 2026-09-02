@@ -54,11 +54,11 @@ func TestCheckRulesAgainstManifest(t *testing.T) {
 	}
 
 	warns := checkRulesAgainstManifest([]*analyze.CompiledRule{
-		mustCompileRule(t, "ok_sum", "data.hp"),                        // 声明 + aggregatable → 放行
-		mustCompileRule(t, "bad_sum", "data.mana"),                     // 声明未开 aggregatable → 告警
-		mustCompileRule(t, "nested_ok", "data.payload.damage"),         // 嵌套声明 + aggregatable → 放行
-		mustCompileRule(t, "undeclared", "data.ghost"),                 // 未声明 → 兼容放行
-		mustCompileRule(t, "grouped", "data.hp", "data.method"),        // group_by 声明未开 groupable → 告警
+		mustCompileRule(t, "ok_sum", "data.hp"),                 // 声明 + aggregatable → 放行
+		mustCompileRule(t, "bad_sum", "data.mana"),              // 声明未开 aggregatable → 告警
+		mustCompileRule(t, "nested_ok", "data.payload.damage"),  // 嵌套声明 + aggregatable → 放行
+		mustCompileRule(t, "undeclared", "data.ghost"),          // 未声明 → 兼容放行
+		mustCompileRule(t, "grouped", "data.hp", "data.method"), // group_by 声明未开 groupable → 告警
 	}, m)
 
 	if len(warns) != 2 {

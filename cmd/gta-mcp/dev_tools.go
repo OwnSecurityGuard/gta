@@ -83,11 +83,11 @@ func (m *mcpCapture) handleActivatePlugin(ctx context.Context, req mcp.CallToolR
 	}
 
 	out := map[string]any{
-		"name":          name,
-		"registry_addr": registryAddr,
+		"name":             name,
+		"registry_addr":    registryAddr,
 		"process_launched": resp.GetOk(),
-		"instance_id":   resp.GetInstanceId(),
-		"message":       resp.GetMessage(),
+		"instance_id":      resp.GetInstanceId(),
+		"message":          resp.GetMessage(),
 	}
 
 	// 联合校验：仅看到进程 pid 或 activate 成功不算接入完成。

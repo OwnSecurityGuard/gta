@@ -9,12 +9,12 @@ import (
 	"context"
 	"net"
 
-	"gta/pkg/internalipc"
-	"gta/pkg/plugindev"
-	pb "gta/pkg/plugindev/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gta/pkg/internalipc"
+	"gta/pkg/plugindev"
+	pb "gta/pkg/plugindev/proto"
 )
 
 // Server implements the PluginDev gRPC service. It is scoped to a single
@@ -140,11 +140,11 @@ func (s *Server) Status(ctx context.Context, req *pb.StatusRequest) (*pb.StatusR
 	}
 	if ps.DevProcess != nil {
 		out.DevProcess = &pb.DevProcess{
-			Launched:        ps.DevProcess.Launched,
-			Pid:             int64(ps.DevProcess.PID),
-			InstanceId:      ps.DevProcess.InstanceID,
-			Alive:           ps.DevProcess.Alive,
-			LaunchedAtUnix:  ps.DevProcess.LaunchedAt.Unix(),
+			Launched:       ps.DevProcess.Launched,
+			Pid:            int64(ps.DevProcess.PID),
+			InstanceId:     ps.DevProcess.InstanceID,
+			Alive:          ps.DevProcess.Alive,
+			LaunchedAtUnix: ps.DevProcess.LaunchedAt.Unix(),
 		}
 	}
 	if ps.LastAttempt != nil {
@@ -217,12 +217,12 @@ func (s *Server) Explain(ctx context.Context, req *pb.ExplainRequest) (*pb.Expla
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	out := &pb.ExplainResponse{
-		Ref:         res.Ref,
-		Name:        res.Name,
-		Action:      res.Action,
-		AtUnix:      res.At.Unix(),
-		Summary:     res.Summary,
-		NextAction:  res.NextAction,
+		Ref:        res.Ref,
+		Name:       res.Name,
+		Action:     res.Action,
+		AtUnix:     res.At.Unix(),
+		Summary:    res.Summary,
+		NextAction: res.NextAction,
 	}
 	for _, f := range res.Findings {
 		pbf := &pb.ExplainFinding{

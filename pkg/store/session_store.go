@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS plugin_debug_access (
 	return nil
 }
 
-// migrateSessionsAddProjectID 为既有数据库补齐 sessions.project_id 列（默认 ''）。
+// migrateSessionsAddProjectID 为既有数据库补齐 sessions.project_id 列（默认 ”）。
 func (cs *ControlStore) migrateSessionsAddProjectID() error {
 	if hasColumn(cs.db, "sessions", "project_id") {
 		return nil
@@ -114,8 +114,8 @@ func (cs *ControlStore) migrateSessionsAddProjectID() error {
 	return nil
 }
 
-// migrateSessionsAddOwner 为既有数据库补齐 sessions.owner 列（默认 ''）。
-// 老库回填 '' = 匿名：已有会话全部归属匿名 owner，本地单机用法行为不变。
+// migrateSessionsAddOwner 为既有数据库补齐 sessions.owner 列（默认 ”）。
+// 老库回填 ” = 匿名：已有会话全部归属匿名 owner，本地单机用法行为不变。
 func (cs *ControlStore) migrateSessionsAddOwner() error {
 	if hasOwnerColumn(cs.db) {
 		return nil

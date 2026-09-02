@@ -281,4 +281,3 @@ func TestRegistryServer_FindByName(t *testing.T) {
 		t.Error("a-decoder should still resolve after b-decoder deregistered")
 	}
 }
-

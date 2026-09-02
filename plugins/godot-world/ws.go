@@ -9,8 +9,8 @@ import (
 )
 
 type wsFrame struct {
-	opcode byte
-	fin    bool
+	opcode  byte
+	fin     bool
 	payload []byte
 }
 

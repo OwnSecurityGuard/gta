@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"google.golang.org/grpc"
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
+	"google.golang.org/grpc"
 )
 
 // fakeDecoderClient 仅用于区分"不同插件实例"（指针不同即视为不同实例）

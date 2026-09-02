@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"google.golang.org/grpc"
 	plugindev "gta/pkg/plugindev"
 	plugindevclient "gta/pkg/plugindev/client"
-	"google.golang.org/grpc"
 )
 
 func TestResolvePluginsDirDefaultNextToExecutable(t *testing.T) {
@@ -296,9 +296,9 @@ func TestHandleExplainPluginForwardsVerify(t *testing.T) {
 	verifyArg := map[string]any{
 		"verdict": "fail",
 		"quality": map[string]any{
-			"total_inputs":    10,
-			"unknown_inputs":  8,
-			"unknown_ratio":   0.8,
+			"total_inputs":     10,
+			"unknown_inputs":   8,
+			"unknown_ratio":    0.8,
 			"entropy_estimate": 7.8,
 		},
 	}

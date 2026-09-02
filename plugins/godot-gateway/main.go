@@ -1,9 +1,9 @@
 package main
 
 import (
-	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"github.com/OwnSecurityGuard/gta-plugin-sdk"
 	"github.com/OwnSecurityGuard/gta-plugin-sdk/event"
+	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 )
 
 func main() {

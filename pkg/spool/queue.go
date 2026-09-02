@@ -100,11 +100,11 @@ type Queue struct {
 	segBytes int64
 
 	mu      sync.Mutex
-	entries []entry   // 未确认条目（entries[0] 是队头）
-	nextIdx int       // 在途条数：entries[:nextIdx] 已交付给调用方，等 Ack
-	bytes   int64     // 未确认字节数（含长度前缀）
-	wrCur   cursor    // 写位置
-	wrFile  *os.File  // 当前写 segment 的句柄（O_RDWR，追加写）
+	entries []entry             // 未确认条目（entries[0] 是队头）
+	nextIdx int                 // 在途条数：entries[:nextIdx] 已交付给调用方，等 Ack
+	bytes   int64               // 未确认字节数（含长度前缀）
+	wrCur   cursor              // 写位置
+	wrFile  *os.File            // 当前写 segment 的句柄（O_RDWR，追加写）
 	files   map[uint64]*os.File // 已打开的 segment（惰性，滚动/清理时关闭）
 
 	recBuf     []byte    // Append 时的序列化复用缓冲（header + body）

@@ -92,7 +92,7 @@ type PluginEvent struct {
 type RegistryServer struct {
 	pb.UnimplementedPluginRegistryServer
 	mu           sync.RWMutex
-	closed       bool // Close() 置位；置位后 Register/隧道钩子拒绝新工作
+	closed       bool                         // Close() 置位；置位后 Register/隧道钩子拒绝新工作
 	plugins      map[string]*RegisteredPlugin // key: instance_id
 	byName       map[string]string            // key: pluginKey(owner, name) → instance_id
 	nextID       atomic.Int64
@@ -698,7 +698,6 @@ func (s *RegistryServer) Connect(stream pb.PluginRegistry_ConnectServer) error {
 	}
 	return s.tunnelHub.Connect(stream)
 }
-
 
 // dialTarget 解析插件上报的 Decode 地址并建立 net.Conn。
 // 支持 host:port（TCP，跨机器）、unix:/path、npipe:\\.\pipe\name、以及裸路径（视为 Unix socket）。

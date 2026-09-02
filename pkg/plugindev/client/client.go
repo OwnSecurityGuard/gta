@@ -8,8 +8,8 @@ package client
 import (
 	"context"
 
-	pb "gta/pkg/plugindev/proto"
 	"google.golang.org/grpc"
+	pb "gta/pkg/plugindev/proto"
 )
 
 // PluginDev is the subset of the Developer Plane gta-mcp forwards to. Keeping

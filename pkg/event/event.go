@@ -84,7 +84,7 @@ func (f TCPFlags) HasCloseFlags() bool {
 
 // Packet 是抓取层输出，也是整个系统统一的数据载体。
 type Packet struct {
-	ID        string    // 原始包在 raw_packets 表中的唯一标识；为空时由存储层生成
+	ID        string // 原始包在 raw_packets 表中的唯一标识；为空时由存储层生成
 	Timestamp time.Time
 	Raw       []byte
 	LinkType  LinkType
@@ -370,4 +370,3 @@ func (e *Event) MetaValue(key string) (Value, bool) {
 	v, ok := metaObj[key]
 	return v, ok
 }
-

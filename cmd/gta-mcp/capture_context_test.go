@@ -35,7 +35,7 @@ func captureCtxFixture(t *testing.T) *store.SQLiteStore {
 		}
 	}
 	events := []*event.Event{
-		mk("e1", "connA", "", 0),           // 未关联 → 自成流
+		mk("e1", "connA", "", 0), // 未关联 → 自成流
 		mk("e2", "connA", "c1", time.Millisecond),
 		mk("e3", "connA", "c1", 2*time.Millisecond), // 同流后续事件
 		mk("e4", "connB", "c2", 3*time.Millisecond),

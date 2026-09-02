@@ -23,7 +23,6 @@ func FlowIDFromEndpoints(src, dst, protocol string) uint64 {
 	return h.Sum64()
 }
 
-
 // InferDirectionFromJSON 尝试从 JSON 的 data 子对象中推断方向（仅 HTTP 协议有效）。
 // 无法判定时返回 ""（调用方应视为 unknown）。
 // 约定：cleanJSON 形如 {"data":{"type":"request",...}}，type 从 data 内 peek。

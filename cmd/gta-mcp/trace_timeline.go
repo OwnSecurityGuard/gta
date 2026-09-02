@@ -42,18 +42,18 @@ type TimelineError struct {
 // 同一 correlation_id 的事件聚合为一个"会话/对话"（request/response 分组）。
 // Children 使用指针，便于在单次遍历中无损挂载子树，序列化时由 encoding/json 自动解引用。
 type TimelineNode struct {
-	ID            string             `json:"id"`
-	Timestamp     time.Time          `json:"timestamp"`
-	SchemaID      string             `json:"schema_id,omitempty"`
-	Type          string             `json:"type,omitempty"`
-	MsgName       string             `json:"msg_name,omitempty"`
-	Direction     string             `json:"direction,omitempty"`
-	CorrelationID string             `json:"correlation_id,omitempty"`
-	IsPush        bool               `json:"is_push,omitempty"`
-	Proto         *TimelineProtocol  `json:"proto,omitempty"`
-	JSON          string             `json:"json,omitempty"` // 干净业务 JSON（不含 _meta），供 Raw JSON 视图
-	Summary       string             `json:"summary,omitempty"`
-	Children      []*TimelineNode    `json:"children,omitempty"`
+	ID            string            `json:"id"`
+	Timestamp     time.Time         `json:"timestamp"`
+	SchemaID      string            `json:"schema_id,omitempty"`
+	Type          string            `json:"type,omitempty"`
+	MsgName       string            `json:"msg_name,omitempty"`
+	Direction     string            `json:"direction,omitempty"`
+	CorrelationID string            `json:"correlation_id,omitempty"`
+	IsPush        bool              `json:"is_push,omitempty"`
+	Proto         *TimelineProtocol `json:"proto,omitempty"`
+	JSON          string            `json:"json,omitempty"` // 干净业务 JSON（不含 _meta），供 Raw JSON 视图
+	Summary       string            `json:"summary,omitempty"`
+	Children      []*TimelineNode   `json:"children,omitempty"`
 }
 
 // timelineProtocol 从事件 _meta.protocol 读取通信语义；不存在或不可解析时返回 nil。
@@ -81,14 +81,14 @@ type ConversationView struct {
 
 // SessionTimeline 是 get_session_timeline 的完整输出。
 type SessionTimeline struct {
-	SessionID     string            `json:"session_id"`
-	Plugin        string            `json:"plugin,omitempty"`
-	Status        string            `json:"status,omitempty"`
-	EventCount    int               `json:"event_count"`
-	RootCount     int               `json:"root_count"`
+	SessionID     string             `json:"session_id"`
+	Plugin        string             `json:"plugin,omitempty"`
+	Status        string             `json:"status,omitempty"`
+	EventCount    int                `json:"event_count"`
+	RootCount     int                `json:"root_count"`
 	Conversations []ConversationView `json:"conversations,omitempty"`
-	Roots         []TimelineNode    `json:"roots"`
-	Uncertainties []string          `json:"uncertainties,omitempty"`
+	Roots         []TimelineNode     `json:"roots"`
+	Uncertainties []string           `json:"uncertainties,omitempty"`
 }
 
 // handleGetSessionTimeline 构建一次抓包会话的完整时序树（request/response 拓扑）。

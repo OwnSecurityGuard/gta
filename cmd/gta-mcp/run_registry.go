@@ -50,11 +50,11 @@ type snapshotBaseline struct {
 
 // RunSummary 是 end_capture_run 时的窗口内增量统计。
 type RunSummary struct {
-	CapturedFlowCount     int64 `json:"captured_flow_count"`     // -1 表示未落地（结构化字段缺失）
-	CapturedMessageCount  int64 `json:"captured_message_count"`
-	ClientRequestCount    int64 `json:"client_request_count"`    // -1 表示未落地
-	ServerMessageCount    int64 `json:"server_message_count"`    // -1 表示未落地
-	DecodeErrorCount      int64 `json:"decode_error_count"`
+	CapturedFlowCount    int64 `json:"captured_flow_count"` // -1 表示未落地（结构化字段缺失）
+	CapturedMessageCount int64 `json:"captured_message_count"`
+	ClientRequestCount   int64 `json:"client_request_count"` // -1 表示未落地
+	ServerMessageCount   int64 `json:"server_message_count"` // -1 表示未落地
+	DecodeErrorCount     int64 `json:"decode_error_count"`
 }
 
 // RunRegistry 管理所有 run 记录，内存 + 文件持久化。

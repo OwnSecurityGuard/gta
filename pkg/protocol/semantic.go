@@ -24,11 +24,11 @@ type ProtocolError struct {
 // ProtocolContext 是放入 Semantic Event Context 的通信语义块。
 // 对应设计中的 context.protocol。
 type ProtocolContext struct {
-	Message     string         `json:"message,omitempty"`   // 消息名（如 LoginRequest）
-	Role        MessageRole    `json:"role"`                // 通信角色
+	Message     string         `json:"message,omitempty"`     // 消息名（如 LoginRequest）
+	Role        MessageRole    `json:"role"`                  // 通信角色
 	Correlation *Correlation   `json:"correlation,omitempty"` // 请求/响应关联
-	Delivery    string         `json:"delivery,omitempty"`  // 投递类型（request/response/push）
-	Error       *ProtocolError `json:"error,omitempty"`     // 错误语义
+	Delivery    string         `json:"delivery,omitempty"`    // 投递类型（request/response/push）
+	Error       *ProtocolError `json:"error,omitempty"`       // 错误语义
 }
 
 // Result 是 ProtocolResolver.Resolve 的返回值，描述一条消息的通信语义。

@@ -9,8 +9,8 @@ import (
 
 	"gta/pkg/plugin"
 
-	"google.golang.org/grpc"
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
+	"google.golang.org/grpc"
 )
 
 // fakeDecoderServerMain 是最小化的 Decoder gRPC 服务桩，仅用于让 Register 完成可达性拨号。
@@ -18,7 +18,9 @@ type fakeDecoderServerMain struct {
 	pb.UnimplementedDecoderServer
 }
 
-func (fakeDecoderServerMain) DecodeV2(stream grpc.BidiStreamingServer[pb.DecodeRequest, pb.DecodeResponseV2]) error { return nil }
+func (fakeDecoderServerMain) DecodeV2(stream grpc.BidiStreamingServer[pb.DecodeRequest, pb.DecodeResponseV2]) error {
+	return nil
+}
 
 // startFakeDecoderMain 启动一个监听 unix socket 的 Decoder 服务，返回 socket 路径与停止函数。
 func startFakeDecoderMain(t *testing.T) (string, func()) {

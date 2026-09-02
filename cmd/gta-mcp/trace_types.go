@@ -29,13 +29,13 @@ type RequestResponsePair struct {
 
 // TraceStep 是执行链路的一步。
 type TraceStep struct {
-	StepID        string           `json:"step_id"`
-	RequestMsgID  int64            `json:"request_msg_id"`
-	Request       RequestSummary   `json:"request"`
-	Response      *ResponseSummary `json:"response,omitempty"`
-	Pushes        []PushSummary    `json:"pushes,omitempty"`
-	EntityDiffs   []EntityDiff     `json:"entity_diffs,omitempty"`
-	WhyRelated    string           `json:"why_related"`
+	StepID       string           `json:"step_id"`
+	RequestMsgID int64            `json:"request_msg_id"`
+	Request      RequestSummary   `json:"request"`
+	Response     *ResponseSummary `json:"response,omitempty"`
+	Pushes       []PushSummary    `json:"pushes,omitempty"`
+	EntityDiffs  []EntityDiff     `json:"entity_diffs,omitempty"`
+	WhyRelated   string           `json:"why_related"`
 }
 
 // RequestSummary / ResponseSummary / PushSummary
@@ -47,7 +47,7 @@ type RequestSummary struct {
 
 type ResponseSummary struct {
 	MsgID     int64          `json:"msg_id"`
-	Name      string          `json:"name"`
+	Name      string         `json:"name"`
 	KeyFields map[string]any `json:"key_fields,omitempty"`
 }
 
@@ -79,12 +79,12 @@ type TraceResult struct {
 // CloseInfo 描述 TCP 连接关闭信息。
 // 通过 flow 内的 tcp_close 事件（FIN/RST）推断哪一侧主动关闭连接。
 type CloseInfo struct {
-	Closer    string    `json:"closer"`     // "client" | "server" | "unknown"
-	Method    string    `json:"method"`     // "FIN" | "RST" | "FIN|ACK"
-	Timestamp time.Time `json:"timestamp"`  // 关闭事件时间
-	MsgID     int64     `json:"msg_id"`     // 对应事件 ID
-	Src       string    `json:"src"`        // 关闭包源地址
-	Dst       string    `json:"dst"`        // 关闭包目的地址
+	Closer    string    `json:"closer"`         // "client" | "server" | "unknown"
+	Method    string    `json:"method"`         // "FIN" | "RST" | "FIN|ACK"
+	Timestamp time.Time `json:"timestamp"`      // 关闭事件时间
+	MsgID     int64     `json:"msg_id"`         // 对应事件 ID
+	Src       string    `json:"src"`            // 关闭包源地址
+	Dst       string    `json:"dst"`            // 关闭包目的地址
 	Note      string    `json:"note,omitempty"` // 额外说明
 }
 

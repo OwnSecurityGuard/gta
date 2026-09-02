@@ -257,7 +257,7 @@ func TestSegmentRollAndCleanup(t *testing.T) {
 	}
 	const total = 100
 	for i := 0; i < total; i++ {
-		if err := q.Append(pkt(string(rune('a' + i%26)) + "-" + itoa(i))); err != nil {
+		if err := q.Append(pkt(string(rune('a'+i%26)) + "-" + itoa(i))); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}

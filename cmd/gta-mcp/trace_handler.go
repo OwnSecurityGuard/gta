@@ -229,8 +229,8 @@ func parseNoiseFilter(req mcp.CallToolRequest) NoiseFilter {
 // parseEntityDiffConfig 从请求解析 entity diff 配置。
 func parseEntityDiffConfig(req mcp.CallToolRequest) EntityDiffConfig {
 	cfg := EntityDiffConfig{
-		Enabled:  true,  // 默认开启
-		WindowMs: 500,   // 默认 500ms
+		Enabled:  true, // 默认开启
+		WindowMs: 500,  // 默认 500ms
 	}
 	if v, ok := req.GetArguments()["entity_diff"].(map[string]any); ok {
 		if en, ok := v["enabled"].(bool); ok {
@@ -242,5 +242,3 @@ func parseEntityDiffConfig(req mcp.CallToolRequest) EntityDiffConfig {
 	}
 	return cfg
 }
-
-

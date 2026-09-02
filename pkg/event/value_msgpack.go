@@ -9,14 +9,14 @@ import (
 // msgpackValue 是 MsgPack 序列化时的中间结构
 // 使用 tagged union 模式，通过 type 字段标识实际值
 type msgpackValue struct {
-	Type   string          `msgpack:"type"`
-	Bool   *bool           `msgpack:"bool,omitempty"`
-	Int    *int64          `msgpack:"int,omitempty"`
-	Uint   *uint64         `msgpack:"uint,omitempty"`
-	Float  *float64        `msgpack:"float,omitempty"`
-	String *string         `msgpack:"string,omitempty"`
-	Bytes  []byte          `msgpack:"bytes,omitempty"`
-	Array  []msgpackValue  `msgpack:"array,omitempty"`
+	Type   string                   `msgpack:"type"`
+	Bool   *bool                    `msgpack:"bool,omitempty"`
+	Int    *int64                   `msgpack:"int,omitempty"`
+	Uint   *uint64                  `msgpack:"uint,omitempty"`
+	Float  *float64                 `msgpack:"float,omitempty"`
+	String *string                  `msgpack:"string,omitempty"`
+	Bytes  []byte                   `msgpack:"bytes,omitempty"`
+	Array  []msgpackValue           `msgpack:"array,omitempty"`
 	Object *map[string]msgpackValue `msgpack:"object,omitempty"`
 }
 

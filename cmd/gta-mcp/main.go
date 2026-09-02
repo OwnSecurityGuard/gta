@@ -693,24 +693,24 @@ func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToo
 	if m.pipelineClient != nil {
 		resp, err := m.pipelineClient.GetCaptureStatus(ctx, &pb.GetCaptureStatusRequest{SessionId: sessionID})
 		if err == nil {
-		return successResult(map[string]any{
-			"session_id":    sessionID,
-			"state":         resp.GetState(),
-			"source_name":   resp.GetSourceName(),
-			"packets_in":    resp.GetPacketsIn(),
-			"raw_count":     resp.GetRawCount(),
-			"event_count":   resp.GetEventCount(),
-			"metric_count":  resp.GetMetricCount(),
-			"decode_errors": resp.GetDecodeErrors(),
-			"drops":         resp.GetDrops(),
-			"errors":        resp.GetErrors(),
-			"err":           resp.GetErr(),
-			// agent 连接活性：agent_connected=true 仅表示推流连接已建立，
-			// 与 raw_count 无关——"连上了但一个包都没有"是常见状态，
-			// UI 据此给不同的排查指引（去启动游戏 vs 去检查 agent）。
-			"agent_connected":      resp.GetAgentConnected(),
-			"agent_last_seen_unix": resp.GetAgentLastSeenUnix(),
-		}), nil
+			return successResult(map[string]any{
+				"session_id":    sessionID,
+				"state":         resp.GetState(),
+				"source_name":   resp.GetSourceName(),
+				"packets_in":    resp.GetPacketsIn(),
+				"raw_count":     resp.GetRawCount(),
+				"event_count":   resp.GetEventCount(),
+				"metric_count":  resp.GetMetricCount(),
+				"decode_errors": resp.GetDecodeErrors(),
+				"drops":         resp.GetDrops(),
+				"errors":        resp.GetErrors(),
+				"err":           resp.GetErr(),
+				// agent 连接活性：agent_connected=true 仅表示推流连接已建立，
+				// 与 raw_count 无关——"连上了但一个包都没有"是常见状态，
+				// UI 据此给不同的排查指引（去启动游戏 vs 去检查 agent）。
+				"agent_connected":      resp.GetAgentConnected(),
+				"agent_last_seen_unix": resp.GetAgentLastSeenUnix(),
+			}), nil
 		}
 		// gRPC 查询失败，降级返回 sessionMgr 中的元数据
 		slog.Warn("get_session_status gRPC failed, falling back to metadata", "error", err, "session_id", sessionID)

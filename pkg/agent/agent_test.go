@@ -428,4 +428,3 @@ func drainPackets(t *testing.T, ch <-chan event.Packet, echoAddr string, wantReq
 			req.Bytes(), wantReq, resp.Bytes(), wantResp)
 	}
 }
-

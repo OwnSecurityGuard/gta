@@ -194,7 +194,7 @@ func (sm *sessionManager) currentPointers() map[string]string {
 // deleteSessionForRetention 删除会话目录并重置指向它的 current 分片。
 // 与 deleteSession 的差别：保留策略跨 owner 全量扫描，无法预知 owner，
 // 直接按收集到的分片文件路径操作；删除前重新读分片确认仍指向该会话
-//（收集与删除之间存在竞争窗口，若分片已被切换则不动它）。
+// （收集与删除之间存在竞争窗口，若分片已被切换则不动它）。
 func (sm *sessionManager) deleteSessionForRetention(meta sessionMetadata, pointers map[string]string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

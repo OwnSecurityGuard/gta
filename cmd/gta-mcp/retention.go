@@ -44,7 +44,11 @@ func configEnvInt(name string, def int) int {
 }
 
 // sessionIDLayout 是会话 ID 的时间编码格式（generateSessionID 产出）。
+// 会话 ID 格式为 "20060102_150405.000_XXXX"，其中 XXXX 是随机后缀。
 const sessionIDLayout = "20060102_150405.000"
+
+// sessionIDTimestampLength 是会话 ID 中时间戳部分的长度（不含随机后缀）。
+const sessionIDTimestampLength = 19
 
 // retentionPolicy 是会话清理策略。
 type retentionPolicy struct {
@@ -162,8 +166,11 @@ func (sm *sessionManager) sessionActivity(meta sessionMetadata) time.Time {
 			latest = info.ModTime()
 		}
 	}
-	if t, err := time.Parse(sessionIDLayout, meta.SessionID); err == nil && t.After(latest) {
-		latest = t
+	// 会话 ID 格式为 "20060102_150405.000_XXXX"，仅解析时间戳部分。
+	if len(meta.SessionID) >= sessionIDTimestampLength {
+		if t, err := time.Parse(sessionIDLayout, meta.SessionID[:sessionIDTimestampLength]); err == nil && t.After(latest) {
+			latest = t
+		}
 	}
 	return latest
 }

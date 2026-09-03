@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	randv2 "math/rand/v2"
 	"runtime"
 	"sort"
 	"strings"
@@ -197,7 +198,17 @@ func (sm *sessionManager) currentPathFor(owner string) string {
 }
 
 func (sm *sessionManager) generateSessionID() string {
-	return time.Now().Format("20060102_150405.000")
+	// 毫秒时间戳 + 4 位随机数，避免同毫秒内碰撞。
+	return fmt.Sprintf("%s_%04d", time.Now().Format("20060102_150405.000"), randInt(10000))
+}
+
+// randInt 返回 [0, n) 范围内的伪随机整数。
+// 使用 math/rand/v2 的全局随机源，无需加锁，并发安全。
+func randInt(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return randv2.IntN(n)
 }
 
 func (sm *sessionManager) sessionDir(sessionID string) string {

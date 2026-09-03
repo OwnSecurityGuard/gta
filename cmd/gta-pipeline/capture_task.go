@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -687,9 +688,9 @@ func (t *captureTask) run() {
 	}
 }
 
-// nowSessionID 生成基于时间戳的会话 ID。
+// nowSessionID 生成基于时间戳的会话 ID（毫秒时间戳 + 4 位随机数，避免同毫秒内碰撞）。
 func nowSessionID() string {
-	return time.Now().Format("20060102_150405.000")
+	return fmt.Sprintf("%s_%04d", time.Now().Format("20060102_150405.000"), rand.IntN(10000))
 }
 
 // getPlugin 读锁返回当前绑定的解码插件名。

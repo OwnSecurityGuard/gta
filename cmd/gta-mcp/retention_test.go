@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,7 +93,7 @@ func TestEnforceRetention_MaxSessionsKeepsNewest(t *testing.T) {
 	sm := newSessionManager(t.TempDir())
 	base := time.Now().Add(-time.Hour)
 	for i := 0; i < 5; i++ {
-		id := time.Now().Add(time.Duration(i) * time.Minute).Format(sessionIDLayout)
+		id := fmt.Sprintf("%s_%04d", time.Now().Add(time.Duration(i)*time.Minute).Format(sessionIDLayout), randInt(10000))
 		makeRetentionSession(t, sm, id, "stopped", base.Add(time.Duration(i)*time.Minute))
 	}
 
@@ -123,7 +124,7 @@ func TestEnforceRetention_MaxSessionsSkipsRunning(t *testing.T) {
 	// 4 个 stopped + 1 个 running（无 TTL，仅数量上限），running 最新。
 	ids := []string{}
 	for i := 0; i < 5; i++ {
-		id := time.Now().Add(time.Duration(i) * time.Minute).Format(sessionIDLayout)
+		id := fmt.Sprintf("%s_%04d", time.Now().Add(time.Duration(i)*time.Minute).Format(sessionIDLayout), randInt(10000))
 		status := "stopped"
 		if i == 4 {
 			status = "running"

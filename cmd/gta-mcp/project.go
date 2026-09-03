@@ -20,7 +20,8 @@ import (
 )
 
 func newProjectID() string {
-	return time.Now().Format("20060102_150405.000")
+	// 毫秒时间戳 + 4 位随机数，避免同毫秒内碰撞。
+	return fmt.Sprintf("%s_%04d", time.Now().Format("20060102_150405.000"), randInt(10000))
 }
 
 // ownerScope 解析当前请求的 owner；返回是否 admin（admin 可见全部 + 可管理任意项目）。

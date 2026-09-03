@@ -90,7 +90,11 @@ RUN CGO_ENABLED=1 \
 	&& CGO_ENABLED=1 \
 	go build -tags pcap -trimpath \
 	-ldflags "-s -w -X gta/pkg/version.Version=${VERSION} -X gta/pkg/version.Commit=${GIT_COMMIT}" \
-	-o /out/gta-mcp ./cmd/gta-mcp
+	-o /out/gta-mcp ./cmd/gta-mcp \
+	&& CGO_ENABLED=0 \
+	go build -trimpath \
+	-ldflags "-s -w -X gta/pkg/version.Version=${VERSION} -X gta/pkg/version.Commit=${GIT_COMMIT}" \
+	-o /out/gta-singbox-agent ./cmd/gta-singbox-agent
 
 # ============================================================================
 # 阶段 2：runtime
@@ -112,6 +116,8 @@ RUN apt-get update \
 
 COPY --from=builder /out/gta-pipeline /usr/local/bin/gta-pipeline
 COPY --from=builder /out/gta-mcp /usr/local/bin/gta-mcp
+COPY --from=builder /out/gta-singbox-agent /usr/local/bin/gta-singbox-agent
+RUN chmod +x /usr/local/bin/gta-singbox-agent
 
 # == Developer Plane 插件编译：gta-mcp 内嵌的 PluginDev 会现场 `go build` 插件
 #    （pkg/plugindev/build.go），故 runtime 保留 Go 工具链 + 模块缓存；构建缓存落
@@ -151,8 +157,6 @@ VOLUME ["/data"]
 EXPOSE 9888 9091 9092 8781
 
 # 默认跑 pipeline；gta-mcp 用法见 docker-compose.yml（覆盖 entrypoint）。
-# -spawn-agent=false：容器内不拉起 gta-singbox-agent（手机代理流量不经容器）。
 # 非 root 运行：useradd --create-home 已建 /data 并归 gta 所有（T15 评审修复）。
 USER gta
 ENTRYPOINT ["/usr/local/bin/gta-pipeline"]
-CMD ["-spawn-agent=false"]

@@ -37,8 +37,8 @@ func buildCapabilityCatalog() capabilityDoc {
 			},
 			{
 				Name:        "proxy",
-				Description: "移动代理抓包服务器配置（常驻，无需手动开始抓包）",
-				Tools:       []string{"get_proxy_server_config", "update_proxy_server_config"},
+				Description: "移动代理抓包租约（按用户/设备独立会话，多用户互不串流）",
+				Tools:       []string{"create_proxy_lease", "list_proxy_leases", "get_proxy_lease", "release_proxy_lease"},
 			},
 			{
 				Name:        "query",

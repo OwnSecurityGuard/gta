@@ -34,9 +34,10 @@ func newSource(cfg any) (capture.Source, error) {
 		return nil, err
 	}
 	s := &mobileSource{
-		cfg:   c,
-		out:   make(chan event.Packet, 256),
-		conns: make(map[string]*connState),
+		cfg:     c,
+		out:     make(chan event.Packet, 256),
+		conns:   make(map[string]*connState),
+		streams: make(map[string]map[string]struct{}),
 		// Activity 可能为 nil（未注入时仅维护内部计数器）。
 		activity: c.Activity,
 	}
@@ -44,9 +45,12 @@ func newSource(cfg any) (capture.Source, error) {
 	return s, nil
 }
 
-// connState 保存单个连接（conn_id）的元数据与打开时间。
+// connState 保存单个连接的元数据与打开时间。
+// id 是流内唯一的连接键（含流前缀，全局唯一，用于下游按连接聚合）；
+// rawID 是 agent 上报的原始 conn_id（仅用于展示与追溯）。
 type connState struct {
 	id      string
+	rawID   string
 	open    *proto.ConnOpen
 	created time.Time
 }
@@ -70,6 +74,14 @@ type mobileSource struct {
 
 	connsMu sync.Mutex
 	conns   map[string]*connState
+	// streams 记录每条 gRPC Push 流当前打开的连接 id 集合，用于流断开时一次性清理。
+	//
+	// conns 的 key 由「流 id + agent 原始 conn_id」组成（见 connKey）：agent 的
+	// conn_id 是各自进程内从 1 开始的自增序号，直接拿它当 key 会让多条流（多
+	// agent / agent 重连）的 1、2、3…互相覆盖——后到的 open 顶掉先到的元数据，
+	// 两条不同连接的数据被当成同一连接下发，即串流。
+	streams    map[string]map[string]struct{}
+	nextStream atomic.Uint64
 
 	// activity 为可选注入的运行时活动追踪器（见 MobileConfig.Activity）。
 	activity *Activity
@@ -133,7 +145,14 @@ func (s *mobileSource) Addr() net.Addr {
 // Push 实现 proto.MobileCaptureServer：接收 agent 的客户端流。
 // 一条流内可包含多条连接的事件（靠 conn_id 区分），流结束返回汇总统计。
 // 流中途断开（agent 重连）不影响 server 继续接受新流。
+//
+// 每条流在入口分配一个流 id，流内所有 conn_id 都按 connKey 加上该前缀后才进入
+// 共享的 conns 表：agent 侧的 conn_id 只保证「本进程内唯一」，跨流不做这个
+// 隔离就会互相覆盖。流退出时该流的全部连接被一次性清理（等价于 agent 侧发来
+// 了一批 close，但 agent 异常退出时不会有 close 事件）。
 func (s *mobileSource) Push(stream proto.MobileCapture_PushServer) error {
+	sk := fmt.Sprintf("s%d", s.nextStream.Add(1))
+	defer s.dropStream(sk)
 	for {
 		evt, err := stream.Recv()
 		if err == io.EOF {
@@ -142,11 +161,31 @@ func (s *mobileSource) Push(stream proto.MobileCapture_PushServer) error {
 		if err != nil {
 			return err
 		}
-		s.handleEvent(evt)
+		s.handleEvent(sk, evt)
 	}
 }
 
-func (s *mobileSource) handleEvent(evt *proto.AgentEvent) {
+// connKey 把 agent 的 conn_id 限定在某条流内，得到全局唯一的连接键。
+func connKey(streamKey, connID string) string { return streamKey + "/" + connID }
+
+// dropStream 清理某条流遗留的全部连接（agent 断流时不会有 close 事件）。
+func (s *mobileSource) dropStream(streamKey string) {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	ids := s.streams[streamKey]
+	delete(s.streams, streamKey)
+	for id := range ids {
+		if _, ok := s.conns[connKey(streamKey, id)]; !ok {
+			continue
+		}
+		delete(s.conns, connKey(streamKey, id))
+		if s.activity != nil {
+			s.activity.activeConns.Add(-1)
+		}
+	}
+}
+
+func (s *mobileSource) handleEvent(streamKey string, evt *proto.AgentEvent) {
 	ts := time.Now()
 	if evt.GetTimestampUnix() > 0 {
 		ts = time.Unix(evt.GetTimestampUnix(), 0)
@@ -154,26 +193,31 @@ func (s *mobileSource) handleEvent(evt *proto.AgentEvent) {
 	connID := evt.GetConnId()
 	switch e := evt.GetEvent().(type) {
 	case *proto.AgentEvent_Open:
-		s.handleOpen(connID, ts, e.Open)
+		s.handleOpen(streamKey, connID, ts, e.Open)
 	case *proto.AgentEvent_Data:
-		s.handleData(connID, e.Data.GetDirection(), ts, e.Data.GetPayload())
+		s.handleData(streamKey, connID, e.Data.GetDirection(), ts, e.Data.GetPayload())
 	case *proto.AgentEvent_Close:
-		s.handleClose(connID, ts, e.Close.GetReason())
+		s.handleClose(streamKey, connID)
 	default:
 		s.countError("unknown agent event for conn %s", connID)
 	}
 }
 
-func (s *mobileSource) handleOpen(connID string, ts time.Time, open *proto.ConnOpen) {
+func (s *mobileSource) handleOpen(streamKey, connID string, ts time.Time, open *proto.ConnOpen) {
 	if connID == "" {
 		s.countError("conn_open without conn_id")
 		return
 	}
+	key := connKey(streamKey, connID)
 	s.connsMu.Lock()
-	if prev, ok := s.conns[connID]; ok {
-		prev.open = open // 更新元数据（agent 重连时地址可能变化）
+	if prev, ok := s.conns[key]; ok {
+		prev.open = open // 同一流内重复 open：更新元数据（agent 重连时地址可能变化）
 	} else {
-		s.conns[connID] = &connState{id: connID, open: open, created: ts}
+		s.conns[key] = &connState{id: key, rawID: connID, open: open, created: ts}
+		if s.streams[streamKey] == nil {
+			s.streams[streamKey] = make(map[string]struct{})
+		}
+		s.streams[streamKey][connID] = struct{}{}
 		s.connsOpened.Add(1)
 		if s.activity != nil {
 			s.activity.activeConns.Add(1)
@@ -183,13 +227,13 @@ func (s *mobileSource) handleOpen(connID string, ts time.Time, open *proto.ConnO
 	s.connsMu.Unlock()
 }
 
-func (s *mobileSource) handleData(connID, direction string, ts time.Time, payload []byte) {
+func (s *mobileSource) handleData(streamKey, connID, direction string, ts time.Time, payload []byte) {
 	if connID == "" {
 		s.countError("conn_data without conn_id")
 		return
 	}
 	s.connsMu.Lock()
-	conn := s.conns[connID]
+	conn := s.conns[connKey(streamKey, connID)]
 	s.connsMu.Unlock()
 	if conn == nil {
 		// open 未到就收到数据（agent 违约）：丢弃并计数。
@@ -210,10 +254,14 @@ func (s *mobileSource) handleData(connID, direction string, ts time.Time, payloa
 	s.emit(conn, direction, payload, ts)
 }
 
-func (s *mobileSource) handleClose(connID string, ts time.Time, reason string) {
+func (s *mobileSource) handleClose(streamKey, connID string) {
+	key := connKey(streamKey, connID)
 	s.connsMu.Lock()
-	conn := s.conns[connID]
-	delete(s.conns, connID)
+	conn := s.conns[key]
+	delete(s.conns, key)
+	if ids := s.streams[streamKey]; ids != nil {
+		delete(ids, connID)
+	}
 	s.connsMu.Unlock()
 	if conn == nil {
 		s.countError("conn_close for unknown conn %s", connID)
@@ -229,7 +277,7 @@ func (s *mobileSource) emit(conn *connState, direction string, frame []byte, ts 
 	// payload 来自 gRPC 反序列化，后续 Recv 可能复用底层字节，必须复制。
 	payload := make([]byte, len(frame))
 	copy(payload, frame)
-	pkt := buildPacket(conn.open, conn.id, direction, payload, ts)
+	pkt := buildPacket(conn, direction, payload, ts)
 	s.StatTracker.AddIn(len(payload))
 	select {
 	case s.out <- pkt:
@@ -265,7 +313,8 @@ func (s *mobileSource) pushResult() *proto.PushResult {
 //   - LinkType = LinkTypeProxyPayload（自定义值，明确表达"只有应用层 payload"）；
 //   - Src/Dst 由 ConnOpen 的 client_addr/server_addr 按方向回填；
 //   - Protocol = network（"tcp"），使现有解码路径（含按协议 hint 路由插件）无需改动即可工作。
-func buildPacket(open *proto.ConnOpen, connID, direction string, payload []byte, ts time.Time) event.Packet {
+func buildPacket(conn *connState, direction string, payload []byte, ts time.Time) event.Packet {
+	open := conn.open
 	network := strings.ToLower(open.GetNetwork())
 	if network == "" {
 		network = "tcp"
@@ -293,8 +342,11 @@ func buildPacket(open *proto.ConnOpen, connID, direction string, payload []byte,
 			capture.MetaDevice:      open.GetDevice(),
 			capture.MetaProcessName: open.GetProcessName(),
 			"network":               network,
-			"conn_id":               connID,
-			"direction":             direction,
+			// conn_id 是流内唯一的键（含流前缀），下游按它聚合连接；
+			// conn_id_raw 是 agent 上报的原始 id，供 UI 展示与人工比对。
+			"conn_id":     conn.id,
+			"conn_id_raw": conn.rawID,
+			"direction":   direction,
 		},
 	}
 }

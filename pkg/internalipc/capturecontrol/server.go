@@ -53,38 +53,57 @@ type CaptureEngine interface {
 	SampleBytes(ctx context.Context, req SampleBytesRequest) (SampleBytesResult, error)
 	// GetRegistryAddr 返回插件应连接的注册中心地址（即 -registry-addr 的值）。
 	GetRegistryAddr(ctx context.Context) (string, error)
-	// GetProxyConfig 返回当前代理抓包服务器配置与运行时状态。
-	GetProxyConfig(ctx context.Context) (ProxyConfigState, error)
-	// UpdateProxyConfig 应用新的代理抓包服务器配置（持久化 + 热重启 agent + 常驻会话）。
-	UpdateProxyConfig(ctx context.Context, req ProxyConfigUpdate) (ProxyConfigState, error)
+	// CreateProxyLease 为调用方创建一个代理抓包租约：独立 mobile 会话 +
+	// 独立 gta-singbox-agent（各自独立端口与筛选配置）。owner 作用域经
+	// withRequestOwner 注入 ctx（同 StartSession）。
+	CreateProxyLease(ctx context.Context, req CreateProxyLeaseRequest) (ProxyLease, error)
+	// ListProxyLeases 列出调用方可见的租约（admin 全可见）。
+	ListProxyLeases(ctx context.Context) ([]ProxyLease, error)
+	// GetProxyLease 查询单个租约状态快照（owner 校验，不匹配按不存在处理）。
+	GetProxyLease(ctx context.Context, leaseID string) (ProxyLease, error)
+	// ReleaseProxyLease 释放租约：停会话、杀 agent、回收端口（幂等）。
+	ReleaseProxyLease(ctx context.Context, leaseID string) (ReleaseProxyLeaseResult, error)
 }
 
-// ProxyConfigState 是代理抓包服务器的配置 + 运行时状态快照（与 proto 对应）。
-type ProxyConfigState struct {
-	ListenAddr     string
-	ServerAddr     string
-	AgentRunning   bool
-	AgentPID       int32
-	SessionRunning bool
-	SessionID      string
-	ConfigPath     string
-	Plugin         string
-	IncludeHosts   []string
-	IncludePorts   []int32
-	ActiveConns    int64
-	TotalConns     uint64
-	LastDataUnix   int64
-	TotalBytes     uint64
+// ProxyLease 是一个代理抓包租约的配置 + 运行时状态快照（与 proto ProxyLeaseState 对应）。
+// LeaseID 与内部抓包会话 session_id 一致（1:1 生命周期）。
+type ProxyLease struct {
+	LeaseID         string
+	Owner           string
+	ProjectID       string
+	Plugin          string
+	IncludeHosts    []string
+	IncludePorts    []int
+	Device          string
+	ListenAddr      string // agent HTTP CONNECT 监听（手机连这里）
+	AgentListenPort int
+	MobileGRPCPort  int
+	AgentRunning    bool
+	AgentPID        int32
+	SessionRunning  bool
+	SessionID       string
+	CreatedAt       time.Time
+	ActiveConns     int64
+	TotalConns      uint64
+	LastDataUnix    int64
+	TotalBytes      uint64
 }
 
-// ProxyConfigUpdate 是新的代理抓包服务器配置（字段为空表示不修改）。
+// CreateProxyLeaseRequest 是创建代理抓包租约的参数（与 proto 对应但不含 protobuf 类型）。
 // 不含分帧参数：帧边界判定是协议语义，由解码插件按连接自行处理（见 mobile.MobileConfig）。
-type ProxyConfigUpdate struct {
-	ListenAddr   string
-	ServerAddr   string
+type CreateProxyLeaseRequest struct {
 	Plugin       string
 	IncludeHosts []string
 	IncludePorts []int32
+	Device       string
+	ProjectID    string
+}
+
+// ReleaseProxyLeaseResult 是释放租约的结果。
+type ReleaseProxyLeaseResult struct {
+	OK        bool
+	Message   string
+	SessionID string
 }
 
 // PluginEvent 是插件注册表状态变化通知（与 proto PluginEvent 对应，但用 Go 原生类型）。
@@ -127,11 +146,11 @@ type TestPluginRequest struct {
 
 // TestEventLite 采样解码事件（插件解出来的相关数据，不含原始字节）。
 type TestEventLite struct {
-	ID            string
+	ID           string
 	TimestampUnix int64
-	Type          string
-	SchemaID      string
-	DataJSON      string // 拍平后的关键 data.* 字段 JSON（可能截断）
+	Type         string
+	SchemaID     string
+	DataJSON     string // 拍平后的关键 data.* 字段 JSON（可能截断）
 }
 
 // TestErrorLite 单个解码失败样例（仅含定位信息，不含原始字节）。
@@ -243,15 +262,15 @@ type SessionSummary struct {
 
 // PluginSummary 是 ListPlugins 返回的插件摘要。
 type PluginSummary struct {
-	InstanceID    string
-	Name          string
-	Protocol      string
-	Type          string
-	APIVersion    string
-	SocketPath    string
-	Online        bool
-	LastHeartbeat time.Time
-	Owner         string
+	InstanceID     string
+	Name           string
+	Protocol       string
+	Type           string
+	APIVersion     string
+	SocketPath     string
+	Online         bool
+	LastHeartbeat  time.Time
+	Owner          string
 }
 
 // Server 实现 pb.CaptureControlServer，委托给 CaptureEngine。
@@ -326,21 +345,21 @@ func (s *Server) GetCaptureStatus(ctx context.Context, req *pb.GetCaptureStatusR
 		return nil, err
 	}
 	return &pb.GetCaptureStatusResponse{
-		State:             res.State,
-		SourceName:        res.SourceName,
-		PacketsIn:         res.PacketsIn,
-		PacketsOut:        res.PacketsOut,
-		BytesIn:           res.BytesIn,
-		BytesOut:          res.BytesOut,
-		Drops:             res.Drops,
-		Errors:            res.Errors,
-		Err:               res.Err,
-		RawCount:          res.RawCount,
-		EventCount:        res.EventCount,
-		MetricCount:       res.MetricCount,
-		DecodeErrors:      res.DecodeErrors,
-		AgentConnected:    res.AgentConnected,
-		AgentLastSeenUnix: res.AgentLastSeenUnix,
+		State:        res.State,
+		SourceName:   res.SourceName,
+		PacketsIn:    res.PacketsIn,
+		PacketsOut:   res.PacketsOut,
+		BytesIn:      res.BytesIn,
+		BytesOut:     res.BytesOut,
+		Drops:        res.Drops,
+		Errors:       res.Errors,
+		Err:          res.Err,
+		RawCount:           res.RawCount,
+		EventCount:         res.EventCount,
+		MetricCount:        res.MetricCount,
+		DecodeErrors:       res.DecodeErrors,
+		AgentConnected:     res.AgentConnected,
+		AgentLastSeenUnix:  res.AgentLastSeenUnix,
 	}, nil
 }
 
@@ -519,10 +538,10 @@ func (s *Server) SetSessionPlugin(ctx context.Context, req *pb.SetSessionPluginR
 	plugin, err := s.engine.SetSessionPlugin(ctx, req.GetSessionId(), req.GetPlugin())
 	if err != nil {
 		return &pb.SetSessionPluginResponse{
-			Ok:        false,
-			SessionId: req.GetSessionId(),
-			Plugin:    req.GetPlugin(),
-			Message:   err.Error(),
+			Ok:         false,
+			SessionId:  req.GetSessionId(),
+			Plugin:     req.GetPlugin(),
+			Message:    err.Error(),
 		}, nil
 	}
 	return &pb.SetSessionPluginResponse{
@@ -557,53 +576,86 @@ func (s *Server) WatchPlugins(req *pb.WatchPluginsRequest, stream grpc.ServerStr
 	return nil
 }
 
-// GetProxyConfig 处理查询代理抓包服务器配置 RPC。
-func (s *Server) GetProxyConfig(ctx context.Context, req *pb.GetProxyConfigRequest) (*pb.GetProxyConfigResponse, error) {
-	st, err := s.engine.GetProxyConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return &pb.GetProxyConfigResponse{State: stateToProto(st)}, nil
-}
-
-// UpdateProxyConfig 处理应用代理抓包服务器配置 RPC。
-// 引擎负责持久化 + 热重启 agent + 确保代理会话常驻；失败时 ok=false + message 说明。
-func (s *Server) UpdateProxyConfig(ctx context.Context, req *pb.UpdateProxyConfigRequest) (*pb.UpdateProxyConfigResponse, error) {
-	st, err := s.engine.UpdateProxyConfig(ctx, ProxyConfigUpdate{
-		ListenAddr:   req.GetListenAddr(),
-		ServerAddr:   req.GetServerAddr(),
+// CreateProxyLease 处理创建代理抓包租约 RPC。
+// 身份透传同 StartCapture（withRequestOwner 注入 ctx，engine 侧记录归属）。
+func (s *Server) CreateProxyLease(ctx context.Context, req *pb.CreateProxyLeaseRequest) (*pb.CreateProxyLeaseResponse, error) {
+	lease, err := s.engine.CreateProxyLease(withRequestOwner(ctx, req.GetOwner(), req.GetAllOwners()), CreateProxyLeaseRequest{
 		Plugin:       req.GetPlugin(),
 		IncludeHosts: req.GetIncludeHosts(),
 		IncludePorts: req.GetIncludePorts(),
+		Device:       req.GetDevice(),
+		ProjectID:    req.GetProjectId(),
 	})
 	if err != nil {
-		return &pb.UpdateProxyConfigResponse{
-			Ok:      false,
-			Message: err.Error(),
+		return nil, err
+	}
+	return &pb.CreateProxyLeaseResponse{Lease: leaseToProto(lease)}, nil
+}
+
+// ListProxyLeases 处理列出租约 RPC（owner 作用域过滤在 engine 侧）。
+func (s *Server) ListProxyLeases(ctx context.Context, req *pb.ListProxyLeasesRequest) (*pb.ListProxyLeasesResponse, error) {
+	leases, err := s.engine.ListProxyLeases(withRequestOwner(ctx, req.GetOwner(), req.GetAllOwners()))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*pb.ProxyLeaseState, 0, len(leases))
+	for _, l := range leases {
+		out = append(out, leaseToProto(l))
+	}
+	return &pb.ListProxyLeasesResponse{Leases: out}, nil
+}
+
+// GetProxyLease 处理查询单个租约 RPC（engine 侧做 owner 校验）。
+func (s *Server) GetProxyLease(ctx context.Context, req *pb.GetProxyLeaseRequest) (*pb.GetProxyLeaseResponse, error) {
+	lease, err := s.engine.GetProxyLease(withRequestOwner(ctx, req.GetOwner(), req.GetAllOwners()), req.GetLeaseId())
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetProxyLeaseResponse{Lease: leaseToProto(lease)}, nil
+}
+
+// ReleaseProxyLease 处理释放租约 RPC。错误走 ok=false + message 说明。
+func (s *Server) ReleaseProxyLease(ctx context.Context, req *pb.ReleaseProxyLeaseRequest) (*pb.ReleaseProxyLeaseResponse, error) {
+	res, err := s.engine.ReleaseProxyLease(withRequestOwner(ctx, req.GetOwner(), req.GetAllOwners()), req.GetLeaseId())
+	if err != nil {
+		return &pb.ReleaseProxyLeaseResponse{
+			Ok:        false,
+			Message:   err.Error(),
+			SessionId: req.GetLeaseId(),
 		}, nil
 	}
-	return &pb.UpdateProxyConfigResponse{
-		Ok:      true,
-		Message: "proxy server config applied",
-		State:   stateToProto(st),
+	return &pb.ReleaseProxyLeaseResponse{
+		Ok:        res.OK,
+		Message:   res.Message,
+		SessionId: res.SessionID,
 	}, nil
 }
 
-func stateToProto(st ProxyConfigState) *pb.ProxyConfigState {
-	return &pb.ProxyConfigState{
-		ListenAddr:     st.ListenAddr,
-		ServerAddr:     st.ServerAddr,
-		AgentRunning:   st.AgentRunning,
-		AgentPid:       st.AgentPID,
-		SessionRunning: st.SessionRunning,
-		SessionId:      st.SessionID,
-		ConfigPath:     st.ConfigPath,
-		Plugin:         st.Plugin,
-		IncludeHosts:   st.IncludeHosts,
-		IncludePorts:   st.IncludePorts,
-		ActiveConns:    st.ActiveConns,
-		TotalConns:     st.TotalConns,
-		LastDataUnix:   st.LastDataUnix,
-		TotalBytes:     st.TotalBytes,
+// leaseToProto 把 Go 侧 ProxyLease 快照转为 proto ProxyLeaseState。
+func leaseToProto(l ProxyLease) *pb.ProxyLeaseState {
+	ports := make([]int32, 0, len(l.IncludePorts))
+	for _, p := range l.IncludePorts {
+		ports = append(ports, int32(p))
+	}
+	return &pb.ProxyLeaseState{
+		LeaseId:         l.LeaseID,
+		Owner:           l.Owner,
+		ProjectId:       l.ProjectID,
+		Plugin:          l.Plugin,
+		IncludeHosts:    l.IncludeHosts,
+		IncludePorts:    ports,
+		Device:          l.Device,
+		ListenAddr:      l.ListenAddr,
+		AgentListenPort: int32(l.AgentListenPort),
+		MobileGrpcPort:  int32(l.MobileGRPCPort),
+		AgentRunning:    l.AgentRunning,
+		AgentPid:        l.AgentPID,
+		SessionRunning:  l.SessionRunning,
+		SessionId:       l.SessionID,
+		CreatedAtUnix:   l.CreatedAt.Unix(),
+		ActiveConns:     l.ActiveConns,
+		TotalConns:      l.TotalConns,
+		LastDataUnix:    l.LastDataUnix,
+		TotalBytes:      l.TotalBytes,
 	}
 }

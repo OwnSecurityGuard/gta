@@ -1,4 +1,4 @@
-package mobile
+﻿package mobile
 
 import (
 	"errors"
@@ -24,7 +24,7 @@ type MobileConfig struct {
 
 	// Activity 可选的运行时活动追踪器：非 nil 时 source 在 open/data/close
 	// 事件中更新它（活跃连接数/累计连接/最近数据时间/累计字节），供
-	// 控制面（pipeline GetProxyConfig）查询实时连接状态。
+	// 控制面（lease 快照）查询实时连接状态。
 	Activity *Activity
 }
 

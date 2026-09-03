@@ -82,12 +82,20 @@ func (f *fakeEngine) GetRegistryAddr(ctx context.Context) (string, error) {
 	return ":9091", nil
 }
 
-func (f *fakeEngine) GetProxyConfig(ctx context.Context) (ProxyConfigState, error) {
-	return ProxyConfigState{}, nil
+func (f *fakeEngine) CreateProxyLease(ctx context.Context, req CreateProxyLeaseRequest) (ProxyLease, error) {
+	return ProxyLease{LeaseID: "lease-1", SessionID: "lease-1"}, nil
 }
 
-func (f *fakeEngine) UpdateProxyConfig(ctx context.Context, req ProxyConfigUpdate) (ProxyConfigState, error) {
-	return ProxyConfigState{}, nil
+func (f *fakeEngine) ListProxyLeases(ctx context.Context) ([]ProxyLease, error) {
+	return nil, nil
+}
+
+func (f *fakeEngine) GetProxyLease(ctx context.Context, leaseID string) (ProxyLease, error) {
+	return ProxyLease{}, nil
+}
+
+func (f *fakeEngine) ReleaseProxyLease(ctx context.Context, leaseID string) (ReleaseProxyLeaseResult, error) {
+	return ReleaseProxyLeaseResult{OK: true}, nil
 }
 
 func TestServer_StartCapture(t *testing.T) {

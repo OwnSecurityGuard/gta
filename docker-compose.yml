@@ -41,10 +41,9 @@ services:
       - "127.0.0.1:${GTA_CONTROL_PORT:-9888}:9888"
       - "${GTA_REGISTRY_PORT:-9091}:9091"   # PluginRegistry gRPC（插件注册）
       - "${GTA_AGENT_INGEST_PORT:-9092}:9092" # AgentIngest gRPC（gta-agent 推流）
+    command: ["-agent-bin=/usr/local/bin/gta-singbox-agent"]
     volumes:
       - gta-data:/data
-    # -spawn-agent=false：容器内不拉起 gta-singbox-agent（手机代理流量不经服务端容器）。
-    command: ["-spawn-agent=false"]
 
   mcp:
     image: gta-server:${GTA_VERSION:-latest}

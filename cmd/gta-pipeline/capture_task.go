@@ -97,12 +97,12 @@ type taskStats struct {
 	// PendingDecode 是当前待解码溢出队列的积压包数（>0 表示解码侧落后于抓包）。
 	PendingDecode int64
 	PacketsIn     uint64
-	PacketsOut    uint64
-	BytesIn       uint64
-	BytesOut      uint64
-	Drops         uint64
-	Errors        uint64
-	Err           string
+	PacketsOut   uint64
+	BytesIn      uint64
+	BytesOut     uint64
+	Drops        uint64
+	Errors       uint64
+	Err          string
 }
 
 // 解码流水线参数：capture 与解码解耦的核心配置。
@@ -126,10 +126,10 @@ const (
 // 故设上限：超过时丢最旧的并计入 OverflowDrops。
 // 取值按「单条体积 × 上限 ≈ 可容忍的内存占用」估算。
 const (
-	rawBufMax      = 32768 // ≈ 50MB @1600B/帧
-	eventBufMax    = 65536
-	stateChangeMax = 131072 // 投影条目小（每事件 0..N 条）
-	metricBufMax   = 65536
+	rawBufMax        = 32768 // ≈ 50MB @1600B/帧
+	eventBufMax      = 65536
+	stateChangeMax   = 131072 // 投影条目小（每事件 0..N 条）
+	metricBufMax     = 65536
 )
 
 // retainOnFailure 在写入失败时保留缓冲等下轮重试；超过 max 时丢最旧的并计数。
@@ -240,67 +240,67 @@ func (t *captureTask) run() {
 				metrics = append(metrics, engine.Flush()...)
 			}
 		}
-		if len(raws) > 0 {
-			if err := t.sqliteStore.AppendRawPackets(fctx, raws); err != nil {
-				// 写入失败必须保留缓冲等下轮重试：旧写法失败也清空，
-				// 一次磁盘抖动就永久丢掉整个窗口的原始包。
-				t.logger.Error("write raw failed, retaining buffer for retry", "error", err, "buffered", len(raws))
-				raws = retainOnFailure(raws, rawBufMax, &rawOverflow)
-			} else {
-				t.logger.Debug("flushed raw packets", "count", len(raws))
-				rawCount += int64(len(raws))
-				raws = raws[:0]
-			}
+	if len(raws) > 0 {
+		if err := t.sqliteStore.AppendRawPackets(fctx, raws); err != nil {
+			// 写入失败必须保留缓冲等下轮重试：旧写法失败也清空，
+			// 一次磁盘抖动就永久丢掉整个窗口的原始包。
+			t.logger.Error("write raw failed, retaining buffer for retry", "error", err, "buffered", len(raws))
+			raws = retainOnFailure(raws, rawBufMax, &rawOverflow)
+		} else {
+			t.logger.Debug("flushed raw packets", "count", len(raws))
+			rawCount += int64(len(raws))
+			raws = raws[:0]
 		}
-		if len(events) > 0 {
-			if err := t.sqliteStore.AppendEvents(fctx, events); err != nil {
-				// 同上：事件写失败不清空（清空会导致解码结果永久丢失）。
-				// enrichedSCs 也必须一起保留，否则重试时会与 events 错位。
-				t.logger.Error("write events failed, retaining buffer for retry", "error", err, "buffered", len(events))
-				events = retainOnFailure(events, eventBufMax, &eventOverflow)
-			} else {
-				t.logger.Debug("flushed decoded events", "count", len(events))
-				eventCount += int64(len(events))
-				// 事件写入成功后，再写入语义增强后的状态变更投影
-				if len(enrichedSCs) > 0 {
-					if err := t.sqliteStore.WriteEnrichedStateChanges(fctx, t.sessionID, enrichedSCs); err != nil {
-						// 同上：投影写失败也要保留重试，不能清空。
-						t.logger.Error("write enriched state changes failed, retaining buffer for retry",
-							"error", err, "buffered", len(enrichedSCs))
-						enrichedSCs = retainOnFailure(enrichedSCs, stateChangeMax, &stateChangeOverflow)
-					} else {
-						enrichedSCs = enrichedSCs[:0]
-					}
+	}
+	if len(events) > 0 {
+		if err := t.sqliteStore.AppendEvents(fctx, events); err != nil {
+			// 同上：事件写失败不清空（清空会导致解码结果永久丢失）。
+			// enrichedSCs 也必须一起保留，否则重试时会与 events 错位。
+			t.logger.Error("write events failed, retaining buffer for retry", "error", err, "buffered", len(events))
+			events = retainOnFailure(events, eventBufMax, &eventOverflow)
+		} else {
+			t.logger.Debug("flushed decoded events", "count", len(events))
+			eventCount += int64(len(events))
+			// 事件写入成功后，再写入语义增强后的状态变更投影
+			if len(enrichedSCs) > 0 {
+				if err := t.sqliteStore.WriteEnrichedStateChanges(fctx, t.sessionID, enrichedSCs); err != nil {
+					// 同上：投影写失败也要保留重试，不能清空。
+					t.logger.Error("write enriched state changes failed, retaining buffer for retry",
+						"error", err, "buffered", len(enrichedSCs))
+					enrichedSCs = retainOnFailure(enrichedSCs, stateChangeMax, &stateChangeOverflow)
+				} else {
+					enrichedSCs = enrichedSCs[:0]
 				}
-				events = events[:0]
 			}
+			events = events[:0]
 		}
-		if len(metrics) > 0 {
-			if err := t.sqliteStore.WriteMetrics(fctx, metrics); err != nil {
-				t.logger.Error("write metrics failed, retaining buffer for retry", "error", err, "buffered", len(metrics))
-				metrics = retainOnFailure(metrics, metricBufMax, &metricOverflow)
-			} else {
-				t.logger.Debug("flushed metrics", "count", len(metrics))
-				metricCount += int64(len(metrics))
-				metrics = metrics[:0]
-			}
+	}
+	if len(metrics) > 0 {
+		if err := t.sqliteStore.WriteMetrics(fctx, metrics); err != nil {
+			t.logger.Error("write metrics failed, retaining buffer for retry", "error", err, "buffered", len(metrics))
+			metrics = retainOnFailure(metrics, metricBufMax, &metricOverflow)
+		} else {
+			t.logger.Debug("flushed metrics", "count", len(metrics))
+			metricCount += int64(len(metrics))
+			metrics = metrics[:0]
 		}
+	}
 
-		// 更新统计快照（含 source.Stats()）
-		snap := taskStats{
-			RawCount:     rawCount,
-			EventCount:   eventCount,
-			MetricCount:  metricCount,
-			DecodeErrors: decodeErrs.Load(),
-			// 写缓冲达到上限被迫丢最旧的数量（持续写失败的唯一可见证据）。
-			OverflowDrops: rawOverflow.Load() + eventOverflow.Load() +
-				stateChangeOverflow.Load() + metricOverflow.Load(),
-		}
-		if pq != nil {
-			snap.PendingDecode = int64(pq.len())
-			// 溢出队列达到字节上限被迫丢最旧的包数（raw 已落库，可离线 decode_raw 补救）。
-			snap.DecodeDrops = pq.Dropped()
-		}
+	// 更新统计快照（含 source.Stats()）
+	snap := taskStats{
+		RawCount:     rawCount,
+		EventCount:   eventCount,
+		MetricCount:  metricCount,
+		DecodeErrors: decodeErrs.Load(),
+		// 写缓冲达到上限被迫丢最旧的数量（持续写失败的唯一可见证据）。
+		OverflowDrops: rawOverflow.Load() + eventOverflow.Load() +
+			stateChangeOverflow.Load() + metricOverflow.Load(),
+	}
+	if pq != nil {
+		snap.PendingDecode = int64(pq.len())
+		// 溢出队列达到字节上限被迫丢最旧的包数（raw 已落库，可离线 decode_raw 补救）。
+		snap.DecodeDrops = pq.Dropped()
+	}
 		if source != nil {
 			st := source.Stats()
 			snap.PacketsIn = st.PacketsIn
@@ -625,14 +625,14 @@ func (t *captureTask) run() {
 				return
 			}
 			// 在入缓冲与解码前为原始包分配稳定 ID，确保 raw_packet_id 能定位到 raw_packets 表的真实记录。
-			if pkt.ID == "" {
-				pkt.ID = string(event.NewEventID())
-			}
-			// 派生 conn_id：移动代理在 Metadata 携带真实 conn_id（优先保留）；
-			// agent / 本地网卡抓包没有，按规范五元组（双向排序）派生，使
-			// raw_packets 落库与解码事件上下文都带连接标识——Connections 页面
-			// 依赖 raw_packets.conn_id 聚合，缺失时整个页面为空。
-			deriveConnID(&pkt)
+		if pkt.ID == "" {
+			pkt.ID = string(event.NewEventID())
+		}
+		// 派生 conn_id：移动代理在 Metadata 携带真实 conn_id（优先保留）；
+		// agent / 本地网卡抓包没有，按规范五元组（双向排序）派生，使
+		// raw_packets 落库与解码事件上下文都带连接标识——Connections 页面
+		// 依赖 raw_packets.conn_id 聚合，缺失时整个页面为空。
+		deriveConnID(&pkt)
 			raws = append(raws, pkt)
 			resolveDecoder(false)
 			if pkt.Protocol != "tcp" {

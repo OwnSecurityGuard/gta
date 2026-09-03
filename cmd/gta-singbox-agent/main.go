@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -43,6 +44,7 @@ func main() {
 		filterHosts string
 		filterPorts string
 		sim         bool
+		listenFile  string
 	)
 	flag.StringVar(&server, "server", "127.0.0.1:9090", "GTA mobile capture source gRPC address")
 	flag.StringVar(&listen, "listen", "127.0.0.1:12000", "local address to accept game connections")
@@ -53,6 +55,7 @@ func main() {
 	flag.StringVar(&filterHosts, "filter-hosts", "", "comma-separated target hosts to capture (empty = all)")
 	flag.StringVar(&filterPorts, "filter-ports", "", "comma-separated target ports to capture (empty = all)")
 	flag.BoolVar(&sim, "sim", false, "run with a simulated game server+client (no sing-box needed)")
+	flag.StringVar(&listenFile, "listen-file", "", "write the actual listen address to this file once bound (required when --listen uses port 0)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -109,6 +112,20 @@ func main() {
 		}
 	}()
 
+	// --listen 用端口 0 时端口由内核分配，拉起本进程的 pipeline 租约管理器无法预知，
+	// 只能等绑定成功后回写文件再读回（这是跨进程拿动态端口最省事且无竞态的方式）。
+	if listenFile != "" {
+		addr := listenAddr(relay, logger)
+		if addr == "" {
+			logger.Error("relay listen address unavailable", "listen_file", listenFile)
+			os.Exit(1)
+		}
+		if err := writeListenFile(listenFile, addr); err != nil {
+			logger.Error("write listen file failed", "path", listenFile, "error", err)
+			os.Exit(1)
+		}
+	}
+
 	if sim {
 		go runSimClientLoop(ctx, logger, relay)
 	}
@@ -138,6 +155,22 @@ func runSimClientLoop(ctx context.Context, logger *slog.Logger, relay *agent.Rel
 		}
 		logger.Info("sim client round completed", "relay", relayAddr)
 	}
+}
+
+// writeListenFile 原子写入实际监听地址（临时文件 + rename），避免读取方读到半截内容。
+func writeListenFile(path, addr string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(addr+"\n"), 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func listenAddr(relay *agent.Relay, logger *slog.Logger) string {

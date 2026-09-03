@@ -34,8 +34,10 @@ const (
 	CaptureControl_Verify_FullMethodName              = "/gta.internalipc.CaptureControl/Verify"
 	CaptureControl_SampleBytes_FullMethodName         = "/gta.internalipc.CaptureControl/SampleBytes"
 	CaptureControl_GetRegistryAddr_FullMethodName     = "/gta.internalipc.CaptureControl/GetRegistryAddr"
-	CaptureControl_GetProxyConfig_FullMethodName      = "/gta.internalipc.CaptureControl/GetProxyConfig"
-	CaptureControl_UpdateProxyConfig_FullMethodName   = "/gta.internalipc.CaptureControl/UpdateProxyConfig"
+	CaptureControl_CreateProxyLease_FullMethodName    = "/gta.internalipc.CaptureControl/CreateProxyLease"
+	CaptureControl_ListProxyLeases_FullMethodName     = "/gta.internalipc.CaptureControl/ListProxyLeases"
+	CaptureControl_GetProxyLease_FullMethodName       = "/gta.internalipc.CaptureControl/GetProxyLease"
+	CaptureControl_ReleaseProxyLease_FullMethodName   = "/gta.internalipc.CaptureControl/ReleaseProxyLease"
 )
 
 // CaptureControlClient is the client API for CaptureControl service.
@@ -85,11 +87,16 @@ type CaptureControlClient interface {
 	// gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
 	// 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
 	GetRegistryAddr(ctx context.Context, in *GetRegistryAddrRequest, opts ...grpc.CallOption) (*GetRegistryAddrResponse, error)
-	// GetProxyConfig 返回当前代理抓包服务器配置与运行时状态（agent 子进程 + 代理会话）。
-	GetProxyConfig(ctx context.Context, in *GetProxyConfigRequest, opts ...grpc.CallOption) (*GetProxyConfigResponse, error)
-	// UpdateProxyConfig 应用新的代理抓包服务器配置：持久化 proxy.json、热重启
-	// gta-singbox-agent、并确保代理抓包会话常驻（免手动开始抓包）。
-	UpdateProxyConfig(ctx context.Context, in *UpdateProxyConfigRequest, opts ...grpc.CallOption) (*UpdateProxyConfigResponse, error)
+	// CreateProxyLease 为调用方创建一个代理抓包租约：独立 mobile 抓包会话 +
+	// 独立 gta-singbox-agent 进程（各自独立端口与筛选配置），手机连 agent 的
+	// listen 端口。会话停止时租约自动回收（杀 agent、释放端口）。
+	CreateProxyLease(ctx context.Context, in *CreateProxyLeaseRequest, opts ...grpc.CallOption) (*CreateProxyLeaseResponse, error)
+	// ListProxyLeases 列出调用方可见的租约（admin 全可见，同 ListPlugins 语义）。
+	ListProxyLeases(ctx context.Context, in *ListProxyLeasesRequest, opts ...grpc.CallOption) (*ListProxyLeasesResponse, error)
+	// GetProxyLease 查询单个租约状态快照（owner 校验，不匹配按不存在处理）。
+	GetProxyLease(ctx context.Context, in *GetProxyLeaseRequest, opts ...grpc.CallOption) (*GetProxyLeaseResponse, error)
+	// ReleaseProxyLease 释放租约：停会话、杀 agent、回收端口（幂等）。
+	ReleaseProxyLease(ctx context.Context, in *ReleaseProxyLeaseRequest, opts ...grpc.CallOption) (*ReleaseProxyLeaseResponse, error)
 }
 
 type captureControlClient struct {
@@ -259,20 +266,40 @@ func (c *captureControlClient) GetRegistryAddr(ctx context.Context, in *GetRegis
 	return out, nil
 }
 
-func (c *captureControlClient) GetProxyConfig(ctx context.Context, in *GetProxyConfigRequest, opts ...grpc.CallOption) (*GetProxyConfigResponse, error) {
+func (c *captureControlClient) CreateProxyLease(ctx context.Context, in *CreateProxyLeaseRequest, opts ...grpc.CallOption) (*CreateProxyLeaseResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetProxyConfigResponse)
-	err := c.cc.Invoke(ctx, CaptureControl_GetProxyConfig_FullMethodName, in, out, cOpts...)
+	out := new(CreateProxyLeaseResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_CreateProxyLease_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *captureControlClient) UpdateProxyConfig(ctx context.Context, in *UpdateProxyConfigRequest, opts ...grpc.CallOption) (*UpdateProxyConfigResponse, error) {
+func (c *captureControlClient) ListProxyLeases(ctx context.Context, in *ListProxyLeasesRequest, opts ...grpc.CallOption) (*ListProxyLeasesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpdateProxyConfigResponse)
-	err := c.cc.Invoke(ctx, CaptureControl_UpdateProxyConfig_FullMethodName, in, out, cOpts...)
+	out := new(ListProxyLeasesResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ListProxyLeases_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) GetProxyLease(ctx context.Context, in *GetProxyLeaseRequest, opts ...grpc.CallOption) (*GetProxyLeaseResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProxyLeaseResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_GetProxyLease_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) ReleaseProxyLease(ctx context.Context, in *ReleaseProxyLeaseRequest, opts ...grpc.CallOption) (*ReleaseProxyLeaseResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReleaseProxyLeaseResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ReleaseProxyLease_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -326,11 +353,16 @@ type CaptureControlServer interface {
 	// gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
 	// 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
 	GetRegistryAddr(context.Context, *GetRegistryAddrRequest) (*GetRegistryAddrResponse, error)
-	// GetProxyConfig 返回当前代理抓包服务器配置与运行时状态（agent 子进程 + 代理会话）。
-	GetProxyConfig(context.Context, *GetProxyConfigRequest) (*GetProxyConfigResponse, error)
-	// UpdateProxyConfig 应用新的代理抓包服务器配置：持久化 proxy.json、热重启
-	// gta-singbox-agent、并确保代理抓包会话常驻（免手动开始抓包）。
-	UpdateProxyConfig(context.Context, *UpdateProxyConfigRequest) (*UpdateProxyConfigResponse, error)
+	// CreateProxyLease 为调用方创建一个代理抓包租约：独立 mobile 抓包会话 +
+	// 独立 gta-singbox-agent 进程（各自独立端口与筛选配置），手机连 agent 的
+	// listen 端口。会话停止时租约自动回收（杀 agent、释放端口）。
+	CreateProxyLease(context.Context, *CreateProxyLeaseRequest) (*CreateProxyLeaseResponse, error)
+	// ListProxyLeases 列出调用方可见的租约（admin 全可见，同 ListPlugins 语义）。
+	ListProxyLeases(context.Context, *ListProxyLeasesRequest) (*ListProxyLeasesResponse, error)
+	// GetProxyLease 查询单个租约状态快照（owner 校验，不匹配按不存在处理）。
+	GetProxyLease(context.Context, *GetProxyLeaseRequest) (*GetProxyLeaseResponse, error)
+	// ReleaseProxyLease 释放租约：停会话、杀 agent、回收端口（幂等）。
+	ReleaseProxyLease(context.Context, *ReleaseProxyLeaseRequest) (*ReleaseProxyLeaseResponse, error)
 	mustEmbedUnimplementedCaptureControlServer()
 }
 
@@ -386,11 +418,17 @@ func (UnimplementedCaptureControlServer) SampleBytes(context.Context, *SampleByt
 func (UnimplementedCaptureControlServer) GetRegistryAddr(context.Context, *GetRegistryAddrRequest) (*GetRegistryAddrResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRegistryAddr not implemented")
 }
-func (UnimplementedCaptureControlServer) GetProxyConfig(context.Context, *GetProxyConfigRequest) (*GetProxyConfigResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetProxyConfig not implemented")
+func (UnimplementedCaptureControlServer) CreateProxyLease(context.Context, *CreateProxyLeaseRequest) (*CreateProxyLeaseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateProxyLease not implemented")
 }
-func (UnimplementedCaptureControlServer) UpdateProxyConfig(context.Context, *UpdateProxyConfigRequest) (*UpdateProxyConfigResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpdateProxyConfig not implemented")
+func (UnimplementedCaptureControlServer) ListProxyLeases(context.Context, *ListProxyLeasesRequest) (*ListProxyLeasesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListProxyLeases not implemented")
+}
+func (UnimplementedCaptureControlServer) GetProxyLease(context.Context, *GetProxyLeaseRequest) (*GetProxyLeaseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProxyLease not implemented")
+}
+func (UnimplementedCaptureControlServer) ReleaseProxyLease(context.Context, *ReleaseProxyLeaseRequest) (*ReleaseProxyLeaseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleaseProxyLease not implemented")
 }
 func (UnimplementedCaptureControlServer) mustEmbedUnimplementedCaptureControlServer() {}
 func (UnimplementedCaptureControlServer) testEmbeddedByValue()                        {}
@@ -676,38 +714,74 @@ func _CaptureControl_GetRegistryAddr_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
-func _CaptureControl_GetProxyConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetProxyConfigRequest)
+func _CaptureControl_CreateProxyLease_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateProxyLeaseRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(CaptureControlServer).GetProxyConfig(ctx, in)
+		return srv.(CaptureControlServer).CreateProxyLease(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: CaptureControl_GetProxyConfig_FullMethodName,
+		FullMethod: CaptureControl_CreateProxyLease_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CaptureControlServer).GetProxyConfig(ctx, req.(*GetProxyConfigRequest))
+		return srv.(CaptureControlServer).CreateProxyLease(ctx, req.(*CreateProxyLeaseRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _CaptureControl_UpdateProxyConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpdateProxyConfigRequest)
+func _CaptureControl_ListProxyLeases_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProxyLeasesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(CaptureControlServer).UpdateProxyConfig(ctx, in)
+		return srv.(CaptureControlServer).ListProxyLeases(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: CaptureControl_UpdateProxyConfig_FullMethodName,
+		FullMethod: CaptureControl_ListProxyLeases_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CaptureControlServer).UpdateProxyConfig(ctx, req.(*UpdateProxyConfigRequest))
+		return srv.(CaptureControlServer).ListProxyLeases(ctx, req.(*ListProxyLeasesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_GetProxyLease_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProxyLeaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).GetProxyLease(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_GetProxyLease_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).GetProxyLease(ctx, req.(*GetProxyLeaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_ReleaseProxyLease_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseProxyLeaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ReleaseProxyLease(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ReleaseProxyLease_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ReleaseProxyLease(ctx, req.(*ReleaseProxyLeaseRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -776,12 +850,20 @@ var CaptureControl_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _CaptureControl_GetRegistryAddr_Handler,
 		},
 		{
-			MethodName: "GetProxyConfig",
-			Handler:    _CaptureControl_GetProxyConfig_Handler,
+			MethodName: "CreateProxyLease",
+			Handler:    _CaptureControl_CreateProxyLease_Handler,
 		},
 		{
-			MethodName: "UpdateProxyConfig",
-			Handler:    _CaptureControl_UpdateProxyConfig_Handler,
+			MethodName: "ListProxyLeases",
+			Handler:    _CaptureControl_ListProxyLeases_Handler,
+		},
+		{
+			MethodName: "GetProxyLease",
+			Handler:    _CaptureControl_GetProxyLease_Handler,
+		},
+		{
+			MethodName: "ReleaseProxyLease",
+			Handler:    _CaptureControl_ReleaseProxyLease_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

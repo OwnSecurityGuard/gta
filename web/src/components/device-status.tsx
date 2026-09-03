@@ -108,8 +108,8 @@ function DeviceCard({
         <p className="mt-0.5 text-[11px] text-muted-foreground">
           {device.state === "capturing" ? (
             <>
-              <span className="font-mono tabular-nums">{device.packets.toLocaleString()}</span> packets ·{" "}
-              <span className="font-mono tabular-nums">{device.events.toLocaleString()}</span> events
+              <span className="font-mono tabular-nums">{device.packets?.toLocaleString() ?? 0}</span> packets ·{" "}
+              <span className="font-mono tabular-nums">{device.events?.toLocaleString() ?? 0}</span> events
               {device.decodeErrors > 0 ? (
                 <>
                   {" "}
@@ -124,7 +124,7 @@ function DeviceCard({
             <>
               最近抓包：{seen || "—"}
               {device.packets > 0
-                ? ` · ${device.packets.toLocaleString()} packets / ${device.events.toLocaleString()} events`
+                ? ` · ${device.packets?.toLocaleString() ?? 0} packets / ${device.events?.toLocaleString() ?? 0} events`
                 : ""}
             </>
           ) : device.state === "connected" ? (

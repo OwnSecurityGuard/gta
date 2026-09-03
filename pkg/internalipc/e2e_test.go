@@ -1,4 +1,4 @@
-package internalipc_test
+﻿package internalipc_test
 
 import (
 	"context"
@@ -148,9 +148,15 @@ func (f *fakeCaptureEngine) Verify(ctx context.Context, req capturecontrol.Verif
 func (f *fakeCaptureEngine) SampleBytes(ctx context.Context, req capturecontrol.SampleBytesRequest) (capturecontrol.SampleBytesResult, error) {
 	return capturecontrol.SampleBytesResult{}, nil
 }
-func (f *fakeCaptureEngine) GetProxyConfig(ctx context.Context) (capturecontrol.ProxyConfigState, error) {
-	return capturecontrol.ProxyConfigState{}, nil
+func (f *fakeCaptureEngine) CreateProxyLease(ctx context.Context, req capturecontrol.CreateProxyLeaseRequest) (capturecontrol.ProxyLease, error) {
+	return capturecontrol.ProxyLease{LeaseID: "lease-1", SessionID: "lease-1"}, nil
 }
-func (f *fakeCaptureEngine) UpdateProxyConfig(ctx context.Context, req capturecontrol.ProxyConfigUpdate) (capturecontrol.ProxyConfigState, error) {
-	return capturecontrol.ProxyConfigState{}, nil
+func (f *fakeCaptureEngine) ListProxyLeases(ctx context.Context) ([]capturecontrol.ProxyLease, error) {
+	return nil, nil
+}
+func (f *fakeCaptureEngine) GetProxyLease(ctx context.Context, leaseID string) (capturecontrol.ProxyLease, error) {
+	return capturecontrol.ProxyLease{}, nil
+}
+func (f *fakeCaptureEngine) ReleaseProxyLease(ctx context.Context, leaseID string) (capturecontrol.ReleaseProxyLeaseResult, error) {
+	return capturecontrol.ReleaseProxyLeaseResult{OK: true}, nil
 }

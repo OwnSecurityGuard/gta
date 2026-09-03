@@ -338,11 +338,11 @@ export function MyCapturePage({
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="font-mono text-sm text-foreground">
-                      {s.events.toLocaleString()}{" "}
+                      {s.events?.toLocaleString() ?? 0}{" "}
                       <span className="text-[10px] text-muted-foreground">events</span>
                     </p>
                     <p className="font-mono text-[11px] text-muted-foreground">
-                      {s.raw_packets.toLocaleString()} packets
+                      {s.raw_packets?.toLocaleString() ?? 0} packets
                     </p>
                   </div>
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />

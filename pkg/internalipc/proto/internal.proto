@@ -46,11 +46,16 @@ service CaptureControl {
   // gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
   // 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
   rpc GetRegistryAddr(GetRegistryAddrRequest) returns (GetRegistryAddrResponse);
-  // GetProxyConfig 返回当前代理抓包服务器配置与运行时状态（agent 子进程 + 代理会话）。
-  rpc GetProxyConfig(GetProxyConfigRequest) returns (GetProxyConfigResponse);
-  // UpdateProxyConfig 应用新的代理抓包服务器配置：持久化 proxy.json、热重启
-  // gta-singbox-agent、并确保代理抓包会话常驻（免手动开始抓包）。
-  rpc UpdateProxyConfig(UpdateProxyConfigRequest) returns (UpdateProxyConfigResponse);
+  // CreateProxyLease 为调用方创建一个代理抓包租约：独立 mobile 抓包会话 +
+  // 独立 gta-singbox-agent 进程（各自独立端口与筛选配置），手机连 agent 的
+  // listen 端口。会话停止时租约自动回收（杀 agent、释放端口）。
+  rpc CreateProxyLease(CreateProxyLeaseRequest) returns (CreateProxyLeaseResponse);
+  // ListProxyLeases 列出调用方可见的租约（admin 全可见，同 ListPlugins 语义）。
+  rpc ListProxyLeases(ListProxyLeasesRequest) returns (ListProxyLeasesResponse);
+  // GetProxyLease 查询单个租约状态快照（owner 校验，不匹配按不存在处理）。
+  rpc GetProxyLease(GetProxyLeaseRequest) returns (GetProxyLeaseResponse);
+  // ReleaseProxyLease 释放租约：停会话、杀 agent、回收端口（幂等）。
+  rpc ReleaseProxyLease(ReleaseProxyLeaseRequest) returns (ReleaseProxyLeaseResponse);
 }
 
 // DecodeRawPacketsRequest 离线解码请求。
@@ -387,44 +392,76 @@ message GetRegistryAddrResponse {
   string registry_addr = 1;
 }
 
-// GetProxyConfigRequest 无参数，返回 pipeline 当前的代理抓包服务器配置。
-message GetProxyConfigRequest {}
+// ---- Proxy Lease（按用户/设备的代理抓包租约）----
 
-// ProxyConfigState 是代理抓包服务器的配置 + 运行时状态快照。
-message ProxyConfigState {
-  string listen_addr = 1;    // agent HTTP CONNECT 代理监听地址（手机连这里）
-  string server_addr = 2;    // mobile Source gRPC 监听地址（agent 推这里）
-  bool agent_running = 3;    // gta-singbox-agent 子进程是否存活
-  int32 agent_pid = 4;       // agent 子进程 PID（未运行时为 0）
-  bool session_running = 5;  // 代理抓包会话是否运行中
-  string session_id = 6;     // 代理抓包会话 id（未运行时为空）
-  string config_path = 7;    // 配置文件绝对路径
-  string plugin = 8;         // 代理抓包会话绑定的解码插件名（空=仅抓原始包）
-  repeated string include_hosts = 9;  // 连接筛选：仅抓取目标主机在此列表内的连接
-  repeated int32 include_ports = 10;  // 连接筛选：仅抓取目标端口在此列表内的连接
-  int64 active_conns = 11;   // 当前活跃手机连接数（open - close）
-  uint64 total_conns = 12;   // 累计打开连接数
-  int64 last_data_unix = 13; // 最近一次收到数据的 unix 毫秒（0=从未）
-  uint64 total_bytes = 14;   // 累计接收应用层字节
+// CreateProxyLeaseRequest 创建代理抓包租约。plugin/include_hosts/include_ports
+// 为该租约私有（不影响其他租约）；device 是设备标签；owner/all_owners 由
+// gta-mcp 从 auth ctx 透传（同 StartCaptureRequest），pipeline 记录归属。
+message CreateProxyLeaseRequest {
+  string plugin = 1;                 // 租约会话绑定的解码插件（空=仅原始包）
+  repeated string include_hosts = 2; // 连接筛选：目标主机（空=不筛选）
+  repeated int32 include_ports = 3;  // 连接筛选：目标端口（空=不筛选）
+  string device = 4;                 // 设备标签，如 "alice-phone"（可选）
+  string project_id = 5;             // 归属项目（可选）
+  string owner = 6;                  // gta-mcp 透传的调用方属主
+  bool all_owners = 7;               // gta-mcp 透传（admin）
 }
 
-message GetProxyConfigResponse {
-  ProxyConfigState state = 1;
+// ProxyLeaseState 租约配置 + 运行时状态快照。lease_id 与内部抓包会话
+// session_id 一致（1:1 生命周期），前端可直接跳转会话。
+message ProxyLeaseState {
+  string lease_id = 1;         // 租约 id（= 抓包会话 session_id）
+  string owner = 2;
+  string project_id = 3;
+  string plugin = 4;
+  repeated string include_hosts = 5;
+  repeated int32 include_ports = 6;
+  string device = 7;
+  string listen_addr = 8;      // agent HTTP CONNECT 监听（0.0.0.0:121xx，手机连这里）
+  int32 agent_listen_port = 9; // agent 监听端口（12100-12199）
+  int32 mobile_grpc_port = 10; // mobile source gRPC 端口（19100-19199，本机回环）
+  bool agent_running = 11;
+  int32 agent_pid = 12;
+  bool session_running = 13;
+  string session_id = 14;
+  int64 created_at_unix = 15;
+  int64 active_conns = 16;     // 当前活跃手机连接数
+  uint64 total_conns = 17;
+  int64 last_data_unix = 18;   // unix 毫秒（0=从未）
+  uint64 total_bytes = 19;
 }
 
-// UpdateProxyConfigRequest 新的代理抓包服务器配置。
-// listen_addr 必填（host:port）；其余字段可空（走默认值，等价于不修改）。
-// include_hosts/include_ports 为空表示不筛选（抓取全部连接）。
-message UpdateProxyConfigRequest {
-  string listen_addr = 1;
-  string server_addr = 2;
-  string plugin = 3;
-  repeated string include_hosts = 4;
-  repeated int32 include_ports = 5;
+message CreateProxyLeaseResponse {
+  ProxyLeaseState lease = 1; // 失败走 gRPC error
 }
 
-message UpdateProxyConfigResponse {
+message ListProxyLeasesRequest {
+  string owner = 1;
+  bool all_owners = 2;
+}
+
+message ListProxyLeasesResponse {
+  repeated ProxyLeaseState leases = 1;
+}
+
+message GetProxyLeaseRequest {
+  string lease_id = 1;
+  string owner = 2;
+  bool all_owners = 3;
+}
+
+message GetProxyLeaseResponse {
+  ProxyLeaseState lease = 1;
+}
+
+message ReleaseProxyLeaseRequest {
+  string lease_id = 1;
+  string owner = 2;
+  bool all_owners = 3;
+}
+
+message ReleaseProxyLeaseResponse {
   bool ok = 1;
-  string message = 2;        // 错误信息或状态说明
-  ProxyConfigState state = 3; // 应用后的最新状态
+  string message = 2;
+  string session_id = 3; // 被停止的会话 id
 }

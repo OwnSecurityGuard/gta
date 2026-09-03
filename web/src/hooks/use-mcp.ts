@@ -37,7 +37,12 @@ import type {
 } from "@/types/behavior";
 import type { QueryCaptureTableResult } from "@/types/table-browser";
 import type { ListConnectionsResult, GetConnectionDetailResult, ListConnectionStreamsResult, ListConnectionFramesResult } from "@/types/connection";
-import type { GetProxyConfigResult, UpdateProxyConfigResult, ProxyConfigUpdateVars } from "@/types/proxy";
+import type {
+  ListProxyLeasesResult,
+  CreateProxyLeaseResult,
+  ReleaseProxyLeaseResult,
+  CreateProxyLeaseVars,
+} from "@/types/proxy";
 import type { GetAgentDownloadOptionsResult } from "@/types/agent";
 import type { CreateAccessCodeResult, ListAccessCodesResult } from "@/types/access-code";
 import type {
@@ -761,32 +766,44 @@ export function useAgentDownloadOptions() {
   });
 }
 
-// ===== 代理抓包服务器配置（常驻，无需手动开始抓包）=====
+// ===== 代理抓包租约（按用户/设备独立会话，多用户互不串流）=====
 
-/** get_proxy_server_config：查询当前代理抓包服务器配置 + 运行时状态 + LAN IP/连接地址。 */
-export function useProxyServerConfig() {
+/** list_proxy_leases：查询当前用户可见的代理抓包租约列表（admin 全可见）。 */
+export function useProxyLeases() {
   return useQuery({
-    queryKey: ["proxyServerConfig"],
-    queryFn: () => mcpClient.callTool<GetProxyConfigResult>("get_proxy_server_config"),
-    refetchInterval: 5000, // agent/会话状态实时变化，轮询保持状态新鲜
+    queryKey: ["proxyLeases"],
+    queryFn: () => mcpClient.callTool<ListProxyLeasesResult>("list_proxy_leases"),
+    refetchInterval: 4000, // agent/会话/连接状态实时变化，轮询保持新鲜
   });
 }
 
-/** update_proxy_server_config：应用新的代理服务器配置（持久化 + 热重启 agent + 重启常驻会话）。 */
-export function useUpdateProxyServerConfig() {
+/** create_proxy_lease：创建独立代理抓包租约（独立端口 + 独立 agent + 独立会话）。 */
+export function useCreateProxyLease() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: ProxyConfigUpdateVars) =>
-      mcpClient.callTool<UpdateProxyConfigResult>("update_proxy_server_config", {
-        listen_addr: vars.listenAddr ?? "",
-        server_addr: vars.serverAddr ?? "",
+    mutationFn: (vars: CreateProxyLeaseVars) =>
+      mcpClient.callTool<CreateProxyLeaseResult>("create_proxy_lease", {
         plugin: vars.plugin ?? "",
-        // undefined 序列化后省略（表示不修改）；空数组保留（表示清空筛选）。
-        include_hosts: vars.includeHosts,
-        include_ports: vars.includePorts,
+        include_hosts: vars.includeHosts ?? [],
+        include_ports: vars.includePorts ?? [],
+        device: vars.device ?? "",
+        project_id: vars.projectId ?? "",
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["proxyServerConfig"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyLeases"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+/** release_proxy_lease：释放租约（停会话 + 杀 agent + 回收端口，幂等）。 */
+export function useReleaseProxyLease() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (leaseId: string) =>
+      mcpClient.callTool<ReleaseProxyLeaseResult>("release_proxy_lease", { lease_id: leaseId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["proxyLeases"] });
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });

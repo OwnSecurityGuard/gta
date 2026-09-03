@@ -693,24 +693,24 @@ func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToo
 	if m.pipelineClient != nil {
 		resp, err := m.pipelineClient.GetCaptureStatus(ctx, &pb.GetCaptureStatusRequest{SessionId: sessionID})
 		if err == nil {
-			return successResult(map[string]any{
-				"session_id":    sessionID,
-				"state":         resp.GetState(),
-				"source_name":   resp.GetSourceName(),
-				"packets_in":    resp.GetPacketsIn(),
-				"raw_count":     resp.GetRawCount(),
-				"event_count":   resp.GetEventCount(),
-				"metric_count":  resp.GetMetricCount(),
-				"decode_errors": resp.GetDecodeErrors(),
-				"drops":         resp.GetDrops(),
-				"errors":        resp.GetErrors(),
-				"err":           resp.GetErr(),
-				// agent 连接活性：agent_connected=true 仅表示推流连接已建立，
-				// 与 raw_count 无关——"连上了但一个包都没有"是常见状态，
-				// UI 据此给不同的排查指引（去启动游戏 vs 去检查 agent）。
-				"agent_connected":      resp.GetAgentConnected(),
-				"agent_last_seen_unix": resp.GetAgentLastSeenUnix(),
-			}), nil
+		return successResult(map[string]any{
+			"session_id":    sessionID,
+			"state":         resp.GetState(),
+			"source_name":   resp.GetSourceName(),
+			"packets_in":    resp.GetPacketsIn(),
+			"raw_count":     resp.GetRawCount(),
+			"event_count":   resp.GetEventCount(),
+			"metric_count":  resp.GetMetricCount(),
+			"decode_errors": resp.GetDecodeErrors(),
+			"drops":         resp.GetDrops(),
+			"errors":        resp.GetErrors(),
+			"err":           resp.GetErr(),
+			// agent 连接活性：agent_connected=true 仅表示推流连接已建立，
+			// 与 raw_count 无关——"连上了但一个包都没有"是常见状态，
+			// UI 据此给不同的排查指引（去启动游戏 vs 去检查 agent）。
+			"agent_connected":      resp.GetAgentConnected(),
+			"agent_last_seen_unix": resp.GetAgentLastSeenUnix(),
+		}), nil
 		}
 		// gRPC 查询失败，降级返回 sessionMgr 中的元数据
 		slog.Warn("get_session_status gRPC failed, falling back to metadata", "error", err, "session_id", sessionID)
@@ -2805,15 +2805,28 @@ func main() {
 		mcp.WithDescription("Return the full plugin development guide (markdown). Covers architecture, plugin.yaml schema, Decode RPC contract, lifecycle, framing, and best practices. KEY TAKEAWAY: for pcap sources DecodeRequest.payload is a COMPLETE link-layer frame (link header + IP + TCP/UDP + app bytes), NOT pre-stripped L7 — strip it per link_type with framing.ExtractL7 and reassemble TCP with framing.Reassembler first. Only ProxyPayload(1001)/TLSPlaintext(1002) are already L7. Read this BEFORE writing any decoder."),
 	), capture.handleGetPluginDevGuide)
 
-	s.AddTool(mcp.NewTool("get_proxy_server_config",
-		mcp.WithDescription("Get the current mobile proxy capture server config and runtime status (agent process + always-on session), plus the machine LAN IP and a connect_addr (HTTP CONNECT proxy address for the phone). Use this to render the server config page and generate a scan-to-connect QR code. Proxy capture no longer requires manually starting a session — the pipeline keeps it running."),
-	), capture.handleGetProxyServerConfig)
+	s.AddTool(mcp.NewTool("create_proxy_lease",
+		mcp.WithDescription("Create a per-user/device mobile proxy capture lease: the pipeline allocates dedicated ports, starts an independent mobile capture session and spawns a dedicated gta-singbox-agent with its own filter config — multiple users never share or fight over one session. Returns the lease snapshot including lan_ip, connect_addr (HTTP CONNECT proxy address for the phone) and singbox_uri (scan-to-import QR content). Each user may hold up to 5 leases; release with release_proxy_lease."),
+		mcp.WithString("plugin", mcp.Description("Optional decoder plugin name bound to the lease session")),
+		mcp.WithArray("include_hosts", mcp.Description("Optional host filter list (comma or JSON array), e.g. [\"api.example.com\"]"), mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithArray("include_ports", mcp.Description("Optional port filter list (comma or JSON array), e.g. [443, 8080]"), mcp.Items(map[string]any{"type": "number"})),
+		mcp.WithString("device", mcp.Description("Optional device label for identification, e.g. alice-phone")),
+		mcp.WithString("project_id", mcp.Description("Optional project ID the lease session belongs to")),
+	), capture.handleCreateProxyLease)
 
-	s.AddTool(mcp.NewTool("update_proxy_server_config",
-		mcp.WithDescription("Apply a new mobile proxy capture server config: persists to proxy.json, hot-restarts gta-singbox-agent and restarts the always-on proxy session so the change takes effect immediately. Empty fields keep the current value (listen_addr is the proxy port the phone connects to, e.g. 0.0.0.0:12000; server_addr is the mobile source gRPC addr, e.g. 127.0.0.1:9090; plugin is the decoder bound to the proxy session — framing/reassembly is handled by the plugin itself, not configured here)."),
-		mcp.WithString("listen_addr", mcp.Description("HTTP CONNECT proxy listen address, e.g. 0.0.0.0:12000 (empty = keep current)")),
-		mcp.WithString("server_addr", mcp.Description("Mobile source gRPC address the agent pushes to, e.g. 127.0.0.1:9090 (empty = keep current)")),
-	), capture.handleUpdateProxyServerConfig)
+	s.AddTool(mcp.NewTool("list_proxy_leases",
+		mcp.WithDescription("List the caller's active mobile proxy capture leases with runtime status (agent process, session, live connection activity) plus lan_ip/connect_addr/singbox_uri per lease. Admin callers see all owners' leases."),
+	), capture.handleListProxyLeases)
+
+	s.AddTool(mcp.NewTool("get_proxy_lease",
+		mcp.WithDescription("Get one mobile proxy capture lease's status snapshot by lease_id (= session_id). Includes agent liveness, session state and live connection activity plus the QR connect addresses."),
+		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID returned by create_proxy_lease (= session_id)")),
+	), capture.handleGetProxyLease)
+
+	s.AddTool(mcp.NewTool("release_proxy_lease",
+		mcp.WithDescription("Release a mobile proxy capture lease: stops its capture session, terminates its gta-singbox-agent and frees the ports (idempotent). The lease's QR code / singbox profile stops working immediately. Other users' leases are unaffected."),
+		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID to release (= session_id)")),
+	), capture.handleReleaseProxyLease)
 
 	s.AddTool(mcp.NewTool("get_registry_addr",
 		mcp.WithDescription("Return the registry address the pipeline is currently listening on (its -registry-addr, e.g. :9091). Plugins MUST connect here by setting GTA_REGISTRY_ADDR at startup; this tool removes the guesswork of reading pipeline startup logs. Use it to learn where a freshly launched plugin should register, or to confirm activate_plugin's resolved address."),

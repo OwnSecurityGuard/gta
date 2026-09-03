@@ -22,11 +22,10 @@ import (
 
 // 各监听地址的默认值（与各 main.go 既有 flag 默认值一致，保证无配置时行为不变）。
 const (
-	DefaultMCPAddr         = ":8781"          // gta-mcp HTTP/SSE 监听地址
-	DefaultControlAddr     = ":9888"          // CaptureControl gRPC 监听地址
-	DefaultRegistryAddr    = ":9091"          // PluginRegistry gRPC 监听地址
-	DefaultAgentIngestAddr = ":9092"          // AgentIngest gRPC 监听地址
-	DefaultProxyServerAddr = "127.0.0.1:9090" // mobile Source gRPC 监听地址（T11）
+	DefaultMCPAddr         = ":8781" // gta-mcp HTTP/SSE 监听地址
+	DefaultControlAddr     = ":9888" // CaptureControl gRPC 监听地址
+	DefaultRegistryAddr    = ":9091" // PluginRegistry gRPC 监听地址
+	DefaultAgentIngestAddr = ":9092" // AgentIngest gRPC 监听地址
 )
 
 // MCPServerConfig 是 gta-mcp 相关配置。
@@ -43,13 +42,6 @@ type PipelineServerConfig struct {
 	ControlAddr     string `yaml:"control_addr"`
 	RegistryAddr    string `yaml:"registry_addr"`
 	AgentIngestAddr string `yaml:"agent_ingest_addr"`
-}
-
-// ProxyOverrides 是代理抓包相关覆盖项（T11）。
-type ProxyOverrides struct {
-	// ServerAddr 覆盖 mobile Source 的 gRPC 监听地址（proxy.json 未指定 server_addr 时生效）。
-	// 对应环境变量 GTA_PROXY_SERVER_ADDR；默认 127.0.0.1:9090。
-	ServerAddr string `yaml:"server_addr"`
 }
 
 // SessionConfig 是会话数据保留策略（存储优化），由 gta-mcp 周期执行清理。
@@ -69,7 +61,6 @@ type Config struct {
 	WorkDir  string               `yaml:"workdir"`
 	MCP      MCPServerConfig      `yaml:"mcp"`
 	Pipeline PipelineServerConfig `yaml:"pipeline"`
-	Proxy    ProxyOverrides       `yaml:"proxy"`
 	Sessions SessionConfig        `yaml:"sessions"`
 }
 
@@ -108,7 +99,6 @@ func (c *Config) applyEnvFallback() {
 	c.Pipeline.ControlAddr = firstNonEmpty(os.Getenv("GTA_CONTROL_ADDR"), c.Pipeline.ControlAddr)
 	c.Pipeline.RegistryAddr = firstNonEmpty(os.Getenv("GTA_REGISTRY_ADDR"), c.Pipeline.RegistryAddr)
 	c.Pipeline.AgentIngestAddr = firstNonEmpty(os.Getenv("GTA_AGENT_INGEST_ADDR"), c.Pipeline.AgentIngestAddr)
-	c.Proxy.ServerAddr = firstNonEmpty(os.Getenv("GTA_PROXY_SERVER_ADDR"), c.Proxy.ServerAddr)
 	c.Sessions.RetentionDays = envIntOr("GTA_SESSION_RETENTION_DAYS", c.Sessions.RetentionDays)
 	c.Sessions.MaxSessions = envIntOr("GTA_MAX_SESSIONS", c.Sessions.MaxSessions)
 }

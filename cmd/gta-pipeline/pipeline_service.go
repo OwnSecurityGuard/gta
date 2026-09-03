@@ -9,17 +9,15 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
 	"gta/pkg/auth"
 	"gta/pkg/capture"
 	"gta/pkg/capture/agent"
-	"gta/pkg/capture/mobile"
-	"gta/pkg/config"
 	"gta/pkg/internalipc"
 	"gta/pkg/internalipc/capturecontrol"
 	"gta/pkg/logging"
 	"gta/pkg/plugin"
+	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	protocolconfig "gta/pkg/protocol/config"
 	"gta/pkg/store"
 )
@@ -49,24 +47,16 @@ type pipelineService struct {
 	mu    sync.RWMutex
 	tasks map[string]*captureTask
 
-	// 代理抓包服务器常驻管理（proxyMu 保护）：
-	// proxyCfg 当前生效配置、proxyPath proxy.json 路径、proxySessionID 常驻代理会话 id、
-	// spawnAgent 是否自动拉起 agent、agentBin agent 二进制路径、agentProc 当前 agent 子进程。
-	proxyMu        sync.Mutex
-	proxyCfg       config.ProxyServerConfig
-	proxyPath      string
-	proxySessionID string
-	spawnAgent     bool
-	agentBin       string
-	agentProc      *agentProcess
-	// proxyActivity 是注入常驻 mobile 会话的运行时活动追踪器（非 nil 表示
-	// 当前常驻会话已接线），GetProxyConfig 从它取实时连接状态。
-	proxyActivity *mobile.Activity
-
-	// proxyServerAddrOverride 是 T11 注入的 server_addr 兜底值（gta.yaml
-	// proxy.server_addr / GTA_PROXY_SERVER_ADDR）。proxy.json 未指定 server_addr
-	// 时生效；为空表示无覆盖（沿用 DefaultProxyServerConfig 默认值）。
-	proxyServerAddrOverride string
+	// 代理抓包租约管理（leaseMu 保护 leases；两个端口分配器各自带锁）：
+	// 每个租约 = 独立 mobile 会话 + 独立 gta-singbox-agent 进程 + 私有筛选配置，
+	// lease_id 与 session_id 一致，会话结束（finalizeTask）时自动回收。
+	// 锁序规约：leaseMu 先于 mu；Start/StopSession 一律在 leaseMu 之外调用。
+	leaseMu      sync.Mutex
+	leases       map[string]*proxyLease
+	agentPorts   *portRange // gta-singbox-agent HTTP CONNECT 监听端口段（12100-12199）
+	grpcPorts    *portRange // mobile Source gRPC 监听端口段（19100-19199）
+	agentBin     string     // gta-singbox-agent 二进制路径（空 = <workdir>/bin 下查找）
+	agentSpawner proxyAgentSpawner // 拉起 agent 的函数（测试注入 fake）
 }
 
 // newPipelineService 构造 pipelineService，不启动任何会话。
@@ -80,6 +70,10 @@ func newPipelineService(workDir string, controlStore *store.ControlStore, regist
 		logger:       logging.With("component", "pipeline_service"),
 		registryAddr: registryAddr,
 		tasks:        make(map[string]*captureTask),
+		leases:       make(map[string]*proxyLease),
+		agentPorts:   newPortRange(proxyLeaseAgentPortBase, proxyLeaseAgentPortMax),
+		grpcPorts:    newPortRange(proxyLeaseGRPCPortBase, proxyLeaseGRPCPortMax),
+		agentSpawner: spawnSingboxAgentLease,
 	}
 }
 
@@ -352,6 +346,9 @@ func (s *pipelineService) finalizeTask(task *captureTask) {
 		s.logger.Error("finalizeTask: update control store", "error", err, "session_id", task.sessionID)
 	}
 	s.removeTask(task.sessionID)
+	// 代理租约随会话终止自动回收（幂等；非租约会话是 no-op）。
+	// 此时不持 s.mu，与 leaseMu 无锁序冲突。
+	s.reclaimLeaseForSession(task.sessionID)
 }
 
 // StopAll 优雅停止所有活跃抓包会话，并等待各自 finalize 完成（写 ControlStore running→stopped）。

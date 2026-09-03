@@ -97,18 +97,55 @@ func TestWebUI_AssetImmutable(t *testing.T) {
 	}
 }
 
-// TestWebUI_UnknownPathFallsThrough 验证未命中嵌入文件的路径原样进鉴权链
-// （保持与静态集成前完全一致的 401/404 语义）。
-func TestWebUI_UnknownPathFallsThrough(t *testing.T) {
+// TestWebUI_UnknownPathSPAFallback 验证未命中嵌入文件且非 API 的路径
+// 按 SPA 深链接回退到 index.html（前端路由接管，而非 401/404）。
+func TestWebUI_UnknownPathSPAFallback(t *testing.T) {
 	t.Parallel()
 	probe := &fallbackProbe{}
 	h := serveWebOrAPI(builtFS(), probe)
 	rec := doGet(t, h, "/no-such-path")
-	if !probe.called || probe.path != "/no-such-path" {
-		t.Fatal("未知路径应兜底到鉴权链")
+	if probe.called {
+		t.Fatal("SPA 深链接不应兜底到鉴权链")
 	}
-	if rec.Code != http.StatusTeapot {
-		t.Fatalf("应透传兜底 handler 的响应，实际 %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("SPA 深链接应 200 返回 index.html，实际 %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "<html>index</html>" {
+		t.Fatalf("SPA 深链接应返回 index.html，实际 %q", body)
+	}
+}
+
+// TestWebUI_APIEndpointNotSwallowed 验证 API/流式端点（无扩展名）不回退到
+// index.html，而是交给下游 authed 处理器——否则 EventSource 会因 MIME 不
+// 匹配（text/html vs text/event-stream）中止连接。
+func TestWebUI_APIEndpointNotSwallowed(t *testing.T) {
+	t.Parallel()
+	probe := &fallbackProbe{}
+	h := serveWebOrAPI(builtFS(), probe)
+	for _, path := range []string{"/sse", "/message", "/mcp", "/events/plugins", "/download/agent"} {
+		probe.called = false
+		rec := doGet(t, h, path)
+		if !probe.called || probe.path != path {
+			t.Fatalf("%s 应交给下游 API 处理器，实际 called=%v path=%q", path, probe.called, probe.path)
+		}
+		if rec.Code != http.StatusTeapot {
+			t.Fatalf("%s 应透传下游响应，实际 %d", path, rec.Code)
+		}
+	}
+}
+
+// TestWebUI_StaticFileNotFound 验证带扩展名的静态资源不存在时返回 404
+// （而非 401 或 index.html 200）。
+func TestWebUI_StaticFileNotFound(t *testing.T) {
+	t.Parallel()
+	probe := &fallbackProbe{}
+	h := serveWebOrAPI(builtFS(), probe)
+	rec := doGet(t, h, "/vite.svg")
+	if probe.called {
+		t.Fatal("静态资源不应兜底到鉴权链")
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("缺失的静态资源应 404，实际 %d", rec.Code)
 	}
 }
 
@@ -139,7 +176,7 @@ func TestWebUI_APIGoesThroughAuth(t *testing.T) {
 }
 
 // TestWebUI_PlaceholderWithoutIndex 验证未构建时 "/" 返回内置提示页（200、
-// no-cache、含"未构建"字样），其余路径仍兜底到鉴权链。
+// no-cache、含"未构建"字样），静态路径（带扩展名）返回 404（而非推进鉴权链）。
 func TestWebUI_PlaceholderWithoutIndex(t *testing.T) {
 	t.Parallel()
 	probe := &fallbackProbe{}
@@ -154,8 +191,11 @@ func TestWebUI_PlaceholderWithoutIndex(t *testing.T) {
 	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
 		t.Fatalf("提示页应 no-cache，实际 %q", cc)
 	}
-	doGet(t, h, "/assets/app-1.js")
-	if !probe.called {
-		t.Fatal("未构建时静态路径也应兜底到鉴权链（无产物可服务）")
+	rec2 := doGet(t, h, "/assets/app-1.js")
+	if probe.called {
+		t.Fatal("未构建时静态路径不应兜底到鉴权链")
+	}
+	if rec2.Code != http.StatusNotFound {
+		t.Fatalf("未构建时缺失的静态资源应 404，实际 %d", rec2.Code)
 	}
 }

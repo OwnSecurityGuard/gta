@@ -16,6 +16,8 @@ package agent
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -210,6 +212,10 @@ type Relay struct {
 	filter connectionFilter
 
 	seq atomic.Uint64 // conn_id 序列
+	// agentID 是本 Relay 实例的短标识，作为所有 conn_id 的前缀。
+	// conn_id 原本是纯自增序号，从 1 重新开始——同一 GTA 上跑多个 agent 进程时
+	// （多设备租约、agent 重启）序号必然重复，日志与落库的 conn 无法区分来源。
+	agentID string
 
 	lis    net.Listener
 	active sync.Map // 活跃客户端连接（用于 shutdown 时强制关闭）
@@ -220,7 +226,19 @@ func NewRelay(cfg RelayConfig, client *PushClient, logger *slog.Logger) *Relay {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Relay{cfg: cfg, client: client, logger: logger, filter: compileFilter(cfg)}
+	r := &Relay{cfg: cfg, client: client, logger: logger, filter: compileFilter(cfg)}
+	r.agentID = newAgentID()
+	return r
+}
+
+// newAgentID 生成一个进程级短随机标识（4 字节 hex）。
+// 生成失败不影响功能（退化为空前缀，仍由 GTA 侧的流隔离兜底）。
+func newAgentID() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // compileFilter 将 RelayConfig 中的筛选列表编译为可直接匹配的集合。
@@ -305,7 +323,7 @@ const proxyProbeTimeout = 5 * time.Second
 // 不匹配筛选条件的连接照常中继，但不上报 open/data/close 给 GTA。
 func (r *Relay) handleConn(ctx context.Context, clientConn net.Conn) {
 	defer clientConn.Close()
-	connID := fmt.Sprintf("%d", r.seq.Add(1))
+	connID := fmt.Sprintf("%s-%d", r.agentID, r.seq.Add(1))
 	clientAddr := clientConn.RemoteAddr().String()
 
 	r.active.Store(clientConn, struct{}{})

@@ -1,4 +1,4 @@
-package mobile
+﻿package mobile
 
 import (
 	"sync/atomic"
@@ -6,7 +6,7 @@ import (
 
 // Activity 是移动代理抓包源的运行时活动追踪器（可选注入）。
 //
-// pipeline 把它注入 MobileConfig，使 GetProxyConfig 能向控制面暴露
+// pipeline 把它注入 MobileConfig，使 租约快照能向控制面暴露
 // 「手机是否已连接 / 数据是否在流动」的精准状态——source 实例是
 // capture_task run 的局部变量，控制面无法直接触达，追踪器作为共享
 // 探针跨越此边界。所有字段原子更新，Snapshot 无锁。
@@ -20,7 +20,7 @@ type Activity struct {
 // NewActivity 创建零值活动追踪器。
 func NewActivity() *Activity { return &Activity{} }
 
-// ActivitySnapshot 是追踪器的无锁读快照（与 proto ProxyConfigState 的
+// ActivitySnapshot 是追踪器的无锁读快照（与 proto ProxyLeaseState 的
 // 活动字段一一对应）。
 type ActivitySnapshot struct {
 	ActiveConns  int64

@@ -14,7 +14,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.WorkDir != "" || cfg.MCP.Addr != "" || cfg.Pipeline.ControlAddr != "" ||
-		cfg.Pipeline.RegistryAddr != "" || cfg.Pipeline.AgentIngestAddr != "" || cfg.Proxy.ServerAddr != "" {
+		cfg.Pipeline.RegistryAddr != "" || cfg.Pipeline.AgentIngestAddr != "" {
 		t.Fatalf("expected zero config for missing file, got %+v", cfg)
 	}
 }
@@ -36,8 +36,6 @@ mcp:
 pipeline:
   control_addr: ":9889"
   registry_addr: ":9093"
-proxy:
-  server_addr: "127.0.0.1:9100"
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
@@ -47,8 +45,7 @@ proxy:
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.WorkDir != "/data/gta" || cfg.MCP.Addr != ":8782" ||
-		cfg.Pipeline.ControlAddr != ":9889" || cfg.Pipeline.RegistryAddr != ":9093" ||
-		cfg.Proxy.ServerAddr != "127.0.0.1:9100" {
+		cfg.Pipeline.ControlAddr != ":9889" || cfg.Pipeline.RegistryAddr != ":9093" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 	// 未在文件中配置的字段由环境变量兜底。

@@ -46,7 +46,7 @@ interface SessionSidebarProps {
 
 /** 格式化数字，加千分位 */
 function formatNumber(n: number): string {
-  if (n === 0) return "0";
+  if (!n || n === 0) return "0";
   return n.toLocaleString();
 }
 

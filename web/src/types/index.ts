@@ -70,8 +70,10 @@ export type {
   ListConnectionFramesResult,
 } from "./connection";
 export type {
-  ProxyConfigState,
-  GetProxyConfigResult,
-  UpdateProxyConfigResult,
-  ProxyConfigUpdateVars,
+  ProxyLease,
+  ListProxyLeasesResult,
+  CreateProxyLeaseResult,
+  GetProxyLeaseResult,
+  ReleaseProxyLeaseResult,
+  CreateProxyLeaseVars,
 } from "./proxy";

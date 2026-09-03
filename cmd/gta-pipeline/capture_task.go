@@ -115,6 +115,8 @@ const (
 	decodeWindow = 16
 	// decodeWaitTimeout 是单个解码 Future 的最长等待（防插件挂死阻塞排空）。
 	decodeWaitTimeout = 30 * time.Second
+	// reconnectBackoff 是断流重连的最小间隔，避免重连失败进入紧循环。
+	reconnectBackoff = 5 * time.Second
 	// 无解码器 / 解码队列满时待解码包进溢出队列（见 pending_decode.go），
 	// 容量按字节计、FIFO 回灌，不再有 2048 条的硬上限。
 )
@@ -351,6 +353,8 @@ func (t *captureTask) run() {
 	//   - 未指定插件名时，沿用原行为：按 tcp 协议 hint 取第一个在线插件。
 	var decoderClient pb.DecoderClient // 当前 dispatcher 绑定的 client 指针，用于检测插件是否变化
 	var lastResolve time.Time
+	// lastReconnect 记录上次断流重连时间，用于退避避免紧循环。
+	var lastReconnect time.Time
 
 	// —— 解码流水线：capture 主循环与解码解耦 ——
 	//
@@ -518,6 +522,21 @@ func (t *captureTask) run() {
 			return // 已有解码器且未到节流周期，跳过
 		}
 		lastResolve = now
+
+		// 断流检测：当前 dispatcher 的 recvLoop 已退出（流错误 / 对端关闭），
+		// 但插件注册信息未变（decoderClient 相同），decoderAction 会返回 "keep" 不重建。
+		// 此时必须关闭旧 dispatcher 并清空 decoderClient，强制下次重建。
+		if d := disp.Load(); d != nil && !d.IsHealthy() {
+			// 退避：避免断流后立即重连失败进入紧循环（首次 1s，上限 5s）。
+			if now.Sub(lastReconnect) < reconnectBackoff {
+				return
+			}
+			lastReconnect = now
+			t.logger.Warn("decoder stream broken, force reconnect", "plugin", t.getPlugin())
+			_ = d.Close()
+			disp.Store(nil)
+			decoderClient = nil
+		}
 
 		found, sr, ok := t.resolveDecoderClient()
 		if !ok {

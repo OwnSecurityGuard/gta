@@ -106,6 +106,10 @@ type Dispatcher struct {
 	closed    bool
 	logger    *slog.Logger // 带 session_id 等上下文的 logger
 
+	// streamDone 在 recvLoop 退出时关闭（无论正常关闭还是流错误），
+	// 用于外部检测流是否仍然健康。
+	streamDone chan struct{}
+
 	pending      map[string]*pendingInput
 	causationIdx *causationIndex
 	schemaReg    *schema.Registry
@@ -144,6 +148,7 @@ func NewDispatcher(client pb.DecoderClient, sessionID string, logger *slog.Logge
 		streamV2:     streamV2,
 		sessionID:    sessionID,
 		logger:       logger,
+		streamDone:   make(chan struct{}),
 		pending:      make(map[string]*pendingInput),
 		causationIdx: newCausationIndex(1024),
 		schemaReg:    schemaReg,
@@ -153,6 +158,18 @@ func NewDispatcher(client pb.DecoderClient, sessionID string, logger *slog.Logge
 	}
 	go d.recvLoop()
 	return d, nil
+}
+
+// IsHealthy 返回解码器底层流是否仍然活跃。
+// 当 recvLoop 因流错误或 CloseSend 退出后返回 false，
+// 此时调用方应关闭当前 Dispatcher 并重建。
+func (d *Dispatcher) IsHealthy() bool {
+	select {
+	case <-d.streamDone:
+		return false
+	default:
+		return true
+	}
 }
 
 // DecodeV2 发送单个 packet payload 并返回 Event 列表（0..N 个事件）。
@@ -213,7 +230,9 @@ func (d *Dispatcher) Submit(pkt event.Packet) (*Future, error) {
 
 // recvLoop 独占 streamV2 的 Recv 端：接收响应、按 input_id 聚合，
 // Done 时把结果事件 resolve 给对应 Future。流错误时唤醒所有等待者。
+// 退出时关闭 streamDone，通知外部流已断开。
 func (d *Dispatcher) recvLoop() {
+	defer close(d.streamDone)
 	for {
 		resp, err := d.streamV2.Recv()
 		if err != nil {

@@ -169,6 +169,76 @@ func TestDispatcherDecodeV2Success(t *testing.T) {
 	}
 }
 
+// closeAfterRecvDecoder 接收一个请求后关闭流，模拟断流。
+type closeAfterRecvDecoder struct {
+	pb.UnimplementedDecoderServer
+}
+
+func (f *closeAfterRecvDecoder) DecodeV2(stream grpc.BidiStreamingServer[pb.DecodeRequest, pb.DecodeResponseV2]) error {
+	_, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	// 直接关闭流（不发送响应），模拟对端断流。
+	return nil
+}
+
+func TestDispatcherIsHealthy(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "test.sock")
+	_ = os.Remove(socket)
+	lis, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	pb.RegisterDecoderServer(srv, &closeAfterRecvDecoder{})
+	go srv.Serve(lis)
+	defer srv.Stop()
+
+	conn, err := grpc.NewClient("unix:"+socket, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	d, err := NewDispatcher(pb.NewDecoderClient(conn), "test-session", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	// 新建时流是健康的。
+	if !d.IsHealthy() {
+		t.Fatal("expected dispatcher to be healthy after creation")
+	}
+
+	// 提交一个包触发对端关闭流。
+	pkt := event.Packet{
+		Timestamp: time.Now(),
+		Protocol:  "tcp",
+		Raw:       []byte("x"),
+		Src:       netip.MustParseAddrPort("10.0.0.1:1"),
+		Dst:       netip.MustParseAddrPort("10.0.0.2:2"),
+		Metadata:  make(map[string]any),
+	}
+	_, _ = d.Submit(pkt)
+
+	// 等待 recvLoop 退出。
+	requireEventuallyHealthy(t, d, false, 2*time.Second)
+}
+
+// requireEventuallyHealthy 轮询直到 d.IsHealthy() == want 或超时。
+func requireEventuallyHealthy(t *testing.T, d *Dispatcher, want bool, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if d.IsHealthy() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for dispatcher healthy=%v (got %v)", want, d.IsHealthy())
+}
+
 func TestInferDirection(t *testing.T) {
 	tests := []struct {
 		name       string

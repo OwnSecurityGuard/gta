@@ -3173,6 +3173,8 @@ func main() {
 	// 一键脚本都无法携带 Bearer，两者只凭一次性+限时启动码即可工作（见 access_code.go）。
 	root.HandleFunc("/access/claim", capture.handleAccessClaim)
 	root.HandleFunc("/setup.sh", capture.handleSetupScript)
+	// Windows 一键脚本（与 /setup.sh 对称）：PowerShell  irm ... | iex 一键接入。
+	root.HandleFunc("/setup.ps1", capture.handleSetupScriptPS1)
 	// Web UI 静态资源（免鉴权）兜在 "/" 上：命中嵌入文件才返回静态，其余请求
 	// （含 /mcp 等 API 与未知路径）原样进入鉴权链，语义与集成前一致。
 	root.Handle("/", serveWebOrAPI(mustWebUIFS(), authed))

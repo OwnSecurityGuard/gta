@@ -128,27 +128,13 @@ export function AccessCodePanel() {
   const base = typeof window !== "undefined" ? window.location.origin : "";
   const platformName = selectedPlatform ? `${selectedPlatform.os}/${selectedPlatform.arch}` : `${os}/amd64`;
 
-  // 生成接入命令（复用后端 /setup.sh 的 Linux 脚本 + 内联 PowerShell 的 Windows 命令）。
+  // 接入命令：Linux/Mac 走 /setup.sh，Windows 走 /setup.ps1（均由服务端下发一键脚本）。
   const linuxCmd = useMemo(
     () => (created ? `curl -fsSL "${base}/setup.sh?code=${created.code}&platform=${encodeURIComponent(platformName)}" | bash` : ""),
     [created, base, platformName],
   );
   const windowsCmd = useMemo(
-    () =>
-      created
-        ? [
-            `$code="${created.code}"`,
-            `$base="${base}"`,
-            `$platform="${platformName}"`,
-            `$cfg = Invoke-RestMethod "$base/access/claim?code=$code"`,
-            `$h = @{}; if ($cfg.token) { $h['Authorization'] = "Bearer $($cfg.token)" }`,
-            `$dir = Join-Path $env:USERPROFILE '.gta-agent'; New-Item -ItemType Directory -Force -Path $dir | Out-Null`,
-            `Invoke-WebRequest -Headers $h -Uri "$base/download/agent?code=$code&platform=$platform" -OutFile (Join-Path $env:TEMP 'gta-agent.zip')`,
-            `[IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $env:TEMP 'gta-agent.zip'), $dir)`,
-            `$cfg | ConvertTo-Json | Set-Content (Join-Path $dir 'config.embedded.json') -Encoding utf8`,
-            `Start-Process (Join-Path $dir 'gta-agent.exe')`,
-          ].join("\n")
-        : "",
+    () => (created ? `irm "${base}/setup.ps1?code=${created.code}&platform=${encodeURIComponent(platformName)}" | iex` : ""),
     [created, base, platformName],
   );
   const activeCmd = isWindows ? windowsCmd : linuxCmd;

@@ -361,3 +361,47 @@ echo "已在 $BIN_DIR 完成安装。执行 $BIN_DIR/gta-agent 开始抓包上�
 	_, _ = w.Write([]byte(script))
 	slog.Info("setup script served", "code", code, "platform", platform)
 }
+
+// handleSetupScriptPS1 返回 Windows PowerShell 一键脚本（与 /setup.sh 对称）：
+// 先用启动码调 /access/claim 拿 sidecar 配置，再下载 agent zip 并解压写入配置，
+// 最后启动 gta-agent.exe。支持 `irm ... | iex` 一键执行。
+func (m *mcpCapture) handleSetupScriptPS1(w http.ResponseWriter, r *http.Request) {
+	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
+	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
+	if code == "" {
+		http.Error(w, "code is required", http.StatusBadRequest)
+		return
+	}
+	if platform == "" {
+		platform = "windows/amd64"
+	}
+	base := m.baseURL(r)
+	script := fmt.Sprintf(`$ErrorActionPreference = "Stop"
+$code = "%[1]s"
+$platform = "%[2]s"
+$base = "%[3]s"
+$binDir = Join-Path $env:USERPROFILE ".gta-agent"
+Write-Host "领取启动码配置（token/session）..."
+$cfg = Invoke-RestMethod -Uri "$base/access/claim?code=$code"
+$token = $cfg.token
+$headers = @{}
+if ($token) { $headers["Authorization"] = "Bearer $token" }
+Write-Host "下载 Agent（$platform）..."
+New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+$zipPath = Join-Path $env:TEMP "gta-agent.zip"
+Invoke-WebRequest -Headers $headers -Uri "$base/download/agent?code=$code&platform=$platform" -OutFile $zipPath
+Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+$cfg | ConvertTo-Json -Compress | Set-Content (Join-Path $binDir "config.embedded.json") -Encoding utf8
+$exe = Get-ChildItem -Path $binDir -Filter "gta-agent*.exe" | Select-Object -First 1
+if ($exe) {
+  Write-Host "已在 $binDir 完成安装。启动 $($exe.Name) 开始抓包上报..."
+  Start-Process $exe.FullName
+} else {
+  Write-Host "已在 $binDir 完成安装。请手动运行 gta-agent.exe 开始抓包上报。"
+}
+`, code, platform, base)
+	w.Header().Set("Content-Type", "text/x-powershell; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(script))
+	slog.Info("setup.ps1 served", "code", code, "platform", platform)
+}

@@ -128,10 +128,43 @@ func TestSetupScriptSnippet(t *testing.T) {
 		t.Fatalf("setup.sh: expected 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !bytes.Contains([]byte(body), []byte(`Code: "GTA-ABC1-DEF2"`)) && !bytes.Contains([]byte(body), []byte("GTA-ABC1-DEF2")) {
+	if !bytes.Contains([]byte(body), []byte(`CODE="GTA-ABC1-DEF2"`)) && !bytes.Contains([]byte(body), []byte("GTA-ABC1-DEF2")) {
 		t.Fatalf("setup.sh missing code, got:\n%s", body)
 	}
 	if !bytes.Contains([]byte(body), []byte("/access/claim?code=")) {
 		t.Fatalf("setup.sh missing claim url, got:\n%s", body)
+	}
+}
+
+func TestSetupPS1ScriptSnippet(t *testing.T) {
+	m, _ := newClaimCapture(t)
+	req := httptest.NewRequest(http.MethodGet, "/setup.ps1?code=GTA-ABC1-DEF2&platform=windows/amd64", nil)
+	rec := httptest.NewRecorder()
+	m.handleSetupScriptPS1(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup.ps1: expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !bytes.Contains([]byte(body), []byte("GTA-ABC1-DEF2")) {
+		t.Fatalf("setup.ps1 missing code, got:\n%s", body)
+	}
+	if !bytes.Contains([]byte(body), []byte("/access/claim?code=")) {
+		t.Fatalf("setup.ps1 missing claim url, got:\n%s", body)
+	}
+	if !bytes.Contains([]byte(body), []byte("Invoke-RestMethod")) {
+		t.Fatalf("setup.ps1 missing Invoke-RestMethod, got:\n%s", body)
+	}
+	if !bytes.Contains([]byte(body), []byte("Expand-Archive")) {
+		t.Fatalf("setup.ps1 missing Expand-Archive, got:\n%s", body)
+	}
+}
+
+func TestSetupPS1RequiresCode(t *testing.T) {
+	m, _ := newClaimCapture(t)
+	req := httptest.NewRequest(http.MethodGet, "/setup.ps1", nil)
+	rec := httptest.NewRecorder()
+	m.handleSetupScriptPS1(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("setup.ps1 without code: expected 400, got %d", rec.Code)
 	}
 }

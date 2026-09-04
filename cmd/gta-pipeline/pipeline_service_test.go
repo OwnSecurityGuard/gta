@@ -28,6 +28,12 @@ func newTestPipelineService(t *testing.T) (*pipelineService, string, *store.Cont
 	t.Cleanup(func() { _ = controlStore.Close() })
 	mgr := plugin.NewRegistryServer(10)
 	s := newPipelineService(workDir, controlStore, mgr, nil, nil, ":9091")
+	// 测试期间屏蔽端口预探测：开发机常驻的 gta-singbox-agent 可能正占用
+	// GTA 专属端口段（12100-12199 / 19500-19599），而这些测试只验证
+	// pipelineService 内部状态机，不该耦合到生产服务是否在跑。
+	origProbe := probeFreePortFn
+	probeFreePortFn = func(int) error { return nil }
+	t.Cleanup(func() { probeFreePortFn = origProbe })
 	return s, workDir, controlStore
 }
 

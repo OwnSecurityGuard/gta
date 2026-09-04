@@ -38,6 +38,8 @@ const (
 	CaptureControl_ListProxyLeases_FullMethodName     = "/gta.internalipc.CaptureControl/ListProxyLeases"
 	CaptureControl_GetProxyLease_FullMethodName       = "/gta.internalipc.CaptureControl/GetProxyLease"
 	CaptureControl_ReleaseProxyLease_FullMethodName   = "/gta.internalipc.CaptureControl/ReleaseProxyLease"
+	CaptureControl_StartLeaseCapture_FullMethodName   = "/gta.internalipc.CaptureControl/StartLeaseCapture"
+	CaptureControl_StopLeaseCapture_FullMethodName    = "/gta.internalipc.CaptureControl/StopLeaseCapture"
 )
 
 // CaptureControlClient is the client API for CaptureControl service.
@@ -97,6 +99,17 @@ type CaptureControlClient interface {
 	GetProxyLease(ctx context.Context, in *GetProxyLeaseRequest, opts ...grpc.CallOption) (*GetProxyLeaseResponse, error)
 	// ReleaseProxyLease 释放租约：停会话、杀 agent、回收端口（幂等）。
 	ReleaseProxyLease(ctx context.Context, in *ReleaseProxyLeaseRequest, opts ...grpc.CallOption) (*ReleaseProxyLeaseResponse, error)
+	// StartLeaseCapture 在常驻租约上开一次新的抓包会话。
+	//
+	// 租约的代理出口（agent 进程 + 手机 CONNECT 端口）在整个租约生命周期内不变，
+	// 本 RPC 只切换「抓不抓、抓到哪个会话」。手机侧无需重配代理、VPN 不中断。
+	// 每次调用都是一个全新的会话（独立 session_id / 独立 SQLite / 独立 mobile
+	// source），与上一次抓包完全隔离。租约已处于抓包中时返回错误（先 stop 再 start）。
+	StartLeaseCapture(ctx context.Context, in *StartLeaseCaptureRequest, opts ...grpc.CallOption) (*StartLeaseCaptureResponse, error)
+	// StopLeaseCapture 停止租约当前的抓包会话并回到 idle（出口继续保留）：
+	// agent 立即停止上报，此后不再有原始包落盘与上报成本；手机连接不受影响。
+	// 停止后可再次 StartLeaseCapture（新会话），支持反复开始/停止。
+	StopLeaseCapture(ctx context.Context, in *StopLeaseCaptureRequest, opts ...grpc.CallOption) (*StopLeaseCaptureResponse, error)
 }
 
 type captureControlClient struct {
@@ -306,6 +319,26 @@ func (c *captureControlClient) ReleaseProxyLease(ctx context.Context, in *Releas
 	return out, nil
 }
 
+func (c *captureControlClient) StartLeaseCapture(ctx context.Context, in *StartLeaseCaptureRequest, opts ...grpc.CallOption) (*StartLeaseCaptureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartLeaseCaptureResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_StartLeaseCapture_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) StopLeaseCapture(ctx context.Context, in *StopLeaseCaptureRequest, opts ...grpc.CallOption) (*StopLeaseCaptureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StopLeaseCaptureResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_StopLeaseCapture_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CaptureControlServer is the server API for CaptureControl service.
 // All implementations must embed UnimplementedCaptureControlServer
 // for forward compatibility.
@@ -363,6 +396,17 @@ type CaptureControlServer interface {
 	GetProxyLease(context.Context, *GetProxyLeaseRequest) (*GetProxyLeaseResponse, error)
 	// ReleaseProxyLease 释放租约：停会话、杀 agent、回收端口（幂等）。
 	ReleaseProxyLease(context.Context, *ReleaseProxyLeaseRequest) (*ReleaseProxyLeaseResponse, error)
+	// StartLeaseCapture 在常驻租约上开一次新的抓包会话。
+	//
+	// 租约的代理出口（agent 进程 + 手机 CONNECT 端口）在整个租约生命周期内不变，
+	// 本 RPC 只切换「抓不抓、抓到哪个会话」。手机侧无需重配代理、VPN 不中断。
+	// 每次调用都是一个全新的会话（独立 session_id / 独立 SQLite / 独立 mobile
+	// source），与上一次抓包完全隔离。租约已处于抓包中时返回错误（先 stop 再 start）。
+	StartLeaseCapture(context.Context, *StartLeaseCaptureRequest) (*StartLeaseCaptureResponse, error)
+	// StopLeaseCapture 停止租约当前的抓包会话并回到 idle（出口继续保留）：
+	// agent 立即停止上报，此后不再有原始包落盘与上报成本；手机连接不受影响。
+	// 停止后可再次 StartLeaseCapture（新会话），支持反复开始/停止。
+	StopLeaseCapture(context.Context, *StopLeaseCaptureRequest) (*StopLeaseCaptureResponse, error)
 	mustEmbedUnimplementedCaptureControlServer()
 }
 
@@ -429,6 +473,12 @@ func (UnimplementedCaptureControlServer) GetProxyLease(context.Context, *GetProx
 }
 func (UnimplementedCaptureControlServer) ReleaseProxyLease(context.Context, *ReleaseProxyLeaseRequest) (*ReleaseProxyLeaseResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReleaseProxyLease not implemented")
+}
+func (UnimplementedCaptureControlServer) StartLeaseCapture(context.Context, *StartLeaseCaptureRequest) (*StartLeaseCaptureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartLeaseCapture not implemented")
+}
+func (UnimplementedCaptureControlServer) StopLeaseCapture(context.Context, *StopLeaseCaptureRequest) (*StopLeaseCaptureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StopLeaseCapture not implemented")
 }
 func (UnimplementedCaptureControlServer) mustEmbedUnimplementedCaptureControlServer() {}
 func (UnimplementedCaptureControlServer) testEmbeddedByValue()                        {}
@@ -786,6 +836,42 @@ func _CaptureControl_ReleaseProxyLease_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CaptureControl_StartLeaseCapture_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartLeaseCaptureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).StartLeaseCapture(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_StartLeaseCapture_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).StartLeaseCapture(ctx, req.(*StartLeaseCaptureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_StopLeaseCapture_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StopLeaseCaptureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).StopLeaseCapture(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_StopLeaseCapture_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).StopLeaseCapture(ctx, req.(*StopLeaseCaptureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CaptureControl_ServiceDesc is the grpc.ServiceDesc for CaptureControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -864,6 +950,14 @@ var CaptureControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReleaseProxyLease",
 			Handler:    _CaptureControl_ReleaseProxyLease_Handler,
+		},
+		{
+			MethodName: "StartLeaseCapture",
+			Handler:    _CaptureControl_StartLeaseCapture_Handler,
+		},
+		{
+			MethodName: "StopLeaseCapture",
+			Handler:    _CaptureControl_StopLeaseCapture_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

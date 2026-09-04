@@ -56,6 +56,17 @@ service CaptureControl {
   rpc GetProxyLease(GetProxyLeaseRequest) returns (GetProxyLeaseResponse);
   // ReleaseProxyLease 释放租约：停会话、杀 agent、回收端口（幂等）。
   rpc ReleaseProxyLease(ReleaseProxyLeaseRequest) returns (ReleaseProxyLeaseResponse);
+  // StartLeaseCapture 在常驻租约上开一次新的抓包会话。
+  //
+  // 租约的代理出口（agent 进程 + 手机 CONNECT 端口）在整个租约生命周期内不变，
+  // 本 RPC 只切换「抓不抓、抓到哪个会话」。手机侧无需重配代理、VPN 不中断。
+  // 每次调用都是一个全新的会话（独立 session_id / 独立 SQLite / 独立 mobile
+  // source），与上一次抓包完全隔离。租约已处于抓包中时返回错误（先 stop 再 start）。
+  rpc StartLeaseCapture(StartLeaseCaptureRequest) returns (StartLeaseCaptureResponse);
+  // StopLeaseCapture 停止租约当前的抓包会话并回到 idle（出口继续保留）：
+  // agent 立即停止上报，此后不再有原始包落盘与上报成本；手机连接不受影响。
+  // 停止后可再次 StartLeaseCapture（新会话），支持反复开始/停止。
+  rpc StopLeaseCapture(StopLeaseCaptureRequest) returns (StopLeaseCaptureResponse);
 }
 
 // DecodeRawPacketsRequest 离线解码请求。
@@ -392,9 +403,16 @@ message GetRegistryAddrResponse {
   string registry_addr = 1;
 }
 
-// ---- Proxy Lease（按用户/设备的代理抓包租约）----
+// ---- Proxy Lease（按用户/设备的常驻代理出口 + 可切换抓包会话）----
+//
+// 租约（出口）与抓包会话的生命周期解耦：
+//   - 租约 = 常驻 gta-singbox-agent 进程 + 固定的手机 CONNECT 端口，
+//     创建后端口不再变化（同一二维码长期有效，VPN 无需重连）；
+//   - 抓包会话 = 一次 StartLeaseCapture/StopLeaseCapture，各自独立 session_id、
+//     独立 SQLite、独立 mobile source，互不串数据。
+// 这样手机配好一次代理，就能反复开始/停止抓包任意多次。
 
-// CreateProxyLeaseRequest 创建代理抓包租约。plugin/include_hosts/include_ports
+// CreateProxyLeaseRequest 创建代理出口。plugin/include_hosts/include_ports
 // 为该租约私有（不影响其他租约）；device 是设备标签；owner/all_owners 由
 // gta-mcp 从 auth ctx 透传（同 StartCaptureRequest），pipeline 记录归属。
 message CreateProxyLeaseRequest {
@@ -405,12 +423,20 @@ message CreateProxyLeaseRequest {
   string project_id = 5;             // 归属项目（可选）
   string owner = 6;                  // gta-mcp 透传的调用方属主
   bool all_owners = 7;               // gta-mcp 透传（admin）
+  // no_auto_start 为 true 时只创建常驻出口、不立即开始抓包（等
+  // StartLeaseCapture）。默认 false = 创建后立刻开始抓包（保持既有行为）。
+  // 取反命名是 proto3 默认值所限：bool 只能是 false，无法表达"默认 true"。
+  bool no_auto_start = 8;
+  // sticky 为 true 时按 (owner, device) 复用上一次用过的代理端口：同一台设备
+  // 重新创建租约仍拿到同一个端口，此前扫过的二维码继续有效。默认 true。
+  // 同样因 proto3 默认值限制取反命名为 no_sticky。
+  bool no_sticky = 9;
 }
 
 // ProxyLeaseState 租约配置 + 运行时状态快照。lease_id 与内部抓包会话
 // session_id 一致（1:1 生命周期），前端可直接跳转会话。
 message ProxyLeaseState {
-  string lease_id = 1;         // 租约 id（= 抓包会话 session_id）
+  string lease_id = 1;         // 租约 id（稳定，跨多次抓包会话不变）
   string owner = 2;
   string project_id = 3;
   string plugin = 4;
@@ -418,17 +444,23 @@ message ProxyLeaseState {
   repeated int32 include_ports = 6;
   string device = 7;
   string listen_addr = 8;      // agent HTTP CONNECT 监听（0.0.0.0:121xx，手机连这里）
-  int32 agent_listen_port = 9; // agent 监听端口（12100-12199）
-  int32 mobile_grpc_port = 10; // mobile source gRPC 端口（19100-19199，本机回环）
+  int32 agent_listen_port = 9; // agent 监听端口（12100-12199，租约内恒定）
+  int32 mobile_grpc_port = 10; // 当前抓包会话的 mobile source gRPC 端口（0=未抓包）
   bool agent_running = 11;
   int32 agent_pid = 12;
-  bool session_running = 13;
-  string session_id = 14;
+  bool session_running = 13;   // 当前是否有活跃抓包会话（== capture_running）
+  string session_id = 14;      // 当前抓包会话 id（未抓包为空）
   int64 created_at_unix = 15;
   int64 active_conns = 16;     // 当前活跃手机连接数
   uint64 total_conns = 17;
   int64 last_data_unix = 18;   // unix 毫秒（0=从未）
   uint64 total_bytes = 19;
+  // ---- 以下为常驻出口（stable egress）引入的字段 ----
+  bool capture_running = 20;   // agent 是否正在上报数据（与 session_running 同步）
+  int32 control_port = 21;     // agent 本地控制接口端口（pipeline → agent，19500-19599）
+  int32 capture_count = 22;    // 本租约累计开始过多少次抓包
+  int64 last_capture_at_unix = 23; // 最近一次 start/stop capture 的时间（unix 秒）
+  bool sticky_port = 24;       // 该端口是否为 (owner,device) 复用端口（二维码长期有效）
 }
 
 message CreateProxyLeaseResponse {
@@ -464,4 +496,41 @@ message ReleaseProxyLeaseResponse {
   bool ok = 1;
   string message = 2;
   string session_id = 3; // 被停止的会话 id
+}
+
+// ---- Lease Capture（在常驻出口上反复开停的抓包会话）----
+
+// StartLeaseCaptureRequest 在指定租约上开一次抓包。
+// plugin/include_hosts/include_ports 留空表示沿用租约创建时的配置；
+// 显式给出则本次抓包临时覆盖（不影响租约自身的配置，也不影响其他租约）。
+message StartLeaseCaptureRequest {
+  string lease_id = 1;
+  string plugin = 2;                 // 可选覆盖：本次抓包绑定的解码插件
+  repeated string include_hosts = 3; // 可选覆盖：连接筛选（目标主机）
+  repeated int32 include_ports = 4;  // 可选覆盖：连接筛选（目标端口）
+  string owner = 5;                  // gta-mcp 透传的调用方属主
+  bool all_owners = 6;               // gta-mcp 透传（admin）
+}
+
+message StartLeaseCaptureResponse {
+  bool ok = 1;
+  string message = 2;
+  string session_id = 3; // 本次抓包会话 id（每次 start 都是新的）
+  ProxyLeaseState lease = 4;
+}
+
+// StopLeaseCaptureRequest 停止指定租约当前的抓包（出口保留，回到 idle）。
+message StopLeaseCaptureRequest {
+  string lease_id = 1;
+  string owner = 2;
+  bool all_owners = 3;
+}
+
+message StopLeaseCaptureResponse {
+  bool ok = 1;
+  string message = 2;
+  string session_id = 3;   // 被停止的会话 id
+  int64 raw_packets = 4;   // 本次会话落盘的原始包数
+  int64 events = 5;        // 解码事件数
+  double duration_sec = 6; // 本次抓包时长
 }

@@ -140,6 +140,10 @@ type mcpCapture struct {
 	// 用于构造手机 sing-box 客户端可导入的远程 profile 二维码 URI。
 	httpAddr string
 
+	// lanIPOverride 由 main() 注入：显式指定本机 LAN IP。
+	// 缺省时走启发式（见 proxy_lease.go lanIP()）。
+	lanIPOverride string
+
 	// 事件总线：插件注册/注销/上下线事件经 WatchPlugins 流汇聚后广播给 SSE 订阅者。
 	eventMu   sync.Mutex
 	eventSubs map[chan pluginEventJSON]struct{}
@@ -2637,6 +2641,12 @@ func main() {
 	addr := flag.String("addr", ":8781", "SSE server address（支持 :0 动态分配，实际地址回写 <workdir>/addr.mcp.json）")
 	iface := flag.String("iface", "", "capture interface; empty means all available interfaces")
 	pluginsDir := flag.String("plugins-dir", "plugins", "plugins directory")
+	// 手机所在 LAN 中可达的本机 IPv4。docker / Hyper-V 环境下启发式探测容易被
+	// 虚拟网卡带偏（例如 docker bridge 172.18.x），此时必须显式覆盖——
+	// 例如 -lan-ip=192.168.1.10 或 GTA_LAN_IP=192.168.1.10。
+	// 二维码里的 host:port 必须用这个地址，手机才连得上。
+	lanIP := flag.String("lan-ip", os.Getenv("GTA_LAN_IP"),
+		"override detected host LAN IP for QR-code connect address (env GTA_LAN_IP)")
 	// 工作目录解析规则（T10）：显式 -work-dir > GTA_HOME > gta.yaml workdir >
 	// CWD 既有数据探测（存在 control.sqlite/sessions/runs 时沿用 CWD）> ~/.gta。
 	workDir := flag.String("work-dir", ".", "working directory for session databases（显式传参优先；否则 GTA_HOME > gta.yaml workdir > CWD 既有数据沿用 > ~/.gta）")
@@ -2734,6 +2744,19 @@ func main() {
 	defer capture.controlStore.Close()
 	if capture.pdConn != nil {
 		defer capture.pdConn.Close()
+	}
+
+	// 把 -lan-ip / GTA_LAN_IP 注入 lanIP 探测（proxy_lease.go / agent_download.go /
+	// singbox_profile.go 都通过该函数拿 host:port 拼二维码）。
+	// 没有覆盖时走启发式（含 docker bridge / hyper-v / WSL 排除）。
+	capture.lanIPOverride = *lanIP
+	lanIPOverride = *lanIP // 同时注入 package 级变量，让非 mcpCapture 的调用点也用得上
+	if v := strings.TrimSpace(*lanIP); v != "" {
+		source := "env"
+		if flagSet["lan-ip"] {
+			source = "flag"
+		}
+		slog.Info("lan ip override enabled", "lan_ip", v, "source", source)
 	}
 
 	// 会话保留策略（存储优化）：启动即清一轮，之后周期执行。
@@ -2838,6 +2861,21 @@ func main() {
 		mcp.WithDescription("Release a mobile proxy capture lease: stops its capture session, terminates its gta-singbox-agent and frees the ports (idempotent). The lease's QR code / singbox profile stops working immediately. Other users' leases are unaffected."),
 		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID to release (= session_id)")),
 	), capture.handleReleaseProxyLease)
+
+	// 租约内的抓包开关：手机始终连着同一个代理端口，靠 start/stop 切换抓包会话。
+	// 不抓包时无原始包落盘、零上报；新会话独立 session_id / 独立 SQLite。
+	s.AddTool(mcp.NewTool("start_lease_capture",
+		mcp.WithDescription("Start a fresh capture session on an existing proxy lease (the phone's VPN/QR keeps working unchanged). Each start yields a brand-new session_id with isolated SQLite store and zero data overlap with prior sessions. No need to recreate the lease or rescan the QR."),
+		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID returned by create_proxy_lease")),
+		mcp.WithString("plugin", mcp.Description("Override decoder plugin for this capture (defaults to the lease's bound plugin)")),
+		mcp.WithArray("include_hosts", mcp.Description("Override connection host filter"), mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithArray("include_ports", mcp.Description("Override connection port filter"), mcp.Items(map[string]any{"type": "number"})),
+	), capture.handleStartLeaseCapture)
+
+	s.AddTool(mcp.NewTool("stop_lease_capture",
+		mcp.WithDescription("Stop the current capture session on a proxy lease and return the lease to idle. The phone's VPN/QR stays connected — start_lease_capture can begin a fresh session at any time. After stop, raw packets cease being captured/uploaded."),
+		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID whose current capture should stop")),
+	), capture.handleStopLeaseCapture)
 
 	s.AddTool(mcp.NewTool("get_registry_addr",
 		mcp.WithDescription("Return the registry address the pipeline is currently listening on (its -registry-addr, e.g. :9091). Plugins MUST connect here by setting GTA_REGISTRY_ADDR at startup; this tool removes the guesswork of reading pipeline startup logs. Use it to learn where a freshly launched plugin should register, or to confirm activate_plugin's resolved address."),

@@ -53,20 +53,21 @@ func TestRelayEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = echoLis.Close() })
 	echoAddr := echoLis.Addr().String()
 
-	// 3. PushClient → mobile source
-	client, err := NewPushClient(srcAddr, logger)
-	if err != nil {
-		t.Fatalf("new push client: %v", err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
-
-	// 4. TCP 中继：监听本地，转发到 echo server
-	relay := NewRelay(RelayConfig{
+	// 3. 抓包闸门 → mobile source（capture 开启后才上报）
+	cfg := RelayConfig{
 		ListenAddr: "127.0.0.1:0",
 		TargetAddr: echoAddr,
 		App:        "com.game.demo",
 		Device:     "pixel-8",
-	}, client, logger)
+	}
+	gate := NewCaptureGate(cfg, logger)
+	t.Cleanup(func() { _ = gate.Close() })
+	if err := gate.Start("cap-e2e", srcAddr, nil, nil); err != nil {
+		t.Fatalf("start capture: %v", err)
+	}
+
+	// 4. TCP 中继：监听本地，转发到 echo server
+	relay := NewRelay(cfg, gate, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	relayErr := make(chan error, 1)
@@ -153,15 +154,16 @@ func TestRelayHTTPConnectProxy(t *testing.T) {
 	t.Cleanup(func() { _ = echoLis.Close() })
 	echoAddr := echoLis.Addr().String()
 
-	// 3. PushClient → mobile source
-	client, err := NewPushClient(srcAddr, logger)
-	if err != nil {
-		t.Fatalf("new push client: %v", err)
+	// 3. 抓包闸门 → mobile source（纯代理模式：目标由 CONNECT 动态解析）
+	cfg := RelayConfig{ListenAddr: "127.0.0.1:0"}
+	gate := NewCaptureGate(cfg, logger)
+	t.Cleanup(func() { _ = gate.Close() })
+	if err := gate.Start("cap-connect", srcAddr, nil, nil); err != nil {
+		t.Fatalf("start capture: %v", err)
 	}
-	t.Cleanup(func() { _ = client.Close() })
 
 	// 4. 纯代理模式：TargetAddr 为空 → 等待 CONNECT 动态解析目标
-	relay := NewRelay(RelayConfig{ListenAddr: "127.0.0.1:0"}, client, logger)
+	relay := NewRelay(cfg, gate, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	relayErr := make(chan error, 1)
@@ -294,20 +296,17 @@ func TestRelayHTTPConnectFilter(t *testing.T) {
 	}()
 	discardAddr := discardLis.Addr().String()
 
-	// 3. PushClient → mobile source
-	client, err := NewPushClient(srcAddr, logger)
-	if err != nil {
-		t.Fatalf("new push client: %v", err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
-
 	// 4. 筛选：仅抓取 echo 目标端口；不匹配的连接照常中继但不上报
+	//    （filter 随 capture 一起切换，Start 未指定时沿用 cfg 的默认筛选）
 	_, echoPortStr, _ := net.SplitHostPort(echoAddr)
 	echoPort, _ := strconv.Atoi(echoPortStr)
-	relay := NewRelay(RelayConfig{
-		ListenAddr:  "127.0.0.1:0",
-		FilterPorts: []int{echoPort},
-	}, client, logger)
+	cfg := RelayConfig{ListenAddr: "127.0.0.1:0", FilterPorts: []int{echoPort}}
+	gate := NewCaptureGate(cfg, logger)
+	t.Cleanup(func() { _ = gate.Close() })
+	if err := gate.Start("cap-filter", srcAddr, nil, nil); err != nil {
+		t.Fatalf("start capture: %v", err)
+	}
+	relay := NewRelay(cfg, gate, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	relayErr := make(chan error, 1)

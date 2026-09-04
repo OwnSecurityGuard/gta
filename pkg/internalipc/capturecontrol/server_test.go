@@ -98,6 +98,14 @@ func (f *fakeEngine) ReleaseProxyLease(ctx context.Context, leaseID string) (Rel
 	return ReleaseProxyLeaseResult{OK: true}, nil
 }
 
+func (f *fakeEngine) StartLeaseCapture(ctx context.Context, req StartLeaseCaptureRequest) (StartLeaseCaptureResult, error) {
+	return StartLeaseCaptureResult{OK: true, SessionID: "cap-1", Lease: ProxyLease{LeaseID: "lease-1", SessionID: "cap-1"}}, nil
+}
+
+func (f *fakeEngine) StopLeaseCapture(ctx context.Context, leaseID string) (StopLeaseCaptureResult, error) {
+	return StopLeaseCaptureResult{OK: true, SessionID: "cap-1"}, nil
+}
+
 func TestServer_StartCapture(t *testing.T) {
 	engine := &fakeEngine{
 		startResult: StartSessionResult{SessionID: "s1", State: "Running", DBPath: "/tmp/s1.db"},

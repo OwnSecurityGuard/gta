@@ -47,16 +47,22 @@ type pipelineService struct {
 	mu    sync.RWMutex
 	tasks map[string]*captureTask
 
-	// 代理抓包租约管理（leaseMu 保护 leases；两个端口分配器各自带锁）：
-	// 每个租约 = 独立 mobile 会话 + 独立 gta-singbox-agent 进程 + 私有筛选配置，
-	// lease_id 与 session_id 一致，会话结束（finalizeTask）时自动回收。
+	// 常驻代理出口管理（leaseMu 保护 leases；三个端口分配器各自带锁）：
+	// 每个租约 = 常驻 gta-singbox-agent 进程 + 固定的手机 CONNECT 端口 +
+	// 固定的控制端口。抓包会话在其上反复开停（StartLeaseCapture/StopLeaseCapture），
+	// 只有 ReleaseProxyLease 才回收租约本身。
 	// 锁序规约：leaseMu 先于 mu；Start/StopSession 一律在 leaseMu 之外调用。
 	leaseMu      sync.Mutex
 	leases       map[string]*proxyLease
-	agentPorts   *portRange // gta-singbox-agent HTTP CONNECT 监听端口段（12100-12199）
-	grpcPorts    *portRange // mobile Source gRPC 监听端口段（19100-19199）
-	agentBin     string     // gta-singbox-agent 二进制路径（空 = <workdir>/bin 下查找）
-	agentSpawner proxyAgentSpawner // 拉起 agent 的函数（测试注入 fake）
+	agentPorts   *portRange // agent HTTP CONNECT 监听端口段（12100-12199）
+	grpcPorts    *portRange // mobile Source gRPC 端口段（19100-19199，每次抓包临时分配）
+	ctrlPorts    *portRange // agent 控制接口端口段（19500-19599）
+	// stickyPorts 记录 (owner|device) → 上次使用的 agent 端口。端口本身在租约
+	// 释放时归还端口池，这里只留记忆：同一台设备重建租约时拿回同一端口，
+	// 使此前扫过的二维码继续有效（不占资源，冲突时自动退化到轮转分配）。
+	stickyPorts  map[string]int
+	agentBin     string              // gta-singbox-agent 二进制路径（空 = <workdir>/bin 下查找）
+	agentSpawner proxyAgentSpawner   // 拉起 agent 的函数（测试注入 fake）
 }
 
 // newPipelineService 构造 pipelineService，不启动任何会话。
@@ -73,6 +79,8 @@ func newPipelineService(workDir string, controlStore *store.ControlStore, regist
 		leases:       make(map[string]*proxyLease),
 		agentPorts:   newPortRange(proxyLeaseAgentPortBase, proxyLeaseAgentPortMax),
 		grpcPorts:    newPortRange(proxyLeaseGRPCPortBase, proxyLeaseGRPCPortMax),
+		ctrlPorts:    newPortRange(proxyLeaseCtrlPortBase, proxyLeaseCtrlPortMax),
+		stickyPorts:  make(map[string]int),
 		agentSpawner: spawnSingboxAgentLease,
 	}
 }
@@ -346,9 +354,11 @@ func (s *pipelineService) finalizeTask(task *captureTask) {
 		s.logger.Error("finalizeTask: update control store", "error", err, "session_id", task.sessionID)
 	}
 	s.removeTask(task.sessionID)
-	// 代理租约随会话终止自动回收（幂等；非租约会话是 no-op）。
+	// 代理租约：会话终止只清空该租约上的抓包状态（回收 mobile gRPC 端口），
+	// 出口本身（agent 进程 + 手机 CONNECT 端口 + 控制端口）保留，
+	// 使同一个二维码可以反复开始/停止抓包。非租约会话是 no-op。
 	// 此时不持 s.mu，与 leaseMu 无锁序冲突。
-	s.reclaimLeaseForSession(task.sessionID)
+	s.clearLeaseCapture(task.sessionID)
 }
 
 // StopAll 优雅停止所有活跃抓包会话，并等待各自 finalize 完成（写 ControlStore running→stopped）。

@@ -53,20 +53,25 @@ type CaptureEngine interface {
 	SampleBytes(ctx context.Context, req SampleBytesRequest) (SampleBytesResult, error)
 	// GetRegistryAddr 返回插件应连接的注册中心地址（即 -registry-addr 的值）。
 	GetRegistryAddr(ctx context.Context) (string, error)
-	// CreateProxyLease 为调用方创建一个代理抓包租约：独立 mobile 会话 +
-	// 独立 gta-singbox-agent（各自独立端口与筛选配置）。owner 作用域经
-	// withRequestOwner 注入 ctx（同 StartSession）。
+	// CreateProxyLease 为调用方创建一个常驻代理出口：独立 gta-singbox-agent 进程
+	// + 固定的手机 CONNECT 端口。端口在租约生命周期内不变，可反复在其上开停
+	// 抓包会话。身份经 withRequestOwner 注入 ctx（同 StartSession）。
 	CreateProxyLease(ctx context.Context, req CreateProxyLeaseRequest) (ProxyLease, error)
 	// ListProxyLeases 列出调用方可见的租约（admin 全可见）。
 	ListProxyLeases(ctx context.Context) ([]ProxyLease, error)
 	// GetProxyLease 查询单个租约状态快照（owner 校验，不匹配按不存在处理）。
 	GetProxyLease(ctx context.Context, leaseID string) (ProxyLease, error)
-	// ReleaseProxyLease 释放租约：停会话、杀 agent、回收端口（幂等）。
+	// ReleaseProxyLease 释放租约：停抓包、杀 agent、回收端口（幂等）。
 	ReleaseProxyLease(ctx context.Context, leaseID string) (ReleaseProxyLeaseResult, error)
+	// StartLeaseCapture 在常驻租约上开一次新的抓包会话（独立 session_id）。
+	// 代理出口与手机连接不受影响；租约已在抓包中时返回错误。
+	StartLeaseCapture(ctx context.Context, req StartLeaseCaptureRequest) (StartLeaseCaptureResult, error)
+	// StopLeaseCapture 停止租约当前抓包并回到 idle（出口保留，agent 停止上报）。
+	StopLeaseCapture(ctx context.Context, leaseID string) (StopLeaseCaptureResult, error)
 }
 
-// ProxyLease 是一个代理抓包租约的配置 + 运行时状态快照（与 proto ProxyLeaseState 对应）。
-// LeaseID 与内部抓包会话 session_id 一致（1:1 生命周期）。
+// ProxyLease 是一个常驻代理出口的配置 + 运行时状态快照（与 proto ProxyLeaseState 对应）。
+// LeaseID 在租约生命周期内恒定，与单次抓包会话的 session_id 不再等同。
 type ProxyLease struct {
 	LeaseID         string
 	Owner           string
@@ -77,19 +82,25 @@ type ProxyLease struct {
 	Device          string
 	ListenAddr      string // agent HTTP CONNECT 监听（手机连这里）
 	AgentListenPort int
-	MobileGRPCPort  int
+	MobileGRPCPort  int // 当前抓包会话的 mobile source gRPC 端口（0=未抓包）
 	AgentRunning    bool
 	AgentPID        int32
-	SessionRunning  bool
+	SessionRunning  bool // 当前是否有活跃抓包会话
 	SessionID       string
 	CreatedAt       time.Time
 	ActiveConns     int64
 	TotalConns      uint64
 	LastDataUnix    int64
 	TotalBytes      uint64
+	// ---- 常驻出口相关 ----
+	ControlPort       int    // agent 本地控制接口端口（pipeline → agent）
+	CaptureRunning    bool   // agent 是否正在上报
+	CaptureCount      int    // 本租约累计开始过多少次抓包
+	LastCaptureAtUnix int64  // 最近一次 start/stop capture 时间（unix 秒，0=从未）
+	StickyPort        bool   // 端口是否为 (owner,device) 复用端口（二维码长期有效）
 }
 
-// CreateProxyLeaseRequest 是创建代理抓包租约的参数（与 proto 对应但不含 protobuf 类型）。
+// CreateProxyLeaseRequest 是创建代理出口的参数（与 proto 对应但不含 protobuf 类型）。
 // 不含分帧参数：帧边界判定是协议语义，由解码插件按连接自行处理（见 mobile.MobileConfig）。
 type CreateProxyLeaseRequest struct {
 	Plugin       string
@@ -97,6 +108,37 @@ type CreateProxyLeaseRequest struct {
 	IncludePorts []int32
 	Device       string
 	ProjectID    string
+	// NoAutoStart 为 true 时只创建出口、不立即开始抓包（等 StartLeaseCapture）。
+	NoAutoStart bool
+	// NoSticky 为 true 时不复用该 (owner, device) 上次用过的端口。
+	NoSticky bool
+}
+
+// StartLeaseCaptureRequest 是在租约上开一次抓包的参数。
+// Plugin/IncludeHosts/IncludePorts 留空表示沿用租约创建时的配置。
+type StartLeaseCaptureRequest struct {
+	LeaseID      string
+	Plugin       string
+	IncludeHosts []string
+	IncludePorts []int32
+}
+
+// StartLeaseCaptureResult 是开始抓包的结果：本次会话 id + 租约快照。
+type StartLeaseCaptureResult struct {
+	OK       bool
+	Message  string
+	SessionID string
+	Lease    ProxyLease
+}
+
+// StopLeaseCaptureResult 是停止抓包的结果：被停会话 id + 本次统计。
+type StopLeaseCaptureResult struct {
+	OK          bool
+	Message     string
+	SessionID   string
+	RawPackets  int64
+	Events      int64
+	DurationSec float64
 }
 
 // ReleaseProxyLeaseResult 是释放租约的结果。
@@ -585,6 +627,8 @@ func (s *Server) CreateProxyLease(ctx context.Context, req *pb.CreateProxyLeaseR
 		IncludePorts: req.GetIncludePorts(),
 		Device:       req.GetDevice(),
 		ProjectID:    req.GetProjectId(),
+		NoAutoStart:  req.GetNoAutoStart(),
+		NoSticky:     req.GetNoSticky(),
 	})
 	if err != nil {
 		return nil, err
@@ -631,6 +675,42 @@ func (s *Server) ReleaseProxyLease(ctx context.Context, req *pb.ReleaseProxyLeas
 	}, nil
 }
 
+// StartLeaseCapture 处理「在常驻租约上开一次抓包」RPC。
+// 失败一律转成 error（前端据此提示），成功返回本次会话 id 与租约快照。
+func (s *Server) StartLeaseCapture(ctx context.Context, req *pb.StartLeaseCaptureRequest) (*pb.StartLeaseCaptureResponse, error) {
+	res, err := s.engine.StartLeaseCapture(withRequestOwner(ctx, req.GetOwner(), req.GetAllOwners()), StartLeaseCaptureRequest{
+		LeaseID:      req.GetLeaseId(),
+		Plugin:       req.GetPlugin(),
+		IncludeHosts: req.GetIncludeHosts(),
+		IncludePorts: req.GetIncludePorts(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.StartLeaseCaptureResponse{
+		Ok:        res.OK,
+		Message:   res.Message,
+		SessionId: res.SessionID,
+		Lease:     leaseToProto(res.Lease),
+	}, nil
+}
+
+// StopLeaseCapture 处理「停止租约当前抓包」RPC。出口保留、手机连接不受影响。
+func (s *Server) StopLeaseCapture(ctx context.Context, req *pb.StopLeaseCaptureRequest) (*pb.StopLeaseCaptureResponse, error) {
+	res, err := s.engine.StopLeaseCapture(withRequestOwner(ctx, req.GetOwner(), req.GetAllOwners()), req.GetLeaseId())
+	if err != nil {
+		return nil, err
+	}
+	return &pb.StopLeaseCaptureResponse{
+		Ok:          res.OK,
+		Message:     res.Message,
+		SessionId:   res.SessionID,
+		RawPackets:  res.RawPackets,
+		Events:      res.Events,
+		DurationSec: res.DurationSec,
+	}, nil
+}
+
 // leaseToProto 把 Go 侧 ProxyLease 快照转为 proto ProxyLeaseState。
 func leaseToProto(l ProxyLease) *pb.ProxyLeaseState {
 	ports := make([]int32, 0, len(l.IncludePorts))
@@ -657,5 +737,10 @@ func leaseToProto(l ProxyLease) *pb.ProxyLeaseState {
 		TotalConns:      l.TotalConns,
 		LastDataUnix:    l.LastDataUnix,
 		TotalBytes:      l.TotalBytes,
+		CaptureRunning:  l.CaptureRunning,
+		ControlPort:     int32(l.ControlPort),
+		CaptureCount:    int32(l.CaptureCount),
+		LastCaptureAtUnix: l.LastCaptureAtUnix,
+		StickyPort:      l.StickyPort,
 	}
 }

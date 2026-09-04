@@ -200,16 +200,16 @@ func (f connectionFilter) allow(target string) bool {
 	return true
 }
 
-// Relay 是一个代理/透明 TCP 中继：
+// Relay 是一个常驻的代理/透明 TCP 中继：
 //   - 接受本地连接，转发到上游（固定 TargetAddr 或按 HTTP CONNECT 动态解析）；
-//   - 两个方向的字节流原样推送给 GTA（direction=request/response），抓包尽力而为；
+//     中继与抓包开关无关——不抓包时手机流量照常出入，只是不上报；
+//   - 上报目标由 CaptureGate 动态决定（idle 时不上报，capturing 时推给当前会话）；
 //   - 连接建立/关闭时推送 ConnOpen/ConnClose；
-//   - 不匹配筛选条件的连接照常中继，但不上报给 GTA。
+//   - 不匹配当前 capture 筛选条件的连接照常中继，但不上报。
 type Relay struct {
 	cfg    RelayConfig
-	client *PushClient
+	gate   *CaptureGate
 	logger *slog.Logger
-	filter connectionFilter
 
 	seq atomic.Uint64 // conn_id 序列
 	// agentID 是本 Relay 实例的短标识，作为所有 conn_id 的前缀。
@@ -221,15 +221,21 @@ type Relay struct {
 	active sync.Map // 活跃客户端连接（用于 shutdown 时强制关闭）
 }
 
-// NewRelay 创建 TCP 中继。
-func NewRelay(cfg RelayConfig, client *PushClient, logger *slog.Logger) *Relay {
+// NewRelay 创建 TCP 中继。gate 决定数据上报到哪里（nil 表示永不抓包，纯中转）。
+func NewRelay(cfg RelayConfig, gate *CaptureGate, logger *slog.Logger) *Relay {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	r := &Relay{cfg: cfg, client: client, logger: logger, filter: compileFilter(cfg)}
+	if gate == nil {
+		gate = NewCaptureGate(cfg, logger)
+	}
+	r := &Relay{cfg: cfg, gate: gate, logger: logger}
 	r.agentID = newAgentID()
 	return r
 }
+
+// Gate 返回本 Relay 绑定的抓包闸门（控制面与 Relay 共用同一实例）。
+func (r *Relay) Gate() *CaptureGate { return r.gate }
 
 // newAgentID 生成一个进程级短随机标识（4 字节 hex）。
 // 生成失败不影响功能（退化为空前缀，仍由 GTA 侧的流隔离兜底）。
@@ -323,64 +329,60 @@ const proxyProbeTimeout = 5 * time.Second
 // 不匹配筛选条件的连接照常中继，但不上报 open/data/close 给 GTA。
 func (r *Relay) handleConn(ctx context.Context, clientConn net.Conn) {
 	defer clientConn.Close()
-	connID := fmt.Sprintf("%s-%d", r.agentID, r.seq.Add(1))
+	seq := r.seq.Add(1)
 	clientAddr := clientConn.RemoteAddr().String()
 
 	r.active.Store(clientConn, struct{}{})
 	defer r.active.Delete(clientConn)
 
+	// 目标解析 / 上游拨号失败时不产生任何上报：连接都还没建立，
+	// source 侧没有对应的 open，发 close 只会打成未知连接的错误计数。
 	target, upstream, err := r.resolveTarget(clientConn)
 	if err != nil {
-		r.logger.Warn("resolve upstream target failed", "conn", connID, "error", err)
-		r.pushClose(connID, "no_target")
+		r.logger.Warn("resolve upstream target failed", "conn", seq, "error", err)
 		return
 	}
-
-	// 连接筛选：命中才上报，否则只中继（避免无关连接淹没抓包结果）。
-	capture := r.filter.allow(target)
-	if !capture {
-		r.logger.Debug("connection filtered out (relay only, not captured)", "conn", connID, "target", target)
-	}
-
-	if capture {
-		r.push(&proto.AgentEvent{
-			ConnId:        connID,
-			TimestampUnix: time.Now().Unix(),
-			Event: &proto.AgentEvent_Open{Open: &proto.ConnOpen{
-				ClientAddr:  clientAddr,
-				ServerAddr:  target,
-				Network:     "tcp",
-				App:         r.cfg.App,
-				Device:      r.cfg.Device,
-				ProcessName: r.cfg.Process,
-			}},
-		})
-	}
-
 	serverConn, err := net.Dial("tcp", target)
 	if err != nil {
-		r.logger.Warn("dial upstream failed", "conn", connID, "target", target, "error", err)
-		if capture {
-			r.pushClose(connID, "dial_failed")
-		}
+		r.logger.Warn("dial upstream failed", "conn", seq, "target", target, "error", err)
 		return
 	}
 	defer serverConn.Close()
+
+	conn := &relayConn{
+		id:     fmt.Sprintf("%s-%d", r.agentID, seq),
+		target: target,
+		open: &proto.ConnOpen{
+			ClientAddr:  clientAddr,
+			ServerAddr:  target,
+			Network:     "tcp",
+			App:         r.cfg.App,
+			Device:      r.cfg.Device,
+			ProcessName: r.cfg.Process,
+		},
+		logger: r.logger,
+	}
+
+	r.gate.activeConns.Add(1)
+	r.gate.totalConns.Add(1)
+	defer r.gate.activeConns.Add(-1)
+
+	// 抓包已开启时立即声明连接（零字节连接也能在会话里看见）；
+	// 未开启时留给 forward 在首次有数据时补发——该连接可能早于 capture 就已建立。
+	conn.begin(r.gate.Current())
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		r.forward(upstream, serverConn, connID, "request", capture)
+		r.forward(upstream, serverConn, conn, "request")
 	}()
 	go func() {
 		defer wg.Done()
-		r.forward(serverConn, clientConn, connID, "response", capture)
+		r.forward(serverConn, clientConn, conn, "response")
 	}()
 	wg.Wait()
-	if capture {
-		r.pushClose(connID, "closed")
-	}
+	conn.end(r.gate.Current())
 }
 
 // resolveTarget 确定连接的上游目标，返回请求方向的读取源：
@@ -443,29 +445,44 @@ func parseConnectTarget(line string) (string, bool) {
 	return target, true
 }
 
-// forward 单向转发：读 src 写 dst，同时把读到的字节推送给 GTA（尽力而为）。
-// capture 为 false 时只转发不上报（该连接未命中筛选）。
-// 任一端出错即关闭对端，让对向 goroutine 尽快退出。
+// forward 单向转发：读 src 写 dst；若当前处于 capturing 且连接命中筛选，
+// 同时把字节推给当前会话的 mobile source。
+//
+// 抓包开关是**每块数据实时判定**的，而不是连接建立时定死的：
+//   - capture 中途开启 → 运行中已建立的连接从下一块数据起进入新会话；
+//   - capture 中途关闭 → 立即停止上报，连接继续转发（手机侧无感）。
+//
+// 不抓包时不做 payload 复制（直接把读缓冲写出去），这是「零上报成本」的
+// 关键：idle 状态下除一次 socket 写外没有任何额外分配。
 // 推送失败不中断中继：GTA 未运行时抓包暂时丢失，代理连接仍在转发。
-func (r *Relay) forward(src io.Reader, dst net.Conn, connID, direction string, capture bool) {
+func (r *Relay) forward(src io.Reader, dst net.Conn, conn *relayConn, direction string) {
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := src.Read(buf)
 		if n > 0 {
-			chunk := make([]byte, n)
-			copy(chunk, buf[:n])
-			if _, werr := dst.Write(chunk); werr != nil {
-				return
-			}
-			if !capture {
-				continue
-			}
-			if perr := r.push(&proto.AgentEvent{
-				ConnId:        connID,
-				TimestampUnix: time.Now().Unix(),
-				Event:         &proto.AgentEvent_Data{Data: &proto.ConnData{Direction: direction, Payload: chunk}},
-			}); perr != nil {
-				r.logger.Debug("push failed, capture best-effort", "conn", connID, "direction", direction, "error", perr)
+			r.gate.relayBytes.Add(uint64(n))
+			r.gate.lastDataUnix.Store(time.Now().UnixMilli())
+
+			sink, connID := conn.begin(r.gate.Current())
+			if sink == nil {
+				// 未抓包 / 未命中筛选：原样透传，不复制、不上报。
+				if _, werr := dst.Write(buf[:n]); werr != nil {
+					return
+				}
+			} else {
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				if _, werr := dst.Write(chunk); werr != nil {
+					return
+				}
+				r.gate.capturedBytes.Add(uint64(n))
+				if perr := sink.Send(&proto.AgentEvent{
+					ConnId:        connID,
+					TimestampUnix: time.Now().Unix(),
+					Event:         &proto.AgentEvent_Data{Data: &proto.ConnData{Direction: direction, Payload: chunk}},
+				}); perr != nil {
+					r.logger.Debug("push failed, capture best-effort", "conn", connID, "direction", direction, "error", perr)
+				}
 			}
 		}
 		if err != nil {
@@ -475,18 +492,70 @@ func (r *Relay) forward(src io.Reader, dst net.Conn, connID, direction string, c
 	}
 }
 
-func (r *Relay) push(evt *proto.AgentEvent) error {
-	if err := r.client.Send(evt); err != nil {
-		r.logger.Debug("push to GTA failed (capture best-effort)", "error", err)
-		return err
-	}
-	return nil
+// relayConn 是一条中继连接的上报状态。
+//
+// epoch 隔离是新旧会话不串的关键：手机上的游戏长连接往往在抓包开始前就已建立，
+// 且会跨越多次 start/stop。conn_id 带 epoch 前缀后，同一条物理连接在不同
+// capture 中上报为不同的 conn_id；再配合每个 capture 独占的 gRPC 流，
+// 旧会话绝不可能收到新会话的数据（反之亦然）。
+type relayConn struct {
+	id     string // agent 内唯一连接标识（不含 epoch）
+	target string // 上游目标 host:port，供筛选判定
+	open   *proto.ConnOpen
+	logger *slog.Logger
+
+	mu     sync.Mutex
+	epoch  uint64 // 最近一次 ConnOpen 所属的 capture epoch（0=从未）
+	opened bool   // 当前 epoch 是否已发送过 ConnOpen
 }
 
-func (r *Relay) pushClose(connID, reason string) {
-	_ = r.push(&proto.AgentEvent{
-		ConnId:        connID,
+// connID 返回该连接在给定 epoch 下的上报标识。
+func (c *relayConn) connID(epoch uint64) string {
+	return fmt.Sprintf("%s-e%d", c.id, epoch)
+}
+
+// begin 在当前 capture 下确保已声明本连接，返回应使用的 sink 与 conn_id。
+// 返回 nil 表示本次数据不上报（未抓包，或该连接未命中当前 capture 的筛选）。
+//
+// 幂等：同一 epoch 内只发一次 ConnOpen。
+func (c *relayConn) begin(st *captureState) (*PushClient, string) {
+	if st == nil || !st.filter.allow(c.target) {
+		return nil, ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.epoch != st.epoch {
+		// 进入新 capture：上一个 epoch 的 open 已随旧流作废，需在新会话重新声明。
+		c.epoch = st.epoch
+		c.opened = false
+		c.logger.Debug("connection entering new capture epoch", "conn", c.id, "epoch", st.epoch)
+	}
+	if !c.opened {
+		c.opened = true
+		_ = st.sink.Send(&proto.AgentEvent{
+			ConnId:        c.connID(st.epoch),
+			TimestampUnix: time.Now().Unix(),
+			Event:         &proto.AgentEvent_Open{Open: c.open},
+		})
+	}
+	return st.sink, c.connID(st.epoch)
+}
+
+// end 连接结束时发送 ConnClose（仅当当前 epoch 确实 open 过）。
+// st 为 nil（已停止抓包）时不发：旧流已关闭，close 无处可送。
+func (c *relayConn) end(st *captureState) {
+	if st == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.epoch != st.epoch || !c.opened {
+		return
+	}
+	c.opened = false
+	_ = st.sink.Send(&proto.AgentEvent{
+		ConnId:        c.connID(c.epoch),
 		TimestampUnix: time.Now().Unix(),
-		Event:         &proto.AgentEvent_Close{Close: &proto.ConnClose{Reason: reason}},
+		Event:         &proto.AgentEvent_Close{Close: &proto.ConnClose{Reason: "closed"}},
 	})
 }

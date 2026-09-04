@@ -2873,18 +2873,26 @@ func (x *GetRegistryAddrResponse) GetRegistryAddr() string {
 	return ""
 }
 
-// CreateProxyLeaseRequest 创建代理抓包租约。plugin/include_hosts/include_ports
+// CreateProxyLeaseRequest 创建代理出口。plugin/include_hosts/include_ports
 // 为该租约私有（不影响其他租约）；device 是设备标签；owner/all_owners 由
 // gta-mcp 从 auth ctx 透传（同 StartCaptureRequest），pipeline 记录归属。
 type CreateProxyLeaseRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Plugin        string                 `protobuf:"bytes,1,opt,name=plugin,proto3" json:"plugin,omitempty"`                                         // 租约会话绑定的解码插件（空=仅原始包）
-	IncludeHosts  []string               `protobuf:"bytes,2,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`         // 连接筛选：目标主机（空=不筛选）
-	IncludePorts  []int32                `protobuf:"varint,3,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"` // 连接筛选：目标端口（空=不筛选）
-	Device        string                 `protobuf:"bytes,4,opt,name=device,proto3" json:"device,omitempty"`                                         // 设备标签，如 "alice-phone"（可选）
-	ProjectId     string                 `protobuf:"bytes,5,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`                  // 归属项目（可选）
-	Owner         string                 `protobuf:"bytes,6,opt,name=owner,proto3" json:"owner,omitempty"`                                           // gta-mcp 透传的调用方属主
-	AllOwners     bool                   `protobuf:"varint,7,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`                 // gta-mcp 透传（admin）
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Plugin       string                 `protobuf:"bytes,1,opt,name=plugin,proto3" json:"plugin,omitempty"`                                         // 租约会话绑定的解码插件（空=仅原始包）
+	IncludeHosts []string               `protobuf:"bytes,2,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`         // 连接筛选：目标主机（空=不筛选）
+	IncludePorts []int32                `protobuf:"varint,3,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"` // 连接筛选：目标端口（空=不筛选）
+	Device       string                 `protobuf:"bytes,4,opt,name=device,proto3" json:"device,omitempty"`                                         // 设备标签，如 "alice-phone"（可选）
+	ProjectId    string                 `protobuf:"bytes,5,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`                  // 归属项目（可选）
+	Owner        string                 `protobuf:"bytes,6,opt,name=owner,proto3" json:"owner,omitempty"`                                           // gta-mcp 透传的调用方属主
+	AllOwners    bool                   `protobuf:"varint,7,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`                 // gta-mcp 透传（admin）
+	// no_auto_start 为 true 时只创建常驻出口、不立即开始抓包（等
+	// StartLeaseCapture）。默认 false = 创建后立刻开始抓包（保持既有行为）。
+	// 取反命名是 proto3 默认值所限：bool 只能是 false，无法表达"默认 true"。
+	NoAutoStart bool `protobuf:"varint,8,opt,name=no_auto_start,json=noAutoStart,proto3" json:"no_auto_start,omitempty"`
+	// sticky 为 true 时按 (owner, device) 复用上一次用过的代理端口：同一台设备
+	// 重新创建租约仍拿到同一个端口，此前扫过的二维码继续有效。默认 true。
+	// 同样因 proto3 默认值限制取反命名为 no_sticky。
+	NoSticky      bool `protobuf:"varint,9,opt,name=no_sticky,json=noSticky,proto3" json:"no_sticky,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2968,11 +2976,25 @@ func (x *CreateProxyLeaseRequest) GetAllOwners() bool {
 	return false
 }
 
+func (x *CreateProxyLeaseRequest) GetNoAutoStart() bool {
+	if x != nil {
+		return x.NoAutoStart
+	}
+	return false
+}
+
+func (x *CreateProxyLeaseRequest) GetNoSticky() bool {
+	if x != nil {
+		return x.NoSticky
+	}
+	return false
+}
+
 // ProxyLeaseState 租约配置 + 运行时状态快照。lease_id 与内部抓包会话
 // session_id 一致（1:1 生命周期），前端可直接跳转会话。
 type ProxyLeaseState struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	LeaseId         string                 `protobuf:"bytes,1,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"` // 租约 id（= 抓包会话 session_id）
+	LeaseId         string                 `protobuf:"bytes,1,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"` // 租约 id（稳定，跨多次抓包会话不变）
 	Owner           string                 `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
 	ProjectId       string                 `protobuf:"bytes,3,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	Plugin          string                 `protobuf:"bytes,4,opt,name=plugin,proto3" json:"plugin,omitempty"`
@@ -2980,19 +3002,25 @@ type ProxyLeaseState struct {
 	IncludePorts    []int32                `protobuf:"varint,6,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"`
 	Device          string                 `protobuf:"bytes,7,opt,name=device,proto3" json:"device,omitempty"`
 	ListenAddr      string                 `protobuf:"bytes,8,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"`                   // agent HTTP CONNECT 监听（0.0.0.0:121xx，手机连这里）
-	AgentListenPort int32                  `protobuf:"varint,9,opt,name=agent_listen_port,json=agentListenPort,proto3" json:"agent_listen_port,omitempty"` // agent 监听端口（12100-12199）
-	MobileGrpcPort  int32                  `protobuf:"varint,10,opt,name=mobile_grpc_port,json=mobileGrpcPort,proto3" json:"mobile_grpc_port,omitempty"`   // mobile source gRPC 端口（19100-19199，本机回环）
+	AgentListenPort int32                  `protobuf:"varint,9,opt,name=agent_listen_port,json=agentListenPort,proto3" json:"agent_listen_port,omitempty"` // agent 监听端口（12100-12199，租约内恒定）
+	MobileGrpcPort  int32                  `protobuf:"varint,10,opt,name=mobile_grpc_port,json=mobileGrpcPort,proto3" json:"mobile_grpc_port,omitempty"`   // 当前抓包会话的 mobile source gRPC 端口（0=未抓包）
 	AgentRunning    bool                   `protobuf:"varint,11,opt,name=agent_running,json=agentRunning,proto3" json:"agent_running,omitempty"`
 	AgentPid        int32                  `protobuf:"varint,12,opt,name=agent_pid,json=agentPid,proto3" json:"agent_pid,omitempty"`
-	SessionRunning  bool                   `protobuf:"varint,13,opt,name=session_running,json=sessionRunning,proto3" json:"session_running,omitempty"`
-	SessionId       string                 `protobuf:"bytes,14,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	SessionRunning  bool                   `protobuf:"varint,13,opt,name=session_running,json=sessionRunning,proto3" json:"session_running,omitempty"` // 当前是否有活跃抓包会话（== capture_running）
+	SessionId       string                 `protobuf:"bytes,14,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                 // 当前抓包会话 id（未抓包为空）
 	CreatedAtUnix   int64                  `protobuf:"varint,15,opt,name=created_at_unix,json=createdAtUnix,proto3" json:"created_at_unix,omitempty"`
 	ActiveConns     int64                  `protobuf:"varint,16,opt,name=active_conns,json=activeConns,proto3" json:"active_conns,omitempty"` // 当前活跃手机连接数
 	TotalConns      uint64                 `protobuf:"varint,17,opt,name=total_conns,json=totalConns,proto3" json:"total_conns,omitempty"`
 	LastDataUnix    int64                  `protobuf:"varint,18,opt,name=last_data_unix,json=lastDataUnix,proto3" json:"last_data_unix,omitempty"` // unix 毫秒（0=从未）
 	TotalBytes      uint64                 `protobuf:"varint,19,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// ---- 以下为常驻出口（stable egress）引入的字段 ----
+	CaptureRunning    bool  `protobuf:"varint,20,opt,name=capture_running,json=captureRunning,proto3" json:"capture_running,omitempty"`              // agent 是否正在上报数据（与 session_running 同步）
+	ControlPort       int32 `protobuf:"varint,21,opt,name=control_port,json=controlPort,proto3" json:"control_port,omitempty"`                       // agent 本地控制接口端口（pipeline → agent，19500-19599）
+	CaptureCount      int32 `protobuf:"varint,22,opt,name=capture_count,json=captureCount,proto3" json:"capture_count,omitempty"`                    // 本租约累计开始过多少次抓包
+	LastCaptureAtUnix int64 `protobuf:"varint,23,opt,name=last_capture_at_unix,json=lastCaptureAtUnix,proto3" json:"last_capture_at_unix,omitempty"` // 最近一次 start/stop capture 的时间（unix 秒）
+	StickyPort        bool  `protobuf:"varint,24,opt,name=sticky_port,json=stickyPort,proto3" json:"sticky_port,omitempty"`                          // 该端口是否为 (owner,device) 复用端口（二维码长期有效）
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ProxyLeaseState) Reset() {
@@ -3156,6 +3184,41 @@ func (x *ProxyLeaseState) GetTotalBytes() uint64 {
 		return x.TotalBytes
 	}
 	return 0
+}
+
+func (x *ProxyLeaseState) GetCaptureRunning() bool {
+	if x != nil {
+		return x.CaptureRunning
+	}
+	return false
+}
+
+func (x *ProxyLeaseState) GetControlPort() int32 {
+	if x != nil {
+		return x.ControlPort
+	}
+	return 0
+}
+
+func (x *ProxyLeaseState) GetCaptureCount() int32 {
+	if x != nil {
+		return x.CaptureCount
+	}
+	return 0
+}
+
+func (x *ProxyLeaseState) GetLastCaptureAtUnix() int64 {
+	if x != nil {
+		return x.LastCaptureAtUnix
+	}
+	return 0
+}
+
+func (x *ProxyLeaseState) GetStickyPort() bool {
+	if x != nil {
+		return x.StickyPort
+	}
+	return false
 }
 
 type CreateProxyLeaseResponse struct {
@@ -3522,6 +3585,306 @@ func (x *ReleaseProxyLeaseResponse) GetSessionId() string {
 	return ""
 }
 
+// StartLeaseCaptureRequest 在指定租约上开一次抓包。
+// plugin/include_hosts/include_ports 留空表示沿用租约创建时的配置；
+// 显式给出则本次抓包临时覆盖（不影响租约自身的配置，也不影响其他租约）。
+type StartLeaseCaptureRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LeaseId       string                 `protobuf:"bytes,1,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"`
+	Plugin        string                 `protobuf:"bytes,2,opt,name=plugin,proto3" json:"plugin,omitempty"`                                         // 可选覆盖：本次抓包绑定的解码插件
+	IncludeHosts  []string               `protobuf:"bytes,3,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`         // 可选覆盖：连接筛选（目标主机）
+	IncludePorts  []int32                `protobuf:"varint,4,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"` // 可选覆盖：连接筛选（目标端口）
+	Owner         string                 `protobuf:"bytes,5,opt,name=owner,proto3" json:"owner,omitempty"`                                           // gta-mcp 透传的调用方属主
+	AllOwners     bool                   `protobuf:"varint,6,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`                 // gta-mcp 透传（admin）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartLeaseCaptureRequest) Reset() {
+	*x = StartLeaseCaptureRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartLeaseCaptureRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartLeaseCaptureRequest) ProtoMessage() {}
+
+func (x *StartLeaseCaptureRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartLeaseCaptureRequest.ProtoReflect.Descriptor instead.
+func (*StartLeaseCaptureRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *StartLeaseCaptureRequest) GetLeaseId() string {
+	if x != nil {
+		return x.LeaseId
+	}
+	return ""
+}
+
+func (x *StartLeaseCaptureRequest) GetPlugin() string {
+	if x != nil {
+		return x.Plugin
+	}
+	return ""
+}
+
+func (x *StartLeaseCaptureRequest) GetIncludeHosts() []string {
+	if x != nil {
+		return x.IncludeHosts
+	}
+	return nil
+}
+
+func (x *StartLeaseCaptureRequest) GetIncludePorts() []int32 {
+	if x != nil {
+		return x.IncludePorts
+	}
+	return nil
+}
+
+func (x *StartLeaseCaptureRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *StartLeaseCaptureRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type StartLeaseCaptureResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // 本次抓包会话 id（每次 start 都是新的）
+	Lease         *ProxyLeaseState       `protobuf:"bytes,4,opt,name=lease,proto3" json:"lease,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartLeaseCaptureResponse) Reset() {
+	*x = StartLeaseCaptureResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartLeaseCaptureResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartLeaseCaptureResponse) ProtoMessage() {}
+
+func (x *StartLeaseCaptureResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartLeaseCaptureResponse.ProtoReflect.Descriptor instead.
+func (*StartLeaseCaptureResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *StartLeaseCaptureResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *StartLeaseCaptureResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *StartLeaseCaptureResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *StartLeaseCaptureResponse) GetLease() *ProxyLeaseState {
+	if x != nil {
+		return x.Lease
+	}
+	return nil
+}
+
+// StopLeaseCaptureRequest 停止指定租约当前的抓包（出口保留，回到 idle）。
+type StopLeaseCaptureRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LeaseId       string                 `protobuf:"bytes,1,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"`
+	Owner         string                 `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,3,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StopLeaseCaptureRequest) Reset() {
+	*x = StopLeaseCaptureRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopLeaseCaptureRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopLeaseCaptureRequest) ProtoMessage() {}
+
+func (x *StopLeaseCaptureRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopLeaseCaptureRequest.ProtoReflect.Descriptor instead.
+func (*StopLeaseCaptureRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *StopLeaseCaptureRequest) GetLeaseId() string {
+	if x != nil {
+		return x.LeaseId
+	}
+	return ""
+}
+
+func (x *StopLeaseCaptureRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *StopLeaseCaptureRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type StopLeaseCaptureResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`         // 被停止的会话 id
+	RawPackets    int64                  `protobuf:"varint,4,opt,name=raw_packets,json=rawPackets,proto3" json:"raw_packets,omitempty"`     // 本次会话落盘的原始包数
+	Events        int64                  `protobuf:"varint,5,opt,name=events,proto3" json:"events,omitempty"`                               // 解码事件数
+	DurationSec   float64                `protobuf:"fixed64,6,opt,name=duration_sec,json=durationSec,proto3" json:"duration_sec,omitempty"` // 本次抓包时长
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StopLeaseCaptureResponse) Reset() {
+	*x = StopLeaseCaptureResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopLeaseCaptureResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopLeaseCaptureResponse) ProtoMessage() {}
+
+func (x *StopLeaseCaptureResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopLeaseCaptureResponse.ProtoReflect.Descriptor instead.
+func (*StopLeaseCaptureResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *StopLeaseCaptureResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *StopLeaseCaptureResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *StopLeaseCaptureResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *StopLeaseCaptureResponse) GetRawPackets() int64 {
+	if x != nil {
+		return x.RawPackets
+	}
+	return 0
+}
+
+func (x *StopLeaseCaptureResponse) GetEvents() int64 {
+	if x != nil {
+		return x.Events
+	}
+	return 0
+}
+
+func (x *StopLeaseCaptureResponse) GetDurationSec() float64 {
+	if x != nil {
+		return x.DurationSec
+	}
+	return 0
+}
+
 var File_pkg_internalipc_proto_internal_proto protoreflect.FileDescriptor
 
 const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
@@ -3778,7 +4141,7 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x0etimestamp_unix\x18\x05 \x01(\x03R\rtimestampUnix\"\x18\n" +
 	"\x16GetRegistryAddrRequest\">\n" +
 	"\x17GetRegistryAddrResponse\x12#\n" +
-	"\rregistry_addr\x18\x01 \x01(\tR\fregistryAddr\"\xe7\x01\n" +
+	"\rregistry_addr\x18\x01 \x01(\tR\fregistryAddr\"\xa8\x02\n" +
 	"\x17CreateProxyLeaseRequest\x12\x16\n" +
 	"\x06plugin\x18\x01 \x01(\tR\x06plugin\x12#\n" +
 	"\rinclude_hosts\x18\x02 \x03(\tR\fincludeHosts\x12#\n" +
@@ -3788,7 +4151,9 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"project_id\x18\x05 \x01(\tR\tprojectId\x12\x14\n" +
 	"\x05owner\x18\x06 \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
-	"all_owners\x18\a \x01(\bR\tallOwners\"\x8f\x05\n" +
+	"all_owners\x18\a \x01(\bR\tallOwners\x12\"\n" +
+	"\rno_auto_start\x18\b \x01(\bR\vnoAutoStart\x12\x1b\n" +
+	"\tno_sticky\x18\t \x01(\bR\bnoSticky\"\xd2\x06\n" +
 	"\x0fProxyLeaseState\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\tR\aleaseId\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
@@ -3814,7 +4179,13 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"totalConns\x12$\n" +
 	"\x0elast_data_unix\x18\x12 \x01(\x03R\flastDataUnix\x12\x1f\n" +
 	"\vtotal_bytes\x18\x13 \x01(\x04R\n" +
-	"totalBytes\"R\n" +
+	"totalBytes\x12'\n" +
+	"\x0fcapture_running\x18\x14 \x01(\bR\x0ecaptureRunning\x12!\n" +
+	"\fcontrol_port\x18\x15 \x01(\x05R\vcontrolPort\x12#\n" +
+	"\rcapture_count\x18\x16 \x01(\x05R\fcaptureCount\x12/\n" +
+	"\x14last_capture_at_unix\x18\x17 \x01(\x03R\x11lastCaptureAtUnix\x12\x1f\n" +
+	"\vsticky_port\x18\x18 \x01(\bR\n" +
+	"stickyPort\"R\n" +
 	"\x18CreateProxyLeaseResponse\x126\n" +
 	"\x05lease\x18\x01 \x01(\v2 .gta.internalipc.ProxyLeaseStateR\x05lease\"M\n" +
 	"\x16ListProxyLeasesRequest\x12\x14\n" +
@@ -3839,7 +4210,35 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId2\xd9\x0e\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"\xcc\x01\n" +
+	"\x18StartLeaseCaptureRequest\x12\x19\n" +
+	"\blease_id\x18\x01 \x01(\tR\aleaseId\x12\x16\n" +
+	"\x06plugin\x18\x02 \x01(\tR\x06plugin\x12#\n" +
+	"\rinclude_hosts\x18\x03 \x03(\tR\fincludeHosts\x12#\n" +
+	"\rinclude_ports\x18\x04 \x03(\x05R\fincludePorts\x12\x14\n" +
+	"\x05owner\x18\x05 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x06 \x01(\bR\tallOwners\"\x9c\x01\n" +
+	"\x19StartLeaseCaptureResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x126\n" +
+	"\x05lease\x18\x04 \x01(\v2 .gta.internalipc.ProxyLeaseStateR\x05lease\"i\n" +
+	"\x17StopLeaseCaptureRequest\x12\x19\n" +
+	"\blease_id\x18\x01 \x01(\tR\aleaseId\x12\x14\n" +
+	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x03 \x01(\bR\tallOwners\"\xbf\x01\n" +
+	"\x18StopLeaseCaptureResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x1f\n" +
+	"\vraw_packets\x18\x04 \x01(\x03R\n" +
+	"rawPackets\x12\x16\n" +
+	"\x06events\x18\x05 \x01(\x03R\x06events\x12!\n" +
+	"\fduration_sec\x18\x06 \x01(\x01R\vdurationSec2\xae\x10\n" +
 	"\x0eCaptureControl\x12[\n" +
 	"\fStartCapture\x12$.gta.internalipc.StartCaptureRequest\x1a%.gta.internalipc.StartCaptureResponse\x12X\n" +
 	"\vStopCapture\x12#.gta.internalipc.StopCaptureRequest\x1a$.gta.internalipc.StopCaptureResponse\x12g\n" +
@@ -3860,7 +4259,9 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x10CreateProxyLease\x12(.gta.internalipc.CreateProxyLeaseRequest\x1a).gta.internalipc.CreateProxyLeaseResponse\x12d\n" +
 	"\x0fListProxyLeases\x12'.gta.internalipc.ListProxyLeasesRequest\x1a(.gta.internalipc.ListProxyLeasesResponse\x12^\n" +
 	"\rGetProxyLease\x12%.gta.internalipc.GetProxyLeaseRequest\x1a&.gta.internalipc.GetProxyLeaseResponse\x12j\n" +
-	"\x11ReleaseProxyLease\x12).gta.internalipc.ReleaseProxyLeaseRequest\x1a*.gta.internalipc.ReleaseProxyLeaseResponseB\x1bZ\x19gta/pkg/internalipc/protob\x06proto3"
+	"\x11ReleaseProxyLease\x12).gta.internalipc.ReleaseProxyLeaseRequest\x1a*.gta.internalipc.ReleaseProxyLeaseResponse\x12j\n" +
+	"\x11StartLeaseCapture\x12).gta.internalipc.StartLeaseCaptureRequest\x1a*.gta.internalipc.StartLeaseCaptureResponse\x12g\n" +
+	"\x10StopLeaseCapture\x12(.gta.internalipc.StopLeaseCaptureRequest\x1a).gta.internalipc.StopLeaseCaptureResponseB\x1bZ\x19gta/pkg/internalipc/protob\x06proto3"
 
 var (
 	file_pkg_internalipc_proto_internal_proto_rawDescOnce sync.Once
@@ -3874,7 +4275,7 @@ func file_pkg_internalipc_proto_internal_proto_rawDescGZIP() []byte {
 	return file_pkg_internalipc_proto_internal_proto_rawDescData
 }
 
-var file_pkg_internalipc_proto_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
+var file_pkg_internalipc_proto_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 56)
 var file_pkg_internalipc_proto_internal_proto_goTypes = []any{
 	(*DecodeRawPacketsRequest)(nil),     // 0: gta.internalipc.DecodeRawPacketsRequest
 	(*DecodeRawPacketsResponse)(nil),    // 1: gta.internalipc.DecodeRawPacketsResponse
@@ -3925,19 +4326,23 @@ var file_pkg_internalipc_proto_internal_proto_goTypes = []any{
 	(*GetProxyLeaseResponse)(nil),       // 46: gta.internalipc.GetProxyLeaseResponse
 	(*ReleaseProxyLeaseRequest)(nil),    // 47: gta.internalipc.ReleaseProxyLeaseRequest
 	(*ReleaseProxyLeaseResponse)(nil),   // 48: gta.internalipc.ReleaseProxyLeaseResponse
-	nil,                                 // 49: gta.internalipc.TestPluginResponse.TypeHistogramEntry
-	nil,                                 // 50: gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	nil,                                 // 51: gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	(*StartLeaseCaptureRequest)(nil),    // 49: gta.internalipc.StartLeaseCaptureRequest
+	(*StartLeaseCaptureResponse)(nil),   // 50: gta.internalipc.StartLeaseCaptureResponse
+	(*StopLeaseCaptureRequest)(nil),     // 51: gta.internalipc.StopLeaseCaptureRequest
+	(*StopLeaseCaptureResponse)(nil),    // 52: gta.internalipc.StopLeaseCaptureResponse
+	nil,                                 // 53: gta.internalipc.TestPluginResponse.TypeHistogramEntry
+	nil,                                 // 54: gta.internalipc.SampleBytesResponse.LengthHistogramEntry
+	nil,                                 // 55: gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
 }
 var file_pkg_internalipc_proto_internal_proto_depIdxs = []int32{
-	49, // 0: gta.internalipc.TestPluginResponse.type_histogram:type_name -> gta.internalipc.TestPluginResponse.TypeHistogramEntry
+	53, // 0: gta.internalipc.TestPluginResponse.type_histogram:type_name -> gta.internalipc.TestPluginResponse.TypeHistogramEntry
 	3,  // 1: gta.internalipc.TestPluginResponse.sample_events:type_name -> gta.internalipc.TestEventLite
 	4,  // 2: gta.internalipc.TestPluginResponse.error_samples:type_name -> gta.internalipc.TestErrorLite
 	7,  // 3: gta.internalipc.VerifyResponse.violations:type_name -> gta.internalipc.VerifyViolation
 	8,  // 4: gta.internalipc.VerifyResponse.quality:type_name -> gta.internalipc.VerifyQuality
 	11, // 5: gta.internalipc.SampleBytesResponse.packets:type_name -> gta.internalipc.SampledPacket
-	50, // 6: gta.internalipc.SampleBytesResponse.length_histogram:type_name -> gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	51, // 7: gta.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	54, // 6: gta.internalipc.SampleBytesResponse.length_histogram:type_name -> gta.internalipc.SampleBytesResponse.LengthHistogramEntry
+	55, // 7: gta.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
 	13, // 8: gta.internalipc.StartCaptureRequest.live:type_name -> gta.internalipc.PcapLiveConfig
 	14, // 9: gta.internalipc.StartCaptureRequest.file:type_name -> gta.internalipc.PcapFileConfig
 	15, // 10: gta.internalipc.StartCaptureRequest.mobile:type_name -> gta.internalipc.MobileSourceConfig
@@ -3946,49 +4351,54 @@ var file_pkg_internalipc_proto_internal_proto_depIdxs = []int32{
 	41, // 13: gta.internalipc.CreateProxyLeaseResponse.lease:type_name -> gta.internalipc.ProxyLeaseState
 	41, // 14: gta.internalipc.ListProxyLeasesResponse.leases:type_name -> gta.internalipc.ProxyLeaseState
 	41, // 15: gta.internalipc.GetProxyLeaseResponse.lease:type_name -> gta.internalipc.ProxyLeaseState
-	16, // 16: gta.internalipc.CaptureControl.StartCapture:input_type -> gta.internalipc.StartCaptureRequest
-	18, // 17: gta.internalipc.CaptureControl.StopCapture:input_type -> gta.internalipc.StopCaptureRequest
-	20, // 18: gta.internalipc.CaptureControl.GetCaptureStatus:input_type -> gta.internalipc.GetCaptureStatusRequest
-	24, // 19: gta.internalipc.CaptureControl.ListCaptureSessions:input_type -> gta.internalipc.ListCaptureSessionsRequest
-	22, // 20: gta.internalipc.CaptureControl.ListInterfaces:input_type -> gta.internalipc.ListInterfacesRequest
-	0,  // 21: gta.internalipc.CaptureControl.DecodeRawPackets:input_type -> gta.internalipc.DecodeRawPacketsRequest
-	27, // 22: gta.internalipc.CaptureControl.ListPlugins:input_type -> gta.internalipc.ListPluginsRequest
-	30, // 23: gta.internalipc.CaptureControl.GetPluginManifest:input_type -> gta.internalipc.GetPluginManifestRequest
-	32, // 24: gta.internalipc.CaptureControl.DeregisterPlugin:input_type -> gta.internalipc.DeregisterPluginRequest
-	34, // 25: gta.internalipc.CaptureControl.SetSessionPlugin:input_type -> gta.internalipc.SetSessionPluginRequest
-	36, // 26: gta.internalipc.CaptureControl.WatchPlugins:input_type -> gta.internalipc.WatchPluginsRequest
-	2,  // 27: gta.internalipc.CaptureControl.TestPlugin:input_type -> gta.internalipc.TestPluginRequest
-	6,  // 28: gta.internalipc.CaptureControl.Verify:input_type -> gta.internalipc.VerifyRequest
-	10, // 29: gta.internalipc.CaptureControl.SampleBytes:input_type -> gta.internalipc.SampleBytesRequest
-	38, // 30: gta.internalipc.CaptureControl.GetRegistryAddr:input_type -> gta.internalipc.GetRegistryAddrRequest
-	40, // 31: gta.internalipc.CaptureControl.CreateProxyLease:input_type -> gta.internalipc.CreateProxyLeaseRequest
-	43, // 32: gta.internalipc.CaptureControl.ListProxyLeases:input_type -> gta.internalipc.ListProxyLeasesRequest
-	45, // 33: gta.internalipc.CaptureControl.GetProxyLease:input_type -> gta.internalipc.GetProxyLeaseRequest
-	47, // 34: gta.internalipc.CaptureControl.ReleaseProxyLease:input_type -> gta.internalipc.ReleaseProxyLeaseRequest
-	17, // 35: gta.internalipc.CaptureControl.StartCapture:output_type -> gta.internalipc.StartCaptureResponse
-	19, // 36: gta.internalipc.CaptureControl.StopCapture:output_type -> gta.internalipc.StopCaptureResponse
-	21, // 37: gta.internalipc.CaptureControl.GetCaptureStatus:output_type -> gta.internalipc.GetCaptureStatusResponse
-	25, // 38: gta.internalipc.CaptureControl.ListCaptureSessions:output_type -> gta.internalipc.ListCaptureSessionsResponse
-	23, // 39: gta.internalipc.CaptureControl.ListInterfaces:output_type -> gta.internalipc.ListInterfacesResponse
-	1,  // 40: gta.internalipc.CaptureControl.DecodeRawPackets:output_type -> gta.internalipc.DecodeRawPacketsResponse
-	29, // 41: gta.internalipc.CaptureControl.ListPlugins:output_type -> gta.internalipc.ListPluginsResponse
-	31, // 42: gta.internalipc.CaptureControl.GetPluginManifest:output_type -> gta.internalipc.GetPluginManifestResponse
-	33, // 43: gta.internalipc.CaptureControl.DeregisterPlugin:output_type -> gta.internalipc.DeregisterPluginResponse
-	35, // 44: gta.internalipc.CaptureControl.SetSessionPlugin:output_type -> gta.internalipc.SetSessionPluginResponse
-	37, // 45: gta.internalipc.CaptureControl.WatchPlugins:output_type -> gta.internalipc.PluginEvent
-	5,  // 46: gta.internalipc.CaptureControl.TestPlugin:output_type -> gta.internalipc.TestPluginResponse
-	9,  // 47: gta.internalipc.CaptureControl.Verify:output_type -> gta.internalipc.VerifyResponse
-	12, // 48: gta.internalipc.CaptureControl.SampleBytes:output_type -> gta.internalipc.SampleBytesResponse
-	39, // 49: gta.internalipc.CaptureControl.GetRegistryAddr:output_type -> gta.internalipc.GetRegistryAddrResponse
-	42, // 50: gta.internalipc.CaptureControl.CreateProxyLease:output_type -> gta.internalipc.CreateProxyLeaseResponse
-	44, // 51: gta.internalipc.CaptureControl.ListProxyLeases:output_type -> gta.internalipc.ListProxyLeasesResponse
-	46, // 52: gta.internalipc.CaptureControl.GetProxyLease:output_type -> gta.internalipc.GetProxyLeaseResponse
-	48, // 53: gta.internalipc.CaptureControl.ReleaseProxyLease:output_type -> gta.internalipc.ReleaseProxyLeaseResponse
-	35, // [35:54] is the sub-list for method output_type
-	16, // [16:35] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	41, // 16: gta.internalipc.StartLeaseCaptureResponse.lease:type_name -> gta.internalipc.ProxyLeaseState
+	16, // 17: gta.internalipc.CaptureControl.StartCapture:input_type -> gta.internalipc.StartCaptureRequest
+	18, // 18: gta.internalipc.CaptureControl.StopCapture:input_type -> gta.internalipc.StopCaptureRequest
+	20, // 19: gta.internalipc.CaptureControl.GetCaptureStatus:input_type -> gta.internalipc.GetCaptureStatusRequest
+	24, // 20: gta.internalipc.CaptureControl.ListCaptureSessions:input_type -> gta.internalipc.ListCaptureSessionsRequest
+	22, // 21: gta.internalipc.CaptureControl.ListInterfaces:input_type -> gta.internalipc.ListInterfacesRequest
+	0,  // 22: gta.internalipc.CaptureControl.DecodeRawPackets:input_type -> gta.internalipc.DecodeRawPacketsRequest
+	27, // 23: gta.internalipc.CaptureControl.ListPlugins:input_type -> gta.internalipc.ListPluginsRequest
+	30, // 24: gta.internalipc.CaptureControl.GetPluginManifest:input_type -> gta.internalipc.GetPluginManifestRequest
+	32, // 25: gta.internalipc.CaptureControl.DeregisterPlugin:input_type -> gta.internalipc.DeregisterPluginRequest
+	34, // 26: gta.internalipc.CaptureControl.SetSessionPlugin:input_type -> gta.internalipc.SetSessionPluginRequest
+	36, // 27: gta.internalipc.CaptureControl.WatchPlugins:input_type -> gta.internalipc.WatchPluginsRequest
+	2,  // 28: gta.internalipc.CaptureControl.TestPlugin:input_type -> gta.internalipc.TestPluginRequest
+	6,  // 29: gta.internalipc.CaptureControl.Verify:input_type -> gta.internalipc.VerifyRequest
+	10, // 30: gta.internalipc.CaptureControl.SampleBytes:input_type -> gta.internalipc.SampleBytesRequest
+	38, // 31: gta.internalipc.CaptureControl.GetRegistryAddr:input_type -> gta.internalipc.GetRegistryAddrRequest
+	40, // 32: gta.internalipc.CaptureControl.CreateProxyLease:input_type -> gta.internalipc.CreateProxyLeaseRequest
+	43, // 33: gta.internalipc.CaptureControl.ListProxyLeases:input_type -> gta.internalipc.ListProxyLeasesRequest
+	45, // 34: gta.internalipc.CaptureControl.GetProxyLease:input_type -> gta.internalipc.GetProxyLeaseRequest
+	47, // 35: gta.internalipc.CaptureControl.ReleaseProxyLease:input_type -> gta.internalipc.ReleaseProxyLeaseRequest
+	49, // 36: gta.internalipc.CaptureControl.StartLeaseCapture:input_type -> gta.internalipc.StartLeaseCaptureRequest
+	51, // 37: gta.internalipc.CaptureControl.StopLeaseCapture:input_type -> gta.internalipc.StopLeaseCaptureRequest
+	17, // 38: gta.internalipc.CaptureControl.StartCapture:output_type -> gta.internalipc.StartCaptureResponse
+	19, // 39: gta.internalipc.CaptureControl.StopCapture:output_type -> gta.internalipc.StopCaptureResponse
+	21, // 40: gta.internalipc.CaptureControl.GetCaptureStatus:output_type -> gta.internalipc.GetCaptureStatusResponse
+	25, // 41: gta.internalipc.CaptureControl.ListCaptureSessions:output_type -> gta.internalipc.ListCaptureSessionsResponse
+	23, // 42: gta.internalipc.CaptureControl.ListInterfaces:output_type -> gta.internalipc.ListInterfacesResponse
+	1,  // 43: gta.internalipc.CaptureControl.DecodeRawPackets:output_type -> gta.internalipc.DecodeRawPacketsResponse
+	29, // 44: gta.internalipc.CaptureControl.ListPlugins:output_type -> gta.internalipc.ListPluginsResponse
+	31, // 45: gta.internalipc.CaptureControl.GetPluginManifest:output_type -> gta.internalipc.GetPluginManifestResponse
+	33, // 46: gta.internalipc.CaptureControl.DeregisterPlugin:output_type -> gta.internalipc.DeregisterPluginResponse
+	35, // 47: gta.internalipc.CaptureControl.SetSessionPlugin:output_type -> gta.internalipc.SetSessionPluginResponse
+	37, // 48: gta.internalipc.CaptureControl.WatchPlugins:output_type -> gta.internalipc.PluginEvent
+	5,  // 49: gta.internalipc.CaptureControl.TestPlugin:output_type -> gta.internalipc.TestPluginResponse
+	9,  // 50: gta.internalipc.CaptureControl.Verify:output_type -> gta.internalipc.VerifyResponse
+	12, // 51: gta.internalipc.CaptureControl.SampleBytes:output_type -> gta.internalipc.SampleBytesResponse
+	39, // 52: gta.internalipc.CaptureControl.GetRegistryAddr:output_type -> gta.internalipc.GetRegistryAddrResponse
+	42, // 53: gta.internalipc.CaptureControl.CreateProxyLease:output_type -> gta.internalipc.CreateProxyLeaseResponse
+	44, // 54: gta.internalipc.CaptureControl.ListProxyLeases:output_type -> gta.internalipc.ListProxyLeasesResponse
+	46, // 55: gta.internalipc.CaptureControl.GetProxyLease:output_type -> gta.internalipc.GetProxyLeaseResponse
+	48, // 56: gta.internalipc.CaptureControl.ReleaseProxyLease:output_type -> gta.internalipc.ReleaseProxyLeaseResponse
+	50, // 57: gta.internalipc.CaptureControl.StartLeaseCapture:output_type -> gta.internalipc.StartLeaseCaptureResponse
+	52, // 58: gta.internalipc.CaptureControl.StopLeaseCapture:output_type -> gta.internalipc.StopLeaseCaptureResponse
+	38, // [38:59] is the sub-list for method output_type
+	17, // [17:38] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_pkg_internalipc_proto_internal_proto_init() }
@@ -4007,7 +4417,7 @@ func file_pkg_internalipc_proto_internal_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_internalipc_proto_internal_proto_rawDesc), len(file_pkg_internalipc_proto_internal_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   52,
+			NumMessages:   56,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

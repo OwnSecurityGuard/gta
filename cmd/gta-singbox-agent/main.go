@@ -1,21 +1,32 @@
 // Command gta-singbox-agent 是移动端流量入口（sing-box 侧）到 GTA 的桥接程序。
 //
-// 用法：
+// 它是一个**常驻的手机出口**：监听地址在进程生命周期内固定不变，抓包与否
+// 由 gta-pipeline 通过本地控制接口（--control）随时切换。手机配好一次代理
+// （二维码）之后，反复开始/停止抓包都不需要重新扫码、不需要重连 VPN。
 //
-//	gta-singbox-agent \
-//	  --server 127.0.0.1:9090 \   # GTA mobile capture source 的 gRPC 地址
-//	  --listen 127.0.0.1:12000 \  # 本机监听地址（手机代理软件连这里）
-//	  --target 1.2.3.4:443         # 上游服务器（可省略，见下）
+// 常驻模式（推荐，由 gta-pipeline 的代理租约拉起）：
 //
-// --target 可省略：省略时进入纯 HTTP CONNECT 代理模式，只监听并等待手机代理软件
-// 发来 CONNECT 请求，动态解析目标地址后建立隧道。适合"常驻等待代理连接"的部署，
-// GTA 未运行时不影响监听，GTA 上线后自动恢复推送。
+//	gta-singbox-agent --listen 0.0.0.0:12100 --control 127.0.0.1:19500
+//
+//	启动后处于 idle：手机流量照常中继，但不抓包、不上报、无落盘。
+//	pipeline 通过控制接口切到 capturing：
+//	  POST /v1/capture/start {"capture_id":"<session>","server_addr":"127.0.0.1:19100"}
+//	  POST /v1/capture/stop
+//	  GET  /v1/status
+//
+// 直连模式（向后兼容，手动联调用）：给 --server 时启动即开始抓包，
+// 等价于启动后立刻调一次 capture/start。
+//
+//	gta-singbox-agent --server 127.0.0.1:9090 --listen 127.0.0.1:12000
+//
+// 纯代理模式下 --target 省略：动态解析手机 CONNECT 请求中的目标地址，
+// 适合"常驻等待代理连接"，GTA 未运行或未抓包时不影响监听。
 //
 // 联调模式（无 sing-box，本地模拟游戏流量）：
 //
 //	gta-singbox-agent --sim --target 127.0.0.1:19000
 //
-// 它只负责"中继 + 推送连接级数据"，不解码、不存储。
+// 它只负责"中继 + 按需推送连接级数据"，不解码、不存储。
 package main
 
 import (
@@ -45,8 +56,10 @@ func main() {
 		filterPorts string
 		sim         bool
 		listenFile  string
+		control     string
+		controlFile string
 	)
-	flag.StringVar(&server, "server", "127.0.0.1:9090", "GTA mobile capture source gRPC address")
+	flag.StringVar(&server, "server", "", "GTA mobile capture source gRPC address (empty = start idle, wait for capture/start via --control)")
 	flag.StringVar(&listen, "listen", "127.0.0.1:12000", "local address to accept game connections")
 	flag.StringVar(&target, "target", "", "upstream game server address (optional: omit for pure HTTP CONNECT proxy mode)")
 	flag.StringVar(&app, "app", "", "app/package name (optional)")
@@ -56,6 +69,8 @@ func main() {
 	flag.StringVar(&filterPorts, "filter-ports", "", "comma-separated target ports to capture (empty = all)")
 	flag.BoolVar(&sim, "sim", false, "run with a simulated game server+client (no sing-box needed)")
 	flag.StringVar(&listenFile, "listen-file", "", "write the actual listen address to this file once bound (required when --listen uses port 0)")
+	flag.StringVar(&control, "control", "", "local control API listen address (e.g. 127.0.0.1:19500); enables start/stop capture without restarting")
+	flag.StringVar(&controlFile, "control-file", "", "write the actual control address to this file once bound (required when --control uses port 0)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -82,16 +97,10 @@ func main() {
 		logger.Info("pure HTTP CONNECT proxy mode: listening, waiting for phone proxy connections (target resolved per CONNECT)")
 	}
 
-	client, err := agent.NewPushClient(server, logger)
-	if err != nil {
-		logger.Error("connect to GTA mobile source failed", "error", err)
-		os.Exit(1)
-	}
-	defer client.Close()
-
 	fh := splitCSV(filterHosts)
 	fp := parsePortList(filterPorts)
-	relay := agent.NewRelay(agent.RelayConfig{
+
+	cfg := agent.RelayConfig{
 		ListenAddr:  listen,
 		TargetAddr:  simTarget,
 		App:         app,
@@ -99,7 +108,13 @@ func main() {
 		Process:     process,
 		FilterHosts: fh,
 		FilterPorts: fp,
-	}, client, logger)
+	}
+
+	// 抓包闸门：idle 起步，数据上报目标由控制接口切换（--server 给定时立即开启）。
+	gate := agent.NewCaptureGate(cfg, logger)
+	defer gate.Close()
+
+	relay := agent.NewRelay(cfg, gate, logger)
 	if len(fh) > 0 || len(fp) > 0 {
 		logger.Info("connection filter enabled (unmatched connections relay-only, not captured)",
 			"filter_hosts", filterHosts, "filter_ports", filterPorts)
@@ -112,18 +127,55 @@ func main() {
 		}
 	}()
 
-	// --listen 用端口 0 时端口由内核分配，拉起本进程的 pipeline 租约管理器无法预知，
-	// 只能等绑定成功后回写文件再读回（这是跨进程拿动态端口最省事且无竞态的方式）。
+	// 监听地址回写：--listen 用端口 0 时端口由内核分配，拉起本进程的 pipeline
+	// 租约管理器无法预知，只能等绑定成功后回写文件再读回。
 	if listenFile != "" {
 		addr := listenAddr(relay, logger)
 		if addr == "" {
 			logger.Error("relay listen address unavailable", "listen_file", listenFile)
 			os.Exit(1)
 		}
-		if err := writeListenFile(listenFile, addr); err != nil {
+		if err := writeFile(listenFile, addr); err != nil {
 			logger.Error("write listen file failed", "path", listenFile, "error", err)
 			os.Exit(1)
 		}
+	}
+
+	// 控制接口：管道两侧（pipeline ↔ agent）都按固定地址通信，端口由 pipeline
+	// 从端口段分配后经 --control 传入；端口为 0 时回写 --control-file 供外部读取。
+	var ctrl *agent.ControlServer
+	if control != "" {
+		ctrl = agent.NewControlServer(control, gate, relay, logger)
+		go func() {
+			if err := ctrl.Serve(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("control server failed", "error", err)
+				os.Exit(1)
+			}
+		}()
+		// 控制端口是 pipeline 调 capture/start 的唯一入口，必须等到真正就绪
+		// 再回写文件，否则调用方会拿到一个还连不上的地址。
+		if controlFile != "" {
+			if !waitFor(func() bool { return ctrl.Addr() != control && ctrl.Addr() != "" }) {
+				logger.Error("control address unavailable", "control_file", controlFile)
+				os.Exit(1)
+			}
+			if err := writeFile(controlFile, ctrl.Addr()); err != nil {
+				logger.Error("write control file failed", "path", controlFile, "error", err)
+				os.Exit(1)
+			}
+		}
+	}
+
+	// --server 显式给定时启动即抓包（直连模式，向后兼容手动联调用法）。
+	// 常驻模式（由 pipeline 拉起）不给 --server，等控制指令。
+	if server != "" {
+		if err := gate.Start("", server, fh, fp); err != nil {
+			logger.Error("start capture failed", "server", server, "error", err)
+			os.Exit(1)
+		}
+		logger.Info("capture enabled at startup (direct mode)", "server", server)
+	} else {
+		logger.Info("started idle: relaying without capture; use the control API to start a capture session")
 	}
 
 	if sim {
@@ -157,8 +209,8 @@ func runSimClientLoop(ctx context.Context, logger *slog.Logger, relay *agent.Rel
 	}
 }
 
-// writeListenFile 原子写入实际监听地址（临时文件 + rename），避免读取方读到半截内容。
-func writeListenFile(path, addr string) error {
+// writeFile 原子写入文件内容（临时文件 + rename），避免读取方读到半截内容。
+func writeFile(path, addr string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -171,6 +223,17 @@ func writeListenFile(path, addr string) error {
 		return err
 	}
 	return nil
+}
+
+// waitFor 轮询等待条件成立（最多 5 秒）。
+func waitFor(cond func() bool) bool {
+	for i := 0; i < 100; i++ {
+		if cond() {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }
 
 func listenAddr(relay *agent.Relay, logger *slog.Logger) string {

@@ -160,3 +160,9 @@ func (f *fakeCaptureEngine) GetProxyLease(ctx context.Context, leaseID string) (
 func (f *fakeCaptureEngine) ReleaseProxyLease(ctx context.Context, leaseID string) (capturecontrol.ReleaseProxyLeaseResult, error) {
 	return capturecontrol.ReleaseProxyLeaseResult{OK: true}, nil
 }
+func (f *fakeCaptureEngine) StartLeaseCapture(ctx context.Context, req capturecontrol.StartLeaseCaptureRequest) (capturecontrol.StartLeaseCaptureResult, error) {
+	return capturecontrol.StartLeaseCaptureResult{OK: true, SessionID: "cap-1"}, nil
+}
+func (f *fakeCaptureEngine) StopLeaseCapture(ctx context.Context, leaseID string) (capturecontrol.StopLeaseCaptureResult, error) {
+	return capturecontrol.StopLeaseCaptureResult{OK: true, SessionID: "cap-1"}, nil
+}

@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import {
   useSessions,
   useSetSessionPlugin,
-  useListPlugins,
+  useRegisteredPlugins,
   useSessionStatus,
   useDeleteSession,
   useDeleteSessions,
@@ -677,7 +677,7 @@ function SwitchPluginDialog({
   onClose: () => void;
 }) {
   const setPlugin = useSetSessionPlugin();
-  const { data: pluginsData } = useListPlugins();
+  const { data: pluginsData } = useRegisteredPlugins();
   const plugins = pluginsData?.plugins ?? [];
   const [plugin, setPluginName] = useState(session.plugin ?? "");
 
@@ -727,17 +727,18 @@ function SwitchPluginDialog({
             onChange={(e) => setPluginName(e.target.value)}
           >
             {plugins.length === 0 ? (
-              <option value="">无可用插件</option>
+              <option value="">无可用插件（先在「插件」页面启动一个）</option>
             ) : (
               plugins.map((pl) => (
-                <option key={pl.name} value={pl.name}>
+                <option key={pl.name} value={pl.name} disabled={!pl.online}>
                   {pl.name}
+                  {!pl.online ? "（离线）" : ""}
                 </option>
               ))
             )}
           </select>
           <p className="mt-1 text-xs text-muted-foreground">
-            切换立即生效，下一个包即由新插件解码，无需停止抓包。
+            切换立即生效，下一个包即由新插件解码，无需停止抓包。离线插件不可选。
           </p>
         </div>
         {setPlugin.isError && (

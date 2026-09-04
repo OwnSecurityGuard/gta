@@ -3,7 +3,14 @@ import QRCode from "react-qr-code";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { useProxyLeases, useCreateProxyLease, useReleaseProxyLease, useListPlugins } from "@/hooks/use-mcp";
+import {
+  useProxyLeases,
+  useCreateProxyLease,
+  useReleaseProxyLease,
+  useStartLeaseCapture,
+  useStopLeaseCapture,
+  useRegisteredPlugins,
+} from "@/hooks/use-mcp";
 import type { ProxyLease } from "@/types/proxy";
 import { toast } from "@/components/ui/toast";
 import {
@@ -14,6 +21,8 @@ import {
   Copy,
   CopyCheck,
   MonitorSmartphone,
+  PauseCircle,
+  PlayCircle,
   Plus,
   Smartphone,
   Trash2,
@@ -123,12 +132,17 @@ function ConnectionSteps({ steps }: { steps: StepItem[] }) {
 }
 
 /** 代理抓包租约对话框：按用户/设备创建独立会话，多用户互不串流、互不抢配置。
- * 每个租约 = 独立 mobile 会话 + 独立 gta-singbox-agent + 私有筛选配置。 */
+ * 租约（agent + 出口端口 + 控制端口）与抓包会话独立：
+ *   - 创建后租约常驻，QR 端口不变；
+ *   - 「开始抓包 / 停止抓包」只动会话（不重启 agent，二维码一直有效）；
+ *   - 「释放租约」才会杀 agent、回收端口、QR 失效（按钮与上述二者严格区分）。 */
 export function ProxyConfigDialog({ open, onClose, onNavigateToSession }: ProxyConfigDialogProps) {
   const leasesQuery = useProxyLeases();
   const createLease = useCreateProxyLease();
   const releaseLease = useReleaseProxyLease();
-  const plugins = useListPlugins();
+  const startCapture = useStartLeaseCapture();
+  const stopCapture = useStopLeaseCapture();
+  const plugins = useRegisteredPlugins();
   const leases = leasesQuery.data?.leases ?? [];
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -201,12 +215,49 @@ export function ProxyConfigDialog({ open, onClose, onNavigateToSession }: ProxyC
     releaseLease.mutate(leaseId, {
       onSuccess: (res) => {
         if (selectedId === leaseId) setSelectedId(null);
-        toast.success("租约已释放", res?.message);
+        toast.success("租约已释放（agent 已停、端口已收、二维码失效）", res?.message);
       },
       onError: (err) => {
         toast.error("释放失败", err.message);
       },
     });
+  }
+
+  /** start_lease_capture：在已有租约上开新一轮抓包。
+   * 出口端口/QR 一切不变——手机那边无需任何动作也能继续推数据。 */
+  function handleStart(leaseId: string) {
+    startCapture.mutate(
+      { leaseId },
+      {
+        onSuccess: (res) => {
+          const sid = res?.session_id ?? "";
+          const q = res?.lease?.session_id ? `（新 session ${sid}）` : "";
+          toast.success("已开始抓包", `出口端口不变，会话数据完整隔离${q}`);
+        },
+        onError: (err) => {
+          toast.error("开始抓包失败", err.message);
+        },
+      },
+    );
+  }
+
+  /** stop_lease_capture：停掉当前抓包回归 idle，租约/agent/二维码保留。
+   * 之后只要再点「开始抓包」就能开新一轮（手机无需重连）。 */
+  function handleStop(leaseId: string) {
+    stopCapture.mutate(
+      { leaseId },
+      {
+        onSuccess: (res) => {
+          const detail = res
+            ? `${res.raw_packets ?? 0} 包 · ${res.events ?? 0} 事件 · ${(res.duration_s ?? 0).toFixed(1)}s`
+            : "";
+          toast.success("已停止抓包（出口保留）", detail);
+        },
+        onError: (err) => {
+          toast.error("停止抓包失败", err.message);
+        },
+      },
+    );
   }
 
   // ===== 创建租约表单 =====
@@ -270,13 +321,15 @@ export function ProxyConfigDialog({ open, onClose, onNavigateToSession }: ProxyC
             >
               <option value="">仅抓原始包（不解码）</option>
               {pluginOptions.map((p) => (
-                <option key={p.name} value={p.name}>
+                <option key={p.name} value={p.name} disabled={!p.online}>
                   {p.name}
+                  {!p.online ? "（离线）" : ""}
                 </option>
               ))}
             </select>
             <p className="mt-1 text-xs text-muted-foreground">
               租约会话绑定该插件解码流量；分帧/重组由插件自身实现，空为仅抓原始包。
+              离线插件不可选 —— 先在「插件」页面启动后再来选择。
             </p>
           </div>
 
@@ -373,7 +426,7 @@ export function ProxyConfigDialog({ open, onClose, onNavigateToSession }: ProxyC
                         : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:bg-muted/50"
                     }`}
                   >
-                    <span className={`h-1.5 w-1.5 rounded-full ${l.session_running ? "bg-emerald-500" : "bg-muted-foreground"}`} />
+                    <span className={`h-1.5 w-1.5 rounded-full ${l.capture_running || l.session_running ? "bg-emerald-500" : "bg-muted-foreground"}`} />
                     <span className="max-w-[160px] truncate">{l.device || l.lease_id}</span>
                   </button>
                 );
@@ -382,7 +435,17 @@ export function ProxyConfigDialog({ open, onClose, onNavigateToSession }: ProxyC
           )}
         </section>
 
-        {selected ? <LeaseDetail lease={selected} onNavigateToSession={onNavigateToSession} onRelease={handleRelease} onCopy={handleCopy} copied={copied} /> : null}
+        {selected ? (
+          <LeaseDetail
+            lease={selected}
+            onNavigateToSession={onNavigateToSession}
+            onStart={handleStart}
+            onStop={handleStop}
+            onRelease={handleRelease}
+            onCopy={handleCopy}
+            copied={copied}
+          />
+        ) : null}
       </div>
     </Dialog>
   );
@@ -391,20 +454,28 @@ export function ProxyConfigDialog({ open, onClose, onNavigateToSession }: ProxyC
 interface LeaseDetailProps {
   lease: ProxyLease;
   onNavigateToSession?: (sessionId: string) => void;
+  onStart: (leaseId: string) => void;
+  onStop: (leaseId: string) => void;
   onRelease: (leaseId: string) => void;
   onCopy: (text: string, kind: "uri" | "addr") => void;
   copied: "uri" | "addr" | null;
 }
 
-function LeaseDetail({ lease, onNavigateToSession, onRelease, onCopy, copied }: LeaseDetailProps) {
+function LeaseDetail({ lease, onNavigateToSession, onStart, onStop, onRelease, onCopy, copied }: LeaseDetailProps) {
   const agentUp = !!lease.agent_running;
-  const sessionUp = !!lease.session_running;
+  // 以 capture_running 为准（agent 是否在推数据）；idle 时 false。
+  const capturing = !!(lease.capture_running ?? lease.session_running);
   const activeConns = lease.active_conns ?? 0;
   const totalConns = lease.total_conns ?? 0;
   const totalBytes = lease.total_bytes ?? 0;
   const connectAddr = lease.connect_addr ?? "";
   const singboxUri = lease.singbox_uri ?? "";
   const phoneConnected = activeConns > 0;
+  const captureCount = lease.capture_count ?? 0;
+  const lastCaptureAt = lease.last_capture_at_unix ?? 0;
+  const lastCaptureText = lastCaptureAt
+    ? `${Math.max(0, Math.floor((Date.now() / 1000 - lastCaptureAt)))} 秒前开始/停止过抓包`
+    : "从未开始过抓包";
   const qrValue = singboxUri || connectAddr;
   const qrLabel = singboxUri ? "sing-box 扫码导入" : "手机代理扫码连接";
 
@@ -418,8 +489,10 @@ function LeaseDetail({ lease, onNavigateToSession, onRelease, onCopy, copied }: 
     {
       key: "session",
       label: "抓包会话",
-      done: sessionUp,
-      desc: sessionUp ? "独立会话运行中" : "会话未运行",
+      done: capturing,
+      desc: capturing
+        ? `会话 ${lease.session_id?.slice(-6) ?? ""} 运行中`
+        : `idle（已开 ${captureCount} 次）`,
     },
     {
       key: "phone",
@@ -445,7 +518,32 @@ function LeaseDetail({ lease, onNavigateToSession, onRelease, onCopy, copied }: 
             <h4 className="text-sm font-semibold">{lease.device || "连接状态"}</h4>
           </div>
           <div className="flex items-center gap-2">
-            {sessionUp && lease.session_id && onNavigateToSession && (
+            {/* 开始 / 停止 抓包：核心动作，不会影响出口端口，QR 持续有效 */}
+            {agentUp && !capturing && (
+              <Button
+                variant="default"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={() => onStart(lease.lease_id)}
+                title="在已有租约上开新一轮抓包（手机无需重连）"
+              >
+                <PlayCircle className="h-3.5 w-3.5" />
+                开始抓包
+              </Button>
+            )}
+            {agentUp && capturing && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={() => onStop(lease.lease_id)}
+                title="停止当前抓包，回归 idle；出口端口/QR 保留，可再次开始"
+              >
+                <PauseCircle className="h-3.5 w-3.5" />
+                停止抓包
+              </Button>
+            )}
+            {capturing && lease.session_id && onNavigateToSession && (
               <Button
                 variant="outline"
                 size="sm"
@@ -457,15 +555,16 @@ function LeaseDetail({ lease, onNavigateToSession, onRelease, onCopy, copied }: 
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             )}
+            {/* 释放租约：杀掉 agent、回收端口、QR 失效——与上面 start/stop 严格区分 */}
             <Button
               variant="outline"
               size="sm"
               className="h-7 gap-1 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={() => onRelease(lease.lease_id)}
-              title="释放租约（停止会话并回收端口）"
+              title="释放租约（杀 agent、收端口、QR 失效；之后再建会拿新端口）"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              释放
+              释放租约
             </Button>
           </div>
         </div>
@@ -476,6 +575,12 @@ function LeaseDetail({ lease, onNavigateToSession, onRelease, onCopy, copied }: 
 
         {/* 实时活动明细 */}
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border pt-2.5 text-xs text-muted-foreground">
+          <span className={capturing ? "font-medium text-emerald-600" : ""}>
+            当前会话 <span className="font-mono">{lease.session_id ? lease.session_id.slice(-12) : "idle"}</span>
+          </span>
+          <span>
+            累计抓包 <span className="font-mono">{captureCount}</span> 次
+          </span>
           <span className={phoneConnected ? "font-medium text-emerald-600" : ""}>
             活跃连接 <span className="font-mono">{activeConns}</span>
           </span>
@@ -487,6 +592,9 @@ function LeaseDetail({ lease, onNavigateToSession, onRelease, onCopy, copied }: 
           </span>
           <span>
             最近数据 <span className="font-mono">{lastDataText(lease.last_data_unix ?? 0)}</span>
+          </span>
+          <span>
+            抓包动作 <span className="font-mono">{lastCaptureText}</span>
           </span>
           {!phoneConnected && (
             <span className="w-full pt-0.5">

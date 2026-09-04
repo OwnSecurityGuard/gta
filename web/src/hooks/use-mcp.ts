@@ -41,7 +41,11 @@ import type {
   ListProxyLeasesResult,
   CreateProxyLeaseResult,
   ReleaseProxyLeaseResult,
+  StartLeaseCaptureResult,
+  StopLeaseCaptureResult,
   CreateProxyLeaseVars,
+  StartLeaseCaptureVars,
+  StopLeaseCaptureVars,
 } from "@/types/proxy";
 import type { GetAgentDownloadOptionsResult } from "@/types/agent";
 import type { CreateAccessCodeResult, ListAccessCodesResult } from "@/types/access-code";
@@ -777,7 +781,8 @@ export function useProxyLeases() {
   });
 }
 
-/** create_proxy_lease：创建独立代理抓包租约（独立端口 + 独立 agent + 独立会话）。 */
+/** create_proxy_lease：创建独立代理抓包租约（独立端口 + 独立 agent + 独立会话）。
+ * 默认自动开抓包；noAutoStart=true 只建出口。 */
 export function useCreateProxyLease() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -788,6 +793,7 @@ export function useCreateProxyLease() {
         include_ports: vars.includePorts ?? [],
         device: vars.device ?? "",
         project_id: vars.projectId ?? "",
+        no_auto_start: vars.noAutoStart ?? false,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["proxyLeases"] });
@@ -796,12 +802,48 @@ export function useCreateProxyLease() {
   });
 }
 
-/** release_proxy_lease：释放租约（停会话 + 杀 agent + 回收端口，幂等）。 */
+/** release_proxy_lease：释放租约（停会话 + 杀 agent + 回收端口，幂等）。
+ * 注意：与 start/stop_lease_capture 是不同动作，前者删租约（端口归池、QR 失效），
+ * 后者只关/开抓包（出口保留）。误按 release 想再创建会拿到不同端口。 */
 export function useReleaseProxyLease() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (leaseId: string) =>
       mcpClient.callTool<ReleaseProxyLeaseResult>("release_proxy_lease", { lease_id: leaseId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["proxyLeases"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+/** start_lease_capture：在已有租约上开新一轮抓包（出口端口/QR 不变）。
+ * 返回新的 session_id 与最新 lease 视图；调用方应同时使能 sessions 列表刷新。 */
+export function useStartLeaseCapture() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: StartLeaseCaptureVars) =>
+      mcpClient.callTool<StartLeaseCaptureResult>("start_lease_capture", {
+        lease_id: vars.leaseId,
+        plugin: vars.plugin ?? "",
+        include_hosts: vars.includeHosts ?? [],
+        include_ports: vars.includePorts ?? [],
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["proxyLeases"] });
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+/** stop_lease_capture：停掉租约当前的抓包会话回归 idle（出口/agent 保留）。 */
+export function useStopLeaseCapture() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: StopLeaseCaptureVars) =>
+      mcpClient.callTool<StopLeaseCaptureResult>("stop_lease_capture", {
+        lease_id: vars.leaseId,
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["proxyLeases"] });
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });

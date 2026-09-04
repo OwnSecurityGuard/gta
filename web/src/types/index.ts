@@ -75,5 +75,9 @@ export type {
   CreateProxyLeaseResult,
   GetProxyLeaseResult,
   ReleaseProxyLeaseResult,
+  StartLeaseCaptureResult,
+  StopLeaseCaptureResult,
   CreateProxyLeaseVars,
+  StartLeaseCaptureVars,
+  StopLeaseCaptureVars,
 } from "./proxy";

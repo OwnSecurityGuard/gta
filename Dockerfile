@@ -108,15 +108,22 @@ RUN CGO_ENABLED=1 \
 # ============================================================================
 FROM debian:bookworm-slim
 
+# slim 镜像默认不带 ca-certificates，但 apt 会尝试 HTTPS 访问镜像源 →
+# TLS 验证失败会连累包列表为空。必须先用默认源（HTTP，deb.debian.org）装
+# ca-certificates，再切到镜像源装其余依赖。
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
+
 # 同 builder：apt 换源（ARG 不跨阶段，需重新声明）。
 ARG APT_MIRROR=mirrors.tencent.com
 RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources
 
-# libpcap0.8：gopacket/pcap（cgo）的运行时共享库；ca-certificates：出站 TLS。
+# libpcap0.8：gopacket/pcap（cgo）的运行时共享库。
 # 不再安装 gcc/libpcap-dev：原为远程 agent 现场编译（-tags pcap 走 cgo）所需，
 # 现 agent 改走预置二进制；build_plugin 编译插件是纯 Go，亦无需 gcc。
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends libpcap0.8 ca-certificates \
+	&& apt-get install -y --no-install-recommends libpcap0.8 \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& useradd --system --create-home --home-dir /data gametrace \
 	# 预建插件目录：进程只在 scaffold 时懒创建它，首次 list/build 前不存在会让

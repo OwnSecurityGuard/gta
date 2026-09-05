@@ -11,6 +11,7 @@ package auth
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -33,6 +34,9 @@ const adminSuffix = "admin"
 type Principal struct {
 	Owner   string
 	IsAdmin bool
+	// Tenant 是调用者所属租户。当前 token 格式不带组织信息，恒为空串
+	//（鉴权层归一为 authz.DefaultTenant）；字段先行，多租户实体后补。
+	Tenant string
 }
 
 // Resolver 把凭证字符串解析成身份。接口故意只留一个方法：
@@ -63,6 +67,40 @@ func NewStaticResolver(pairs map[string]Principal) *StaticResolver {
 // Required 报告是否启用了鉴权。false 表示匿名模式：任何请求都放行。
 func (r *StaticResolver) Required() bool {
 	return r != nil && len(r.byToken) > 0
+}
+
+// HasOwner 报告 env bootstrap 配置里是否存在指定 owner 名（与 token 值无关）。
+// 用于自助注册时的保留名检查：env 身份与邀请制身份绝不能同名，否则 projects/
+// sessions 的 owner 字段会把两个身份混同，权限边界直接击穿。
+func (r *StaticResolver) HasOwner(name string) bool {
+	if r == nil {
+		return false
+	}
+	for _, p := range r.byToken {
+		if p.Owner == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Owners 返回 env bootstrap 配置的全部 owner 名（去重、升序）。
+// 用于成员管理界面展示 bootstrap 身份（只读、不可撤销——它们不在 users 表）。
+func (r *StaticResolver) Owners() []string {
+	if r == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(r.byToken))
+	out := make([]string, 0, len(r.byToken))
+	for _, p := range r.byToken {
+		if _, ok := seen[p.Owner]; ok {
+			continue
+		}
+		seen[p.Owner] = struct{}{}
+		out = append(out, p.Owner)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Resolve 解析 token。

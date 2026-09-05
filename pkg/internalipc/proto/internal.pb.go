@@ -1325,7 +1325,10 @@ type StartCaptureRequest struct {
 	Owner     string `protobuf:"bytes,8,opt,name=owner,proto3" json:"owner,omitempty"`
 	AllOwners bool   `protobuf:"varint,9,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
 	// 会话归属的项目（projects.id），可选。gta-mcp 从 HTTP 入参透传。
-	ProjectId     string `protobuf:"bytes,10,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	ProjectId string `protobuf:"bytes,10,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	// plugin_owners 是允许按名解析解码插件的额外 owner 集合（除会话 owner 外）。
+	// gta-mcp 依据"调用者所属项目的插件条目归属"计算；用于项目成员共用项目插件。
+	PluginOwners  []string `protobuf:"bytes,11,rep,name=plugin_owners,json=pluginOwners,proto3" json:"plugin_owners,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1441,6 +1444,13 @@ func (x *StartCaptureRequest) GetProjectId() string {
 		return x.ProjectId
 	}
 	return ""
+}
+
+func (x *StartCaptureRequest) GetPluginOwners() []string {
+	if x != nil {
+		return x.PluginOwners
+	}
+	return nil
 }
 
 type isStartCaptureRequest_Source interface {
@@ -2554,9 +2564,11 @@ func (x *DeregisterPluginResponse) GetName() string {
 // SetSessionPluginRequest 运行中热切换解码插件绑定请求。
 // session_id 指定目标抓包会话；plugin 为新的解码插件名（按名精确路由）。
 type SetSessionPluginRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Plugin        string                 `protobuf:"bytes,2,opt,name=plugin,proto3" json:"plugin,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Plugin    string                 `protobuf:"bytes,2,opt,name=plugin,proto3" json:"plugin,omitempty"`
+	// 热切换后允许的额外插件 owner 集合（语义同 StartCaptureRequest.plugin_owners）。
+	PluginOwners  []string `protobuf:"bytes,3,rep,name=plugin_owners,json=pluginOwners,proto3" json:"plugin_owners,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2603,6 +2615,13 @@ func (x *SetSessionPluginRequest) GetPlugin() string {
 		return x.Plugin
 	}
 	return ""
+}
+
+func (x *SetSessionPluginRequest) GetPluginOwners() []string {
+	if x != nil {
+		return x.PluginOwners
+	}
+	return nil
 }
 
 // SetSessionPluginResponse 热切换结果。
@@ -2892,7 +2911,11 @@ type CreateProxyLeaseRequest struct {
 	// sticky 为 true 时按 (owner, device) 复用上一次用过的代理端口：同一台设备
 	// 重新创建租约仍拿到同一个端口，此前扫过的二维码继续有效。默认 true。
 	// 同样因 proto3 默认值限制取反命名为 no_sticky。
-	NoSticky      bool `protobuf:"varint,9,opt,name=no_sticky,json=noSticky,proto3" json:"no_sticky,omitempty"`
+	NoSticky bool `protobuf:"varint,9,opt,name=no_sticky,json=noSticky,proto3" json:"no_sticky,omitempty"`
+	// plugin_owners 允许按名解析解码插件的额外 owner 集合（语义同
+	// StartCaptureRequest）。租约保存该集合，自动开抓包与后续 StartLeaseCapture
+	// 未显式给出时沿用。
+	PluginOwners  []string `protobuf:"bytes,10,rep,name=plugin_owners,json=pluginOwners,proto3" json:"plugin_owners,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2988,6 +3011,13 @@ func (x *CreateProxyLeaseRequest) GetNoSticky() bool {
 		return x.NoSticky
 	}
 	return false
+}
+
+func (x *CreateProxyLeaseRequest) GetPluginOwners() []string {
+	if x != nil {
+		return x.PluginOwners
+	}
+	return nil
 }
 
 // ProxyLeaseState 租约配置 + 运行时状态快照。lease_id 与内部抓包会话
@@ -3596,6 +3626,7 @@ type StartLeaseCaptureRequest struct {
 	IncludePorts  []int32                `protobuf:"varint,4,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"` // 可选覆盖：连接筛选（目标端口）
 	Owner         string                 `protobuf:"bytes,5,opt,name=owner,proto3" json:"owner,omitempty"`                                           // gta-mcp 透传的调用方属主
 	AllOwners     bool                   `protobuf:"varint,6,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`                 // gta-mcp 透传（admin）
+	PluginOwners  []string               `protobuf:"bytes,7,rep,name=plugin_owners,json=pluginOwners,proto3" json:"plugin_owners,omitempty"`         // 允许的额外插件 owner 集合（语义同 StartCaptureRequest）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3670,6 +3701,13 @@ func (x *StartLeaseCaptureRequest) GetAllOwners() bool {
 		return x.AllOwners
 	}
 	return false
+}
+
+func (x *StartLeaseCaptureRequest) GetPluginOwners() []string {
+	if x != nil {
+		return x.PluginOwners
+	}
+	return nil
 }
 
 type StartLeaseCaptureResponse struct {
@@ -4011,7 +4049,7 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"5\n" +
 	"\x12MobileSourceConfig\x12\x1f\n" +
 	"\vlisten_addr\x18\x01 \x01(\tR\n" +
-	"listenAddr\"\x81\x03\n" +
+	"listenAddr\"\xa6\x03\n" +
 	"\x13StartCaptureRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -4026,7 +4064,8 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"all_owners\x18\t \x01(\bR\tallOwners\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\n" +
-	" \x01(\tR\tprojectIdB\b\n" +
+	" \x01(\tR\tprojectId\x12#\n" +
+	"\rplugin_owners\x18\v \x03(\tR\fpluginOwnersB\b\n" +
 	"\x06source\"d\n" +
 	"\x14StartCaptureResponse\x12\x1d\n" +
 	"\n" +
@@ -4120,11 +4159,12 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x1f\n" +
 	"\vinstance_id\x18\x02 \x01(\tR\n" +
 	"instanceId\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\"P\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"u\n" +
 	"\x17SetSessionPluginRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
-	"\x06plugin\x18\x02 \x01(\tR\x06plugin\"{\n" +
+	"\x06plugin\x18\x02 \x01(\tR\x06plugin\x12#\n" +
+	"\rplugin_owners\x18\x03 \x03(\tR\fpluginOwners\"{\n" +
 	"\x18SetSessionPluginResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x1d\n" +
 	"\n" +
@@ -4141,7 +4181,7 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x0etimestamp_unix\x18\x05 \x01(\x03R\rtimestampUnix\"\x18\n" +
 	"\x16GetRegistryAddrRequest\">\n" +
 	"\x17GetRegistryAddrResponse\x12#\n" +
-	"\rregistry_addr\x18\x01 \x01(\tR\fregistryAddr\"\xa8\x02\n" +
+	"\rregistry_addr\x18\x01 \x01(\tR\fregistryAddr\"\xcd\x02\n" +
 	"\x17CreateProxyLeaseRequest\x12\x16\n" +
 	"\x06plugin\x18\x01 \x01(\tR\x06plugin\x12#\n" +
 	"\rinclude_hosts\x18\x02 \x03(\tR\fincludeHosts\x12#\n" +
@@ -4153,7 +4193,9 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\n" +
 	"all_owners\x18\a \x01(\bR\tallOwners\x12\"\n" +
 	"\rno_auto_start\x18\b \x01(\bR\vnoAutoStart\x12\x1b\n" +
-	"\tno_sticky\x18\t \x01(\bR\bnoSticky\"\xd2\x06\n" +
+	"\tno_sticky\x18\t \x01(\bR\bnoSticky\x12#\n" +
+	"\rplugin_owners\x18\n" +
+	" \x03(\tR\fpluginOwners\"\xd2\x06\n" +
 	"\x0fProxyLeaseState\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\tR\aleaseId\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
@@ -4210,7 +4252,7 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\"\xcc\x01\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"\xf1\x01\n" +
 	"\x18StartLeaseCaptureRequest\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\tR\aleaseId\x12\x16\n" +
 	"\x06plugin\x18\x02 \x01(\tR\x06plugin\x12#\n" +
@@ -4218,7 +4260,8 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\rinclude_ports\x18\x04 \x03(\x05R\fincludePorts\x12\x14\n" +
 	"\x05owner\x18\x05 \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
-	"all_owners\x18\x06 \x01(\bR\tallOwners\"\x9c\x01\n" +
+	"all_owners\x18\x06 \x01(\bR\tallOwners\x12#\n" +
+	"\rplugin_owners\x18\a \x03(\tR\fpluginOwners\"\x9c\x01\n" +
 	"\x19StartLeaseCaptureResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

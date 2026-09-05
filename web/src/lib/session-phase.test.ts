@@ -104,7 +104,7 @@ describe("describeSessionPhase", () => {
       status: status({ agent_connected: true }),
     });
     expect(view.phase).toBe("agent_idle");
-    expect(view.title).toContain("Agent 已连接");
+    expect(view.title).toContain("探针已连接");
     const tips = view.guidance?.steps.join(" ") ?? "";
     expect(tips).toContain("启动游戏");
     expect(tips).toContain("操作");
@@ -120,13 +120,13 @@ describe("describeSessionPhase", () => {
     expect(view.facts[1]).toMatchObject({ ok: false, value: "Packets: 0" });
   });
 
-  it("awaiting_agent 的进度条停在「连接 Agent」，且该步为 active", () => {
+  it("awaiting_agent 的进度条停在「连接探针」，且该步为 active", () => {
     const view = describeSessionPhase({
       meta: meta(),
       status: status({ agent_connected: false }),
     });
     const step = (key: string) => view.steps.find((s) => s.key === key);
-    expect(step("link")).toMatchObject({ label: "连接 Agent", state: "active" });
+    expect(step("link")).toMatchObject({ label: "连接探针", state: "active" });
     expect(step("traffic")?.state).toBe("pending");
   });
 

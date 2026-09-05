@@ -51,6 +51,9 @@ type captureTask struct {
 	// 解码插件绑定：创建时设定，运行中可经 SetSessionPlugin 热切换（pluginMu 保护）。
 	pluginMu sync.RWMutex
 	plugin   string
+	// pluginOwners 是允许按名解析解码插件的额外 owner 集合（项目成员共用项目插件，
+	// 来自 StartSessionRequest.plugin_owners；随 SetSessionPlugin 热切换更新）。
+	pluginOwners []string
 	// reresolve 用于外部（SetSessionPlugin）通知 run 循环立即重解析解码器（buffer 1，非阻塞发送）。
 	reresolve chan struct{}
 
@@ -78,7 +81,7 @@ type captureTask struct {
 	statsSnap atomic.Value // taskStats
 
 	// 资源（session 级，run 退出时关闭）
-	sqliteStore *store.SQLiteStore
+	sqliteStore store.Store
 	// source 不放 struct——是 run 的 local variable
 
 	// finalize 回调：run 退出时通知 pipelineService（写 ControlStore + removeTask）
@@ -701,14 +704,16 @@ func (t *captureTask) getPlugin() string {
 	return t.plugin
 }
 
-// SetSessionPlugin 运行中热切换解码插件绑定，并立即触发 run 循环重解析解码器。
+// SetSessionPlugin 运行中热切换解码插件绑定与允许的插件 owner 集合，
+// 并立即触发 run 循环重解析解码器。
 // 返回切换后的插件名；会话未运行或已结束时返回 ErrNoActiveCapture。
-func (t *captureTask) SetSessionPlugin(ctx context.Context, plugin string) (string, error) {
+func (t *captureTask) SetSessionPlugin(ctx context.Context, plugin string, pluginOwners []string) (string, error) {
 	if t.State() != capture.StateRunning {
 		return "", internalipc.ErrNoActiveCapture
 	}
 	t.pluginMu.Lock()
 	t.plugin = plugin
+	t.pluginOwners = pluginOwners
 	t.pluginMu.Unlock()
 
 	// 非阻塞通知 run 循环立即强制重解析（force=true 跳过节流）。
@@ -721,17 +726,19 @@ func (t *captureTask) SetSessionPlugin(ctx context.Context, plugin string) (stri
 }
 
 // resolveDecoderClient 解析本次会话应使用的 DecoderClient 与 schema registry。
-// 路由规则（GAP 2 修复）：
-//   - 指定插件名（t.plugin != ""）：优先 FindByNameFor 精确路由（owner 作用域，
-//     t.owner 为空时与旧 FindByName 行为一致），名查不到时退化按协议 hint（FindFor），
-//     使 A 项目会话绑 A 插件、B 项目会话绑 B 插件，多项目并行互不干扰。
+// 路由规则（GAP 2 修复 + 项目插件共享）：
+//   - 指定插件名（t.plugin != ""）：先按 owner 候选集精确路由——会话 owner 优先，
+//     其后为 pluginOwners（调用者所属项目的插件归属 owner，gta-mcp 计算后透传）；
+//     名查不到时退化按协议 hint（FindFor），使 A 项目会话绑 A 插件、B 项目会话绑
+//     B 插件，多项目并行互不干扰。
 //   - 未指定插件名：沿用原行为，按 "tcp" 协议 hint 取第一个在线插件（兼容默认抓包场景）。
 //
 // 解析顺序（名精确 → 协议退化）保持不变。
 func (t *captureTask) resolveDecoderClient() (pb.DecoderClient, *schema.Registry, bool) {
 	plugin := t.getPlugin()
 	if plugin != "" {
-		if c, sr, ok := t.registry.FindByNameFor(t.owner, plugin); ok {
+		owners := t.pluginOwnerCandidates()
+		if c, sr, ok := t.registry.FindByNameAmong(owners, plugin); ok {
 			return c, sr, true
 		}
 		if c, sr, ok := t.registry.FindFor(t.owner, plugin); ok {
@@ -741,6 +748,27 @@ func (t *captureTask) resolveDecoderClient() (pb.DecoderClient, *schema.Registry
 		return nil, nil, false
 	}
 	return t.registry.FindFor(t.owner, "tcp")
+}
+
+// pluginOwnerCandidates 返回去重保序的插件解析 owner 候选集：会话 owner 在前，
+// pluginOwners（项目插件归属）在后。owner 为空串时保留（匿名语境按裸名解析）。
+func (t *captureTask) pluginOwnerCandidates() []string {
+	t.pluginMu.RLock()
+	extra := t.pluginOwners
+	t.pluginMu.RUnlock()
+	owners := make([]string, 0, len(extra)+1)
+	seen := map[string]bool{}
+	if _, dup := seen[t.owner]; !dup {
+		seen[t.owner] = true
+		owners = append(owners, t.owner)
+	}
+	for _, o := range extra {
+		if _, dup := seen[o]; !dup {
+			seen[o] = true
+			owners = append(owners, o)
+		}
+	}
+	return owners
 }
 
 // deriveConnID 为无连接标识的包派生 conn_id（幂等：已有则保留）。

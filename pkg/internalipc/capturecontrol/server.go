@@ -38,8 +38,9 @@ type CaptureEngine interface {
 	// DeregisterPlugin 注销指定插件（按 instance_id 或 name）。
 	DeregisterPlugin(ctx context.Context, instanceID, name string) (string, error)
 	// SetSessionPlugin 运行中热切换某抓包会话的解码插件绑定。
+	// pluginOwners 是切换后允许的额外插件 owner 集合（项目成员共用项目插件）。
 	// 返回切换后的实际插件名。
-	SetSessionPlugin(ctx context.Context, sessionID, plugin string) (string, error)
+	SetSessionPlugin(ctx context.Context, sessionID, plugin string, pluginOwners []string) (string, error)
 	// SubscribePlugins 订阅插件注册表状态变化事件流（register/deregister/online/offline）。
 	// 返回的通道在 ctx 取消时关闭。抓包侧借此即时感知插件上下线，避免轮询。
 	SubscribePlugins(ctx context.Context) (<-chan PluginEvent, error)
@@ -108,6 +109,9 @@ type CreateProxyLeaseRequest struct {
 	IncludePorts []int32
 	Device       string
 	ProjectID    string
+	// PluginOwners 允许按名解析解码插件的额外 owner 集合（项目成员共用项目插件）。
+	// 租约保存该集合；自动开抓包与后续 StartLeaseCapture 未显式给出时沿用。
+	PluginOwners []string
 	// NoAutoStart 为 true 时只创建出口、不立即开始抓包（等 StartLeaseCapture）。
 	NoAutoStart bool
 	// NoSticky 为 true 时不复用该 (owner, device) 上次用过的端口。
@@ -121,6 +125,8 @@ type StartLeaseCaptureRequest struct {
 	Plugin       string
 	IncludeHosts []string
 	IncludePorts []int32
+	// PluginOwners 允许按名解析解码插件的额外 owner 集合（项目成员共用项目插件）。
+	PluginOwners []string
 }
 
 // StartLeaseCaptureResult 是开始抓包的结果：本次会话 id + 租约快照。
@@ -226,6 +232,9 @@ type StartSessionRequest struct {
 	Agent bool
 	// ProjectID 会话归属的项目（projects.id），可选，透传自 proto StartCaptureRequest.project_id。
 	ProjectID string
+	// PluginOwners 允许按名解析解码插件的额外 owner 集合（除会话 owner 外）。
+	// gta-mcp 依据调用者所属项目的插件归属计算；空集 = 仅会话 owner 自己的插件。
+	PluginOwners []string
 }
 
 // LiveConfig 对应 proto PcapLiveConfig。
@@ -577,7 +586,7 @@ func (s *Server) DeregisterPlugin(ctx context.Context, req *pb.DeregisterPluginR
 
 // SetSessionPlugin 处理运行中热切换解码插件绑定 RPC。
 func (s *Server) SetSessionPlugin(ctx context.Context, req *pb.SetSessionPluginRequest) (*pb.SetSessionPluginResponse, error) {
-	plugin, err := s.engine.SetSessionPlugin(ctx, req.GetSessionId(), req.GetPlugin())
+	plugin, err := s.engine.SetSessionPlugin(ctx, req.GetSessionId(), req.GetPlugin(), req.GetPluginOwners())
 	if err != nil {
 		return &pb.SetSessionPluginResponse{
 			Ok:         false,
@@ -683,6 +692,7 @@ func (s *Server) StartLeaseCapture(ctx context.Context, req *pb.StartLeaseCaptur
 		Plugin:       req.GetPlugin(),
 		IncludeHosts: req.GetIncludeHosts(),
 		IncludePorts: req.GetIncludePorts(),
+		PluginOwners: req.GetPluginOwners(),
 	})
 	if err != nil {
 		return nil, err

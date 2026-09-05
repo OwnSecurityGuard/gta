@@ -272,9 +272,11 @@ func (m *mcpCapture) handleCreateProxyLease(ctx context.Context, req mcp.CallToo
 		grpcReq.IncludePorts = append(grpcReq.IncludePorts, int32(p))
 	}
 	// 透传调用方身份：pipeline 记录租约归属并做 owner 作用域过滤。
+	// pluginOwners 附带你属项目插件归属 owner：成员在租约抓包也能用项目插件。
 	if p, ok := auth.PrincipalFrom(ctx); ok {
 		grpcReq.Owner = p.Owner
 		grpcReq.AllOwners = p.IsAdmin
+		grpcReq.PluginOwners = m.pluginOwnersFor(ctx, p.Owner)
 	}
 
 	resp, err := m.pipelineClient.CreateProxyLease(ctx, grpcReq)
@@ -387,6 +389,7 @@ func (m *mcpCapture) handleStartLeaseCapture(ctx context.Context, req mcp.CallTo
 	if p, ok := auth.PrincipalFrom(ctx); ok {
 		grpcReq.Owner = p.Owner
 		grpcReq.AllOwners = p.IsAdmin
+		grpcReq.PluginOwners = m.pluginOwnersFor(ctx, p.Owner)
 	}
 
 	resp, err := m.pipelineClient.StartLeaseCapture(ctx, grpcReq)

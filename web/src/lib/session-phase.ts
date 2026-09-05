@@ -74,7 +74,7 @@ export interface PhaseInput {
 
 /** 来源展示名。 */
 function sourceName(source?: string): string {
-  if (source === "agent") return "远程 Agent";
+  if (source === "agent") return "抓包探针";
   if (source === "proxy") return "移动代理";
   return "服务器网卡";
 }
@@ -171,7 +171,7 @@ export function describeSessionPhase(input: PhaseInput): SessionPhaseView {
   const lastSeenAgo = fmtAgo(status?.agent_last_seen_unix);
 
   // 进度条：非 agent 源把「连接 Agent」换成「数据源就绪」，步骤数保持一致。
-  const linkLabel = isAgent ? "连接 Agent" : "连接数据源";
+  const linkLabel = isAgent ? "连接探针" : "连接数据源";
   const steps: PhaseStep[] = [
     { key: "prepare", label: "准备中", state: "pending" },
     { key: "link", label: linkLabel, state: "pending" },
@@ -185,7 +185,7 @@ export function describeSessionPhase(input: PhaseInput): SessionPhaseView {
   const linked = isAgent ? !!status?.agent_connected : true;
   const facts: SessionPhaseView["facts"] = [
     {
-      label: isAgent ? "Agent 已连接" : "数据源就绪",
+      label: isAgent ? "探针已连接" : "数据源就绪",
       ok: linked,
       value: linked ? "✓" : "未连接",
     },
@@ -232,18 +232,18 @@ export function describeSessionPhase(input: PhaseInput): SessionPhaseView {
       setStep("link", "active");
       return {
         phase,
-        title: "等待 Agent 接入",
-        shortTitle: "等待 Agent",
-        detail: "抓包会话已就绪，但还没有 Agent 连上来",
+        title: "等待探针接入",
+        shortTitle: "等待探针",
+        detail: "抓包会话已就绪，但还没有探针连上来",
         tone: "wait",
         steps,
         facts,
         guidance: {
-          title: "还没有 Agent 接入。请：",
+          title: "还没有探针接入。请：",
           steps: [
-            "在目标电脑上下载并运行 GTA Agent（用上面的启动码）",
-            "确认 Agent 与 GTA 服务端网络互通（防火墙放行 ingest 端口）",
-            "Agent 连上后这里会自动变成「等待流量」，无需刷新",
+            "在目标电脑上下载并运行 GTA 探针（用上面的启动码）",
+            "确认探针与 GTA 服务端网络互通（防火墙放行 ingest 端口）",
+            "探针连上后这里会自动变成「等待流量」，无需刷新",
           ],
         },
       };
@@ -253,14 +253,14 @@ export function describeSessionPhase(input: PhaseInput): SessionPhaseView {
       setStep("traffic", "active");
       return {
         phase,
-        title: "Agent 已连接，等待流量",
+        title: "探针已连接，等待流量",
         shortTitle: "已连接·无流量",
         detail: "链路正常，但目标端口还没有产生任何数据",
         tone: "wait",
         steps,
         facts,
         guidance: {
-          title: "Agent 已连接，但还没有捕获到数据。请：",
+          title: "探针已连接，但还没有捕获到数据。请：",
           steps: [
             "启动游戏 / 客户端",
             "在游戏里执行一次会产生网络请求的操作（登录、进入房间、移动）",
@@ -381,7 +381,7 @@ export function describeSessionPhase(input: PhaseInput): SessionPhaseView {
             port > 0
               ? `核对抓包端口 ${port} 与游戏实际端口一致（${PORT_HINT}）`
               : PORT_HINT,
-            isAgent ? "确认 Agent 期间没有断开（断开期间的数据不会补发）" : "确认网卡选择正确（多网卡机器极易选错）",
+            isAgent ? "确认探针期间没有断开（断开期间的数据不会补发）" : "确认网卡选择正确（多网卡机器极易选错）",
           ],
         },
       };

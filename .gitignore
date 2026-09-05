@@ -97,3 +97,7 @@ NUL
 # Local Go workspace (SDK local dev), do not commit
 go.work
 go.work.sum
+
+# Runtime session state / local test artifacts
+current.*.json
+qc

@@ -60,6 +60,22 @@ openssl rand -hex 24   # 输出前加 gta_tok_ 前缀
 
 其余 `.env` 可选项（端口映射 `GTA_*_PORT`、容器内监听地址 `GTA_*_ADDR`、CORS `GTA_MCP_ALLOWED_ORIGINS`、版本注入 `GTA_VERSION`/`GTA_GIT_COMMIT`）见 `.env.example` 内注释。
 
+### 2.2 邀请制与自助注册：新成员获取身份
+
+新成员有两条路径获得个人独立身份（users 表 + 即时生效的 `gta_` token）：
+
+1. **自助注册（默认开放）**：Web UI「设置」弹窗 →「没有令牌？快速开始」输入用户名即可创建身份，无需管理员介入。注册者可立即创建自己的项目、抓原始包；**别人项目的解码插件需要该项目把你加为成员（项目邀请）才能按名解析使用**。接口为 `POST /access/register {"name":"carol"}`；`GTA_AUTH_REGISTER=off` 可显式关闭（封闭团队走纯邀请制）；匿名模式下无意义（恒关闭）。保留名不可注册：env bootstrap 的 owner、匿名 owner `local`、已存在用户。
+2. **邀请码**：持有 token 的成员在 Web UI「我的接入」面板勾选「邀请码：为新成员创建独立身份」，填入新成员用户名后生成邀请码；新成员认领后即获得个人独立身份，而非借用邀请人的身份。
+
+邀请码细节：
+
+- **发放**：`create_access_code` 带 `new_owner` 参数（格式：字母/数字开头，可含 `. _ -`，≤64 字符；同名用户已存在则拒绝）。匿名部署无法发邀请。
+- **认领**：新成员在目标机执行 `curl -fsSL "http://<server>:8781/access/claim?code=<GTA-XXXX>"`，返回 JSON 中的 `token` 即个人凭证（仅此一次展示）；走 setup 脚本接入设备时同样自动创建身份。
+- **管理**：global admin（`:admin` token）可用 `list_users` / `revoke_user` 查看与撤销邀请制用户（含自助注册用户）；撤销即删 users 行，token **立即失效**。env bootstrap 身份（`GTA_AUTH_TOKENS`）不在其列，天然不可被撤销。
+- 注意：env bootstrap token 默认**不是** global admin，需带 `:admin` 后缀才能使用成员管理工具。
+
+**项目插件共享**：项目 admin 在项目页设置的解码插件条目会记录设置者身份；项目成员（member/admin/owner）开始抓包（`start_capture`、租约抓包、`set_session_plugin` 热切换）时，服务端自动把"所属项目插件的归属 owner"加入解析白名单——成员可以用项目插件，但看不到、也不能用项目之外的其他用户插件。
+
 ## 3. 启动与验证
 
 ```bash
@@ -91,13 +107,22 @@ HTTP 路由：`/sse`、`/message`、`/mcp`、`/events/plugins` 均在鉴权链�
 |---|---|
 | `create_project` / `list_projects` / `get_project` / `update_project` / `delete_project` | 项目 CRUD，跨 owner 可见（见下） |
 | `add_project_member` / `remove_project_member` | 项目成员增删；角色仅 `admin`/`member` 两档，不做复杂 RBAC |
+| `transfer_project_owner` | 转移项目 Owner（独立的敏感安全操作；新 Owner 必须已是项目内成员） |
 | `set_project_plugins` / `set_project_rules` | 项目持有的插件/规则条目（关联数据，非独立管理后台） |
-| `set_session_project` | 把既有会话绑定到项目（或空串解除），一键 `start_capture` 也可自动带 `project_id` |
+| `move_session_to_project` | 把既有会话移入项目（或空串解除）；`set_session_project` 为其兼容别名 |
 
-可见性与权限：
+角色与权限（2026-09-05 钉死，角色层级：global admin > Project Owner > Project Admin > Project Member）：
 
-- **可见性**：项目对 `created_by`、成员列表内的人、以及全局 `:admin` 可见（持久化在 `control.sqlite` 的 `projects` 表，跨 owner 共享）。
-- **管理权**：仅项目 `created_by` 或全局 `:admin` 可改/删项目、管理成员与插件/规则（`member` 只读可看、可抓包）。
+| 动作 | Owner | Admin | Member |
+|---|:--:|:--:|:--:|
+| 查看项目 / 项目内会话 / 开始抓包 | ✓ | ✓ | ✓ |
+| 管理成员 / 插件 / 规则 | ✓ | ✓ | ✗ |
+| 修改 / 删除项目 | ✓ | ✗ | ✗ |
+| 转移 Owner | ✓ | ✗ | ✗ |
+
+- **Owner**：`projects.owner` 字段（创建者即首任 Owner）。Owner 不在成员表内；`created_by` 仅为审计字段。
+- **可见性**：项目对 Owner、成员、全局 `:admin` 可见；**项目是协作边界**——成员可见项目内全部会话（含他人创建的），个人会话（未归属项目）仅创建者可见。
+- **会话移动**：`move_session_to_project` 需要调用者对源会话有管理权、对目标项目有成员身份，且租户一致；不是任意可调的裸更新。
 - **一手体验**：Web 首页「我的项目」展示项目在线/离线状态与最近会话；从项目发起抓包自动携带 `project_id`，会话持久化到 `sessions.project_id`。
 
 ```bash

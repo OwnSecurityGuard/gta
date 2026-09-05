@@ -15,8 +15,8 @@ import (
 )
 
 // sqliteReaderOpener 返回一个使用 store.NewSQLiteStore 的 readerOpener，供测试注入。
-func sqliteReaderOpener() func(dbPath string) (captureReader, error) {
-	return func(dbPath string) (captureReader, error) {
+func sqliteReaderOpener() func(dbPath, sessionID string) (captureReader, error) {
+	return func(dbPath, sessionID string) (captureReader, error) {
 		return store.NewSQLiteStore(dbPath, nil)
 	}
 }

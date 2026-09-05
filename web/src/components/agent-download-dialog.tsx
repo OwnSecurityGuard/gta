@@ -70,11 +70,19 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
   const [server, setServer] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // 默认回连 IP：优先取浏览器当前访问的服务端 hostname；取不到时退回服务端探测的 host。
-  const deployHost = [
-    typeof window !== "undefined" ? window.location.hostname : "",
-    opts?.host ?? "",
-  ].find((h) => Boolean(h)) ?? "";
+  // 默认回连 IP：优先取浏览器当前访问的服务端 hostname；但 localhost/127.0.0.1/::1
+  // 对远端探针不可达（探针拿到会回连它自己），此时退回服务端探测的 LAN IP（opts.host）。
+  // 两者都拿不到时留空，由用户手填（下载按钮不因此禁用）。
+  const browserHost =
+    typeof window !== "undefined" ? window.location.hostname : "";
+  const isLoopbackHost = (h: string) =>
+    !h ||
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    h === "::1" ||
+    h === "[::1]" ||
+    h.endsWith(".localhost");
+  const deployHost = [browserHost, opts?.host ?? ""].find((h) => !isLoopbackHost(h)) ?? "";
 
   // 打开/拿到平台时：预填回连地址，并按用户 UA 推荐首个可用平台。
   useEffect(() => {
@@ -117,12 +125,19 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
     return "";
   }
 
-  function validServer(value: string): boolean {
-    if (!value.trim()) return false;
-    const m = /^[^:\s]+:\d{1,5}$/.exec(value.trim());
-    if (!m) return false;
-    const p = Number(m[1]);
-    return p >= 1 && p <= 65535;
+  /**
+   * 宽容解析回连地址：容忍全角冒号（中文 IME）、http(s):// 前缀、尾随斜杠/路径、
+   * 首尾空白。返回规范化的 host:port；无法解析返回 null（调用方据此报错并回显原值）。
+   */
+  function parseServer(raw: string): string | null {
+    let v = raw.trim();
+    if (!v) return null;
+    v = v.replace(/：/g, ":").replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, "").replace(/[\\/]+.*$/, "");
+    const m = /^(\[[0-9a-fA-F:]+\]|[^:\s]+):(\d{1,5})$/.exec(v);
+    if (!m) return null;
+    const p = Number(m[2]);
+    if (!(p >= 1 && p <= 65535)) return null;
+    return `${m[1]}:${p}`;
   }
 
   async function handleDownload() {
@@ -135,12 +150,17 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
       toast.error("请选择操作系统", "当前没有任何可下载的平台产物");
       return;
     }
-    const addr = server.trim() || defaultServer();
-    if (!validServer(addr)) {
-      toast.error("请填写有效的回连地址", "格式 host:port，如 192.168.1.10:9091");
+    const rawAddr = server.trim() || defaultServer();
+    const addr = parseServer(rawAddr);
+    if (!addr) {
+      toast.error(
+        "回连地址格式无效",
+        `需要 host:port（如 192.168.1.10:9091），实际收到「${rawAddr.trim() || "（空）"}」`,
+      );
       return;
     }
-    if (!deployHost || !opts?.registry_port) {
+    setServer(addr);
+    if (!opts?.registry_port) {
       toast.error("服务端信息未就绪", "请稍后重试");
       return;
     }
@@ -156,7 +176,7 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
       const resp = await fetch(url, { headers: authHeaders() });
       if (!resp.ok) {
         const txt = (await resp.text().catch(() => "")) || `HTTP ${resp.status}`;
-        toast.error("Agent 下载失败", txt.slice(0, 200));
+        toast.error("探针下载失败", txt.slice(0, 200));
         return;
       }
       const newSessionId = resp.headers.get("X-Session-Id") ?? "";
@@ -174,10 +194,10 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
       if (newSessionId) {
         setSessionId(newSessionId);
         setPhase("awaiting");
-        toast.success("Agent 已下载", `抓包端口 ${p}，等待 Agent 连接`);
+        toast.success("探针已下载", `抓包端口 ${p}，等待探针连接`);
         return;
       }
-      toast.success("Agent 下载已触发");
+      toast.success("探针下载已触发");
     } catch (e) {
       toast.error("下载失败", e instanceof Error ? e.message : String(e));
     } finally {
@@ -190,13 +210,13 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
     mode === "quick"
       ? "我的接入"
       : phase === "awaiting"
-        ? "等待 Agent 连接"
-        : "下载远程 Agent";
+        ? "等待探针连接"
+        : "下载抓包探针";
   const dialogDesc =
     mode === "quick"
       ? "生成一次性启动码，在目标机执行复制到的命令即可免参数注册并回连抓包。"
       : phase === "awaiting"
-        ? "在目标电脑解压并双击运行 Agent，GTA 会自动回连并开始抓包。"
+        ? "在目标电脑解压并双击运行探针，GTA 会自动回连并开始抓包。"
         : "选择目标操作系统与抓包端口后下载，回连地址、token 与会话都已打入 zip，运行即可免参数抓包上报。";
 
   return (
@@ -211,7 +231,7 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
           <>
             <Button variant="outline" onClick={() => setPhase("configure")}>
               <Download className="h-4 w-4" />
-              下载另一个 Agent
+              下载另一个探针
             </Button>
             <Button
               variant="outline"
@@ -232,9 +252,9 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
               <X className="h-4 w-4" />
               关闭
             </Button>
-            <Button onClick={handleDownload} disabled={busy || isLoading || !opts?.host}>
+            <Button onClick={handleDownload} disabled={busy || isLoading || !opts?.registry_port}>
               <Download className="h-4 w-4" />
-              {busy ? "打包下载中…" : "下载 Agent"}
+              {busy ? "打包下载中…" : "下载探针"}
             </Button>
           </>
         ) : (
@@ -320,7 +340,7 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
                 <span className="text-muted-foreground">可达 IP</span>
                 <span>{deployHost}</span>
                 <span className="text-muted-foreground">registry 端口</span>
-                <span>{opts.registry_port}（Agent 回连）</span>
+                <span>{opts.registry_port}（探针回连）</span>
                 <span className="text-muted-foreground">ingest 端口</span>
                 <span>{opts.ingest_port}（推送抓包数据）</span>
               </div>
@@ -339,7 +359,7 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
               className="mt-1.5 font-mono"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Agent 将抓取该电脑上对该端口的 TCP/UDP 流量（自动生成 BPF 过滤）并推送到服务端会话。
+              探针将抓取该电脑上对该端口的 TCP/UDP 流量（自动生成 BPF 过滤）并推送到服务端会话。
             </p>
           </div>
 
@@ -367,18 +387,18 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
           <div>
             <label className="flex items-center gap-1.5 text-sm font-medium">
               <Radio className="h-3.5 w-3.5 text-muted-foreground" />
-              Agent 回连地址（host:port）
+              探针回连地址（host:port）
             </label>
             <Input
               value={server}
               onChange={(e) => setServer(e.target.value)}
-              aria-label="Agent 回连地址"
+              aria-label="探针回连地址"
               placeholder={defaultServer() || "192.168.1.10:9091"}
               spellCheck={false}
               className="mt-1.5 font-mono"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              端口必须是上面的 registry 端口；IP 需为远端 Agent 可达的地址（默认已填入当前服务部署 IP）。
+              端口必须是上面的 registry 端口；IP 需为远端探针可达的地址（默认已填入当前服务部署 IP）。
             </p>
           </div>
         </div>
@@ -430,20 +450,20 @@ function AwaitingAgentPanel({
 }) {
   const steps = [
     {
-      label: "Agent 已生成并下载",
+      label: "探针已生成并下载",
       detail: "已在服务端创建接收会话，zip 已保存到浏览器下载目录",
       done: true,
     },
     {
-      label: "解压并双击运行 Agent",
+      label: "解压并双击运行探针",
       detail: "在目标电脑解压 zip，双击运行 gta-agent（.exe 视平台而定）",
       done: true,
     },
     {
-      label: attached ? "Agent 已连接 · 抓包中" : "等待 Agent 连接…",
+      label: attached ? "探针已连接 · 抓包中" : "等待探针连接…",
       detail: attached
         ? `已收到 ${packets.toLocaleString()} packets · 已解析 ${events.toLocaleString()} events`
-        : "Agent 正在回连服务端，连接建立后会自动开始抓包（无需任何参数）",
+        : "探针正在回连服务端，连接建立后会自动开始抓包（无需任何参数）",
       done: attached,
     },
   ];
@@ -482,8 +502,8 @@ function AwaitingAgentPanel({
         </div>
       ) : (
         <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-          正在等待 Agent 回连… 若长时间无变化，请确认目标电脑能访问上面的回连地址，且压缩包中的
-          config.embedded.json 与 Agent 在同一目录。
+          正在等待探针回连… 若长时间无变化，请确认目标电脑能访问上面的回连地址，且压缩包中的
+          config.embedded.json 与探针在同一目录。
         </p>
       )}
     </div>

@@ -5,7 +5,7 @@ import { describeSessionPhase } from "@/lib/session-phase";
 import { SessionPhaseTracker } from "@/components/session-phase-tracker";
 
 function sourceName(source: string): string {
-  if (source === "agent") return "远程 Agent";
+  if (source === "agent") return "抓包探针";
   if (source === "proxy") return "手机代理";
   return "服务器抓包";
 }

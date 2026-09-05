@@ -63,7 +63,7 @@ func (f *fakeEngine) SampleBytes(ctx context.Context, req SampleBytesRequest) (S
 	f.sampleLastReq = req
 	return f.sampleResult, f.sampleErr
 }
-func (f *fakeEngine) SetSessionPlugin(ctx context.Context, sessionID, plugin string) (string, error) {
+func (f *fakeEngine) SetSessionPlugin(ctx context.Context, sessionID, plugin string, pluginOwners []string) (string, error) {
 	return plugin, nil
 }
 func (f *fakeEngine) SubscribePlugins(ctx context.Context) (<-chan PluginEvent, error) {

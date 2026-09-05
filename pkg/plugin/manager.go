@@ -535,6 +535,62 @@ func (s *RegistryServer) FindByNameFor(owner, name string) (pb.DecoderClient, *s
 	return s.findByKey(owner, pluginKeyCandidates(owner, name))
 }
 
+// FindByNameAmong 是多 owner 候选版的 FindByNameFor：依序尝试 owners 中每个
+// owner 的候选键（owner/name 优先、裸名退化），返回第一个在线命中。
+// 用于项目成员共用项目插件：owners = 会话 owner + 所属项目插件条目的归属 owner。
+// 隔离语义：只允许命中 owners 集合内的插件（匿名/系统插件恒可见，与单 owner 版一致）；
+// 含 "/" 的完整键仍要求键内 owner 属于集合，不能越权寻址。
+// owners 为空时行为等价 FindByNameFor("", name)。
+func (s *RegistryServer) FindByNameAmong(owners []string, name string) (pb.DecoderClient, *schema.Registry, bool) {
+	keys, allowed := amongCandidates(owners, name)
+	if len(keys) == 0 {
+		return s.FindByNameFor("", name)
+	}
+	return s.findByKeyAllowed(keys, allowed)
+}
+
+// amongCandidates 汇总多 owner 的查找键（去重保序）与 owner 白名单。
+// 空串 owner 恒在白名单内（匿名/系统插件对所有人可见）。
+func amongCandidates(owners []string, name string) ([]string, map[string]bool) {
+	allowed := make(map[string]bool, len(owners)+1)
+	allowed[""] = true
+	var keys []string
+	seen := map[string]bool{}
+	for _, o := range owners {
+		allowed[o] = true
+		for _, k := range pluginKeyCandidates(o, name) {
+			if !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
+		}
+	}
+	return keys, allowed
+}
+
+// findByKeyAllowed 是 findByKey 的多 owner 白名单变体：命中键后校验插件 owner
+// 必须在 allowed 集合内。与 findByKey 的差异：某个 owner 的同名实例离线时
+// 继续尝试后续候选（多 owner 共用同名插件时，取第一个在线的）。全部检查锁内完成。
+func (s *RegistryServer) findByKeyAllowed(keys []string, allowed map[string]bool) (pb.DecoderClient, *schema.Registry, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, key := range keys {
+		id, ok := s.byName[key]
+		if !ok {
+			continue
+		}
+		rp, ok := s.plugins[id]
+		if !ok || !rp.Online.Load() || rp.Client == nil {
+			continue
+		}
+		if !allowed[rp.Owner] {
+			return nil, nil, false
+		}
+		return rp.Client, rp.SchemaRegistry(), true
+	}
+	return nil, nil, false
+}
+
 // findByKey 依序尝试候选键查找在线插件（全部候选检查在 RLock 内完成，
 // 避免与 Register/Deregister 的 map 写并发）；隧道插件绑定前（Client nil）
 // 不可见。callerOwner 用于隔离校验：即使按完整键（owner/name）寻址，
@@ -579,6 +635,33 @@ func (s *RegistryServer) GetPluginManifestFor(owner, name string) ([]byte, error
 		}
 		if rp.Owner != "" && rp.Owner != owner {
 			return nil, fmt.Errorf("plugin %q not found", name)
+		}
+		return yaml.Marshal(rp.Manifest)
+	}
+	return nil, fmt.Errorf("plugin %q not found", name)
+}
+
+// GetPluginManifestAmong 是多 owner 候选版的 GetPluginManifestFor（隔离语义同
+// FindByNameAmong：只允许命中 owners 白名单内的插件）。用于会话创建时的
+// manifest 快照：会话 owner 自己的插件查不到时，按项目插件归属 owner 依次尝试。
+func (s *RegistryServer) GetPluginManifestAmong(owners []string, name string) ([]byte, error) {
+	keys, allowed := amongCandidates(owners, name)
+	if len(keys) == 0 {
+		return s.GetPluginManifestFor("", name)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, key := range keys {
+		id, ok := s.byName[key]
+		if !ok {
+			continue
+		}
+		rp, ok := s.plugins[id]
+		if !ok {
+			continue
+		}
+		if !allowed[rp.Owner] {
+			return nil, fmt.Errorf("plugin %q not accessible", name)
 		}
 		return yaml.Marshal(rp.Manifest)
 	}

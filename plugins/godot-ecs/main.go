@@ -15,9 +15,20 @@ func main() {
 	// 注意隧道与非隧道都要带 token：两种模式只是「谁拨谁」不同，
 	// Register 走的是同一条鉴权链路，非隧道路径漏传 token 会被 registry 直接拒。
 	sdk.RunRegisterLoopWithOptions(decodePacket, sdk.RegisterOptions{
-		Tunnel:    os.Getenv("GTA_TUNNEL") != "",
-		AuthToken: os.Getenv("GTA_AUTH_TOKEN"),
+		Tunnel: os.Getenv("GTA_TUNNEL") != "",
+		// token 来源：优先 GTA_AUTH_TOKEN 环境变量（gta-agent 托管模式会注入）；
+		// 回退到 zzz 的自助注册 token——IDE go run 不好传 env，先保住插件归属，
+		// 换正式身份/改用脚本启动时删掉回退值。（SDK 侧同样有 env 回退逻辑。）
+		AuthToken: envOr("GTA_AUTH_TOKEN", "gta_b8f3ffe5e91fce6b785e8d728d541492359e88027e388c14"),
 	})
+}
+
+// envOr 取环境变量，未设置时回退默认值。
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // decodePacket 实现 sdk.DecodeFuncV2（gta.decoder/v2）。

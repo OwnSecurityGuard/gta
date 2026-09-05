@@ -21,6 +21,8 @@ export interface AccessCode {
   claimed?: boolean;
   /** 认领后建立的服务端会话 */
   session_id?: string;
+  /** 非空表示邀请码：认领时为该名字创建独立身份 */
+  new_owner?: string;
 }
 
 /** create_access_code 返回：新建的启动码。 */
@@ -33,6 +35,10 @@ export interface CreateAccessCodeResult {
   port?: number;
   platform?: string;
   expires_at: string;
+  /** 邀请码标记：new_owner 非空时为 true */
+  invite?: boolean;
+  /** 邀请码目标身份名 */
+  new_owner?: string;
 }
 
 /** list_access_codes 返回：当前用户可见的启动码列表。 */
@@ -40,4 +46,30 @@ export interface ListAccessCodesResult {
   ok?: boolean;
   error?: string;
   codes: AccessCode[];
+}
+
+/** 邀请制用户条目（list_users 返回；不含 token —— 凭证只在创建时展示一次）。 */
+export interface GtaUser {
+  owner: string;
+  is_admin?: boolean;
+  tenant_id?: string;
+  created_by?: string;
+  created_at: string;
+}
+
+/** list_users 返回：成员账号列表 + env bootstrap 身份（仅 global admin）。 */
+export interface ListUsersResult {
+  ok?: boolean;
+  error?: string;
+  users: GtaUser[];
+  /** env bootstrap（GTA_AUTH_TOKENS）身份名：不在 users 表、不可撤销，仅展示。 */
+  bootstrap_owners?: string[];
+}
+
+/** revoke_user 返回。 */
+export interface RevokeUserResult {
+  ok?: boolean;
+  error?: string;
+  owner: string;
+  revoked?: boolean;
 }

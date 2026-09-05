@@ -13,7 +13,7 @@ import (
 	"gta/pkg/store"
 )
 
-// newProjectMCP 构造带真实 projectStore + ControlStore 的 mcpCapture。
+// newProjectMCP 构造带真实 projectStore + ControlStore + projectAuthorizer 的 mcpCapture。
 func newProjectMCP(t *testing.T) (*mcpCapture, *store.ControlStore) {
 	t.Helper()
 	cs, err := store.NewControlStore(filepath.Join(t.TempDir(), "control.sqlite"))
@@ -25,7 +25,7 @@ func newProjectMCP(t *testing.T) (*mcpCapture, *store.ControlStore) {
 	if err := ps.Init(); err != nil {
 		t.Fatal(err)
 	}
-	return &mcpCapture{projects: ps, controlStore: cs}, cs
+	return &mcpCapture{projects: ps, controlStore: cs, authz: newProjectAuthorizer(ps)}, cs
 }
 
 func ctxOwner(owner string) context.Context {
@@ -117,26 +117,191 @@ func TestProjectMemberCannotManage(t *testing.T) {
 		t.Fatalf("add member failed: %s", text)
 	}
 
-	// bob 尝试 add_project_member → forbidden。
+	// bob（member）尝试 add_project_member → 拒绝。
+	// 语义（2026-09-05）：不可见统一按 not found 处理，不泄露项目存在性。
 	breq := mcp.CallToolRequest{}
 	breq.Params.Arguments = map[string]any{"project_id": id, "user": "carol", "role": "member"}
 	bres, err := m.handleAddProjectMember(ctxOwner("bob"), breq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text := resultText(t, bres); !strings.Contains(text, "forbidden") {
-		t.Errorf("bob add_project_member should be forbidden: %s", text)
+	if text := resultText(t, bres); !strings.Contains(text, "not found") {
+		t.Errorf("bob add_project_member should be rejected: %s", text)
 	}
 
-	// bob 尝试 set_project_plugins → forbidden。
+	// bob 尝试 set_project_plugins → 拒绝。
 	preq := mcp.CallToolRequest{}
 	preq.Params.Arguments = map[string]any{"project_id": id, "plugins": `[{"id":"p1","name":"http"}]`}
 	pres, err := m.handleSetProjectPlugins(ctxOwner("bob"), preq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text := resultText(t, pres); !strings.Contains(text, "forbidden") {
-		t.Errorf("bob set_project_plugins should be forbidden: %s", text)
+	if text := resultText(t, pres); !strings.Contains(text, "not found") {
+		t.Errorf("bob set_project_plugins should be rejected: %s", text)
+	}
+}
+
+// TestProjectSessionCollaborationBoundary 验证项目是协作边界（方案 D1-A）：
+// 项目成员能看到项目内他人创建的会话；项目外用户不能。
+func TestProjectSessionCollaborationBoundary(t *testing.T) {
+	m, cs := newProjectMCP(t)
+	ctx := context.Background()
+	id := createProjectAs(t, m, "alice")
+
+	// alice 添加 bob 为 member。
+	areq := mcp.CallToolRequest{}
+	areq.Params.Arguments = map[string]any{"project_id": id, "user": "bob", "role": "member"}
+	if _, err := m.handleAddProjectMember(ctxOwner("alice"), areq); err != nil {
+		t.Fatal(err)
+	}
+
+	// alice（owner）创建会话并绑到项目。
+	sessionID := "s-collab-1"
+	if err := cs.CreateSession(ctx, store.SessionMeta{
+		Owner: "alice", SessionID: sessionID, Status: "running", Plugin: "http",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mreq := mcp.CallToolRequest{}
+	mreq.Params.Arguments = map[string]any{"session_id": sessionID, "project_id": id}
+	if _, err := m.handleMoveSessionToProject(ctxOwner("alice"), mreq); err != nil {
+		t.Fatal(err)
+	}
+
+	// bob（member）get_project 的 recent_sessions 应包含 alice 的会话。
+	greq := mcp.CallToolRequest{}
+	greq.Params.Arguments = map[string]any{"id": id}
+	gres, err := m.handleGetProject(ctxOwner("bob"), greq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := resultText(t, gres); !strings.Contains(text, sessionID) {
+		t.Errorf("member bob must see project sessions (collab boundary): %s", text)
+	}
+
+	// tom（非成员）get_project → not found。
+	tres, err := m.handleGetProject(ctxOwner("tom"), greq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := resultText(t, tres); !strings.Contains(text, "not found") {
+		t.Errorf("tom must not see project: %s", text)
+	}
+}
+
+// TestTransferProjectOwnerFlow 验证 transfer_project_owner 工具流：
+// owner 可转移给项目内成员；新 owner 生效、旧 owner 降为 admin 成员；
+// member 无权发起转移；目标必须是项目内成员。
+func TestTransferProjectOwnerFlow(t *testing.T) {
+	m, _ := newProjectMCP(t)
+	id := createProjectAs(t, m, "alice")
+
+	// alice 添加 bob（admin）、carol（member）。
+	for u, r := range map[string]string{"bob": "admin", "carol": "member"} {
+		req := mcp.CallToolRequest{}
+		req.Params.Arguments = map[string]any{"project_id": id, "user": u, "role": r}
+		if _, err := m.handleAddProjectMember(ctxOwner("alice"), req); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// carol（member）无权发起转移。
+	creq := mcp.CallToolRequest{}
+	creq.Params.Arguments = map[string]any{"project_id": id, "new_owner": "carol"}
+	res, err := m.handleTransferProjectOwner(ctxOwner("carol"), creq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := resultText(t, res); !strings.Contains(text, "not found") {
+		t.Errorf("member transfer must be rejected: %s", text)
+	}
+
+	// 目标是项目外用户（tom）→ 拒绝。
+	treq := mcp.CallToolRequest{}
+	treq.Params.Arguments = map[string]any{"project_id": id, "new_owner": "tom"}
+	res, err = m.handleTransferProjectOwner(ctxOwner("alice"), treq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := resultText(t, res); !strings.Contains(text, "must be an existing member") {
+		t.Errorf("outsider cannot become owner: %s", text)
+	}
+
+	// alice → bob 转移成功。
+	breq := mcp.CallToolRequest{}
+	breq.Params.Arguments = map[string]any{"project_id": id, "new_owner": "bob"}
+	res, err = m.handleTransferProjectOwner(ctxOwner("alice"), breq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := resultText(t, res); strings.Contains(text, `"ok":false`) {
+		t.Fatalf("transfer failed: %s", text)
+	}
+	p, err := m.projects.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Owner != "bob" {
+		t.Errorf("owner = %q, want bob", p.Owner)
+	}
+	// bob 现在可以删除项目（owner 全权），alice 降为 admin 仍可管成员但不能删。
+	dreq := mcp.CallToolRequest{}
+	dreq.Params.Arguments = map[string]any{"id": "nonexistent"}
+	_ = dreq // 删除路径在 TestProjectDeleteByOwnerOnly 中验证
+	foundAlice := false
+	foundBob := false
+	for _, mm := range p.Members {
+		if mm.User == "alice" && mm.Role == roleAdmin {
+			foundAlice = true
+		}
+		if mm.User == "bob" {
+			foundBob = true
+		}
+	}
+	if !foundAlice {
+		t.Errorf("previous owner alice should be demoted to admin member: %+v", p.Members)
+	}
+	if foundBob {
+		t.Errorf("new owner bob should not sit in members table: %+v", p.Members)
+	}
+}
+
+// TestProjectDeleteByOwnerOnly 验证删除项目仅 Owner / global admin：
+// project admin 成员可管成员，但不能删除项目。
+func TestProjectDeleteByOwnerOnly(t *testing.T) {
+	m, _ := newProjectMCP(t)
+	id := createProjectAs(t, m, "alice")
+
+	// bob 为 admin 成员。
+	areq := mcp.CallToolRequest{}
+	areq.Params.Arguments = map[string]any{"project_id": id, "user": "bob", "role": "admin"}
+	if _, err := m.handleAddProjectMember(ctxOwner("alice"), areq); err != nil {
+		t.Fatal(err)
+	}
+
+	// bob（admin）可加成员，但删除项目被拒。
+	dreq := mcp.CallToolRequest{}
+	dreq.Params.Arguments = map[string]any{"project_id": id, "user": "carol", "role": "member"}
+	if _, err := m.handleAddProjectMember(ctxOwner("bob"), dreq); err != nil {
+		t.Fatal(err)
+	}
+	delreq := mcp.CallToolRequest{}
+	delreq.Params.Arguments = map[string]any{"id": id}
+	res, err := m.handleDeleteProject(ctxOwner("bob"), delreq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := resultText(t, res); !strings.Contains(text, "not found") {
+		t.Errorf("project admin must not delete project: %s", text)
+	}
+
+	// alice（owner）删除成功。
+	res, err = m.handleDeleteProject(ctxOwner("alice"), delreq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := resultText(t, res); strings.Contains(text, `"ok":false`) {
+		t.Fatalf("owner delete failed: %s", text)
 	}
 }
 
@@ -184,7 +349,7 @@ func TestProjectAdminRoleCanManage(t *testing.T) {
 	erreq.Params.Arguments = map[string]any{"project_id": id, "plugins": `[]`}
 	if res, err := m.handleSetProjectPlugins(ctxOwner("carol"), erreq); err != nil {
 		t.Fatal(err)
-	} else if text := resultText(t, res); !strings.Contains(text, "forbidden") {
+	} else if text := resultText(t, res); !strings.Contains(text, "not found") {
 		t.Errorf("carol (member role) must not manage: %s", text)
 	}
 }

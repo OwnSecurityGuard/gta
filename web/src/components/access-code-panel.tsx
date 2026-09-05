@@ -9,7 +9,11 @@ import {
   MonitorSmartphone,
   Clock,
 } from "lucide-react";
-import { useAgentDownloadOptions, useCreateAccessCode, useProjects } from "@/hooks/use-mcp";
+import {
+  useAgentDownloadOptions,
+  useCreateAccessCode,
+  useProjects,
+} from "@/hooks/use-mcp";
 import { DeviceStatusList } from "@/components/device-status";
 import { toast } from "@/components/ui/toast";
 import type { CreateAccessCodeResult } from "@/types/access-code";
@@ -30,9 +34,10 @@ function formatExpiry(ts: string): string {
 }
 
 /**
- * 「我的接入」面板（启动码为主，高级下载收纳为折叠项）：
- * 普通用户选平台 + 端口（可选绑项目）→ 生成 GTA-XXXX 启动码 → 复制一条接入命令，
- * 在目标机执行即可自动注册设备、领取配置并回连抓包，全程无需手填 token/回连地址/会话。
+ * 「我的接入」面板（纯设备接入）：普通用户选平台 + 端口（可选绑项目）→
+ * 生成 GTA-XXXX 启动码 → 复制一条接入命令，在目标机执行即可自动注册设备、
+ * 领取配置并回连抓包，全程无需手填 token/回连地址/会话。
+ * 成员管理（邀请码/账号列表）已拆分至 members-admin-dialog。
  */
 export function AccessCodePanel() {
   const { data, isLoading } = useAgentDownloadOptions();

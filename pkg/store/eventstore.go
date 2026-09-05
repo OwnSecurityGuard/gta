@@ -89,20 +89,39 @@ type SessionStore interface {
 	DeleteSession(ctx context.Context, sessionID string) error
 }
 
-// SessionOwnerFilter 描述会话查询的 owner 可见性。
+// SessionOwnerFilter 描述会话查询的可见性。
 //
-// Owner 为空串表示匿名（本地单机用法）：只看 owner=” 的会话。
-// AllOwners 为 true（admin）时不过滤，可看到所有 owner 的会话。
+// 基础轴是 owner：Owner 为空串表示匿名（本地单机用法），只看 owner=” 的会话；
+// AllOwners 为 true（admin）时不过滤。
+//
+// ProjectIDs 是项目协作轴的扩展：归属这些项目的会话对调用者同样可见
+// （项目是协作边界，成员可见项目内全部会话）。store 不理解 project 语义，
+// 只把 id 列表当作可见性扩展条件；调用方负责先鉴权项目可见性再填充。
+//
 // 兼容约定：无过滤（ListSessions/GetSession）等价于 AllOwners=true，
 // 保证既有调用方行为完全不变。
 type SessionOwnerFilter struct {
-	Owner     string
-	AllOwners bool
+	Owner      string
+	AllOwners  bool
+	ProjectIDs []string // 归属这些项目的会话同样可见（OR 语义）
 }
 
 // Matches 判断 meta 是否对该过滤器可见。
 func (f SessionOwnerFilter) Matches(meta SessionMeta) bool {
-	return f.AllOwners || meta.Owner == f.Owner
+	if f.AllOwners {
+		return true
+	}
+	if meta.Owner == f.Owner {
+		return true
+	}
+	if meta.ProjectID != "" {
+		for _, id := range f.ProjectIDs {
+			if meta.ProjectID == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ===== 查询参数类型 =====
@@ -219,8 +238,14 @@ type ColumnSchema struct {
 type SessionMeta struct {
 	// Owner 是会话归属者（pkg/auth 的 Principal.Owner）。
 	// 空串表示匿名（本地单机用法）。一等字段，持久化到 sessions.owner 列。
+	// 语义（2026-09-05 钉死）：owner = 创建者 = 归属者。对项目会话（ProjectID != ''）
+	// 它退化为审计字段，不参与可见性判定；对个人会话它是唯一权限依据。
 	Owner string `json:"owner,omitempty"`
-	// ProjectID 是会话所属的项目（projects.id）。空串表示未归属任何项目。
+	// TenantID 是资源归属租户。空串等价于 authz.DefaultTenant。
+	// 当前部署没有组织实体，全部为默认租户；字段先行，实体后补。
+	TenantID string `json:"tenant_id,omitempty"`
+	// ProjectID 是会话所属的项目（projects.id）。空串表示未归属任何项目
+	//（个人会话，语义上等价于 NULL）。
 	// 一等字段，持久化到 sessions.project_id 列。
 	ProjectID    string         `json:"project_id,omitempty"`
 	SessionID    string         `json:"session_id"`
@@ -245,3 +270,36 @@ type SessionMeta struct {
 	// 空字符串表示会话创建时未获取到 manifest（如插件未注册）。
 	ManifestSnapshot string `json:"manifest_snapshot,omitempty"`
 }
+
+// ===== 第 4 层：连接聚合查询 =====
+
+// ConnectionQuerier 由 gta-mcp 使用，按连接聚合代理抓包数据（Connections 页面）。
+// SQLiteStore 与 PGStore 均实现。
+type ConnectionQuerier interface {
+	QueryConnections(ctx context.Context, sessionID string, limit, offset int) ([]ConnectionSummary, error)
+	QueryConnectionDetail(ctx context.Context, sessionID, connID string) (*ConnectionDetail, error)
+	QueryConnectionEvents(ctx context.Context, sessionID, connID string, limit, offset int) ([]*event.Event, error)
+	QueryConnectionStreams(ctx context.Context, sessionID, connID string, limit, offset int) ([]ConnectionStream, error)
+	QueryConnectionFrames(ctx context.Context, connID string, limit, offset int) ([]ConnectionFrame, error)
+}
+
+// Clearer 离线重解码前清空旧解码结果（保留 raw_packets）。
+type Clearer interface {
+	ClearDecodedData(ctx context.Context) error
+}
+
+// Store 是事件存储的完整能力集合：写入（Pipeline）+ 读取（MCP）+ 连接聚合。
+// SQLiteStore 与 PGStore 均实现该接口；切换后端（sqlite/postgres）时实现该接口即可，
+// 调用方（gta-pipeline / gta-mcp）统一持有 Store，不感知具体后端。
+type Store interface {
+	EventWriter
+	EventReader
+	EventPager
+	ProjectionWriter
+	ProjectionReader
+	ConnectionQuerier
+	Clearer
+}
+
+// 编译期断言：SQLiteStore 实现完整 Store 接口。
+var _ Store = (*SQLiteStore)(nil)

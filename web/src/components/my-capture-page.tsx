@@ -29,7 +29,7 @@ function sourceLabel(source: string) {
     case "proxy":
       return "手机代理";
     case "agent":
-      return "远程 Agent";
+      return "抓包探针";
     default:
       return "服务器抓包";
   }
@@ -126,7 +126,7 @@ export function MyCapturePage({
                 <Laptop className="h-6 w-6 text-primary" />
                 <p className="mt-2.5 text-sm font-medium">我的电脑</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  在我的电脑上运行 GTA Agent，接入后开始抓包
+                  在我的电脑上运行 GTA 探针，接入后开始抓包
                 </p>
               </button>
               <button

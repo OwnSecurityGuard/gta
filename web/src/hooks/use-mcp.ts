@@ -48,7 +48,12 @@ import type {
   StopLeaseCaptureVars,
 } from "@/types/proxy";
 import type { GetAgentDownloadOptionsResult } from "@/types/agent";
-import type { CreateAccessCodeResult, ListAccessCodesResult } from "@/types/access-code";
+import type {
+  CreateAccessCodeResult,
+  ListAccessCodesResult,
+  ListUsersResult,
+  RevokeUserResult,
+} from "@/types/access-code";
 import type {
   ListProjectsResult,
   ProjectResult,
@@ -470,7 +475,20 @@ export function useProject(id?: string) {
   });
 }
 
-/** set_session_project：把会话绑定到某个项目。成功后失效 sessions 缓存。 */
+/** move_session_to_project：把会话移入/移出项目（后端六步鉴权收口）。 */
+export function useMoveSessionToProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { session_id: string; project_id?: string }) =>
+      mcpClient.callTool<{ ok?: boolean }>("move_session_to_project", v),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["sessions"] });
+      void qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
+/** @deprecated 兼容旧后端：改用 useMoveSessionToProject。 */
 export function useSetSessionProject() {
   const qc = useQueryClient();
   return useMutation({
@@ -480,15 +498,18 @@ export function useSetSessionProject() {
   });
 }
 
-/** add_project_member：向项目添加成员。 */
+/** add_project_member：向项目添加成员。pending=true 表示用户名尚未注册（预邀请，对方注册同名后生效）。 */
 export function useAddProjectMember(projectId?: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { user: string; role: ProjectRole }) =>
-      mcpClient.callTool<{ ok?: boolean }>("add_project_member", {
+      mcpClient.callTool<{ ok?: boolean; pending?: boolean }>("add_project_member", {
         project_id: projectId, ...v,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["project", projectId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["project", projectId] });
+      void qc.invalidateQueries({ queryKey: ["projects"] });
+    },
   });
 }
 
@@ -864,7 +885,8 @@ export function useAccessCodes() {
   });
 }
 
-/** create_access_code：生成一个绑定当前用户的启动码（可选绑项目/插件/端口/平台/回连地址）。 */
+/** create_access_code：生成一个绑定当前用户的启动码（可选绑项目/插件/端口/平台/回连地址）。
+ *  newOwner 非空时为邀请码：认领时为该名字创建独立身份（users 表）。 */
 export function useCreateAccessCode() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -874,6 +896,7 @@ export function useCreateAccessCode() {
       port?: number;
       platform?: string;
       server?: string;
+      newOwner?: string;
     }) =>
       mcpClient.callTool<CreateAccessCodeResult>("create_access_code", {
         project_id: vars.projectId ?? "",
@@ -881,9 +904,31 @@ export function useCreateAccessCode() {
         port: vars.port ?? 0,
         platform: vars.platform ?? "",
         server: vars.server ?? "",
+        new_owner: vars.newOwner ?? "",
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["accessCodes"] });
+    },
+  });
+}
+
+/** list_users：列出邀请制用户（仅 global admin；非 admin 调用会抛错，由调用方降级隐藏）。 */
+export function useListUsers() {
+  return useQuery({
+    queryKey: ["users"],
+    queryFn: () => mcpClient.callTool<ListUsersResult>("list_users"),
+    staleTime: 15_000,
+  });
+}
+
+/** revoke_user：撤销邀请制用户（删除 users 行，token 即时失效；仅 global admin）。 */
+export function useRevokeUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { owner: string }) =>
+      mcpClient.callTool<RevokeUserResult>("revoke_user", { owner: vars.owner }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["users"] });
     },
   });
 }

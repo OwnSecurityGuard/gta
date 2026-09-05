@@ -14,14 +14,15 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { StartCaptureDialog } from "@/components/start-capture-dialog";
 import { ProxyConfigDialog } from "@/components/proxy-config-dialog";
 import { AgentDownloadDialog } from "@/components/agent-download-dialog";
+import { MembersAdminDialog } from "@/components/members-admin-dialog";
 import { MyCapturePage } from "@/components/my-capture-page";
 import { ProjectPage } from "@/components/project-page";
 import { SessionOverviewPage } from "@/components/session-overview-page";
 import { Button } from "@/components/ui/button";
-import { Sun, Moon, Settings, Play, Square, Cable, KeyRound, Download, ChevronDown, Check } from "lucide-react";
+import { Sun, Moon, Settings, Play, Square, Cable, KeyRound, Download, ChevronDown, Check, UserRound, Users } from "lucide-react";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
 import { usePluginEventStream, useStopCapture, useSessions } from "@/hooks/use-mcp";
-import { useAuthError } from "@/hooks/use-auth";
+import { useAuthError, useIdentity } from "@/hooks/use-auth";
 import { toast } from "@/components/ui/toast";
 import type { ProjectInfo } from "@/types/project";
 
@@ -85,9 +86,12 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 服务器开启令牌校验且本地无有效凭证（401）：横幅提示并自动打开设置。
   const authError = useAuthError();
+  // 当前身份（后端响应头回显）：顶栏展示"我是谁"，是协作（告知用户名/被加项目）的前提。
+  const identity = useIdentity();
   const [startOpen, setStartOpen] = useState(false);
   const [proxyConfigOpen, setProxyConfigOpen] = useState(false);
   const [agentDownloadOpen, setAgentDownloadOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   const [isDark, setIsDark] = useState(() => {
     const stored = localStorage.getItem("gta-theme");
     if (stored) return stored === "dark";
@@ -418,18 +422,29 @@ export default function App() {
               size="sm"
               className="h-8"
               onClick={() => setAgentDownloadOpen(true)}
-              title="接入成员（生成启动码，把成员电脑接进团队抓包）"
-              aria-label="接入成员"
+              title="接入设备（生成启动码，把成员电脑接进团队抓包）"
+              aria-label="接入设备"
             >
               <Download className="h-4 w-4" />
-              接入成员
+              接入设备
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={() => setMembersOpen(true)}
+              title="成员管理（邀请码 / 成员账号列表与撤销）"
+              aria-label="成员管理"
+            >
+              <Users className="h-4 w-4" />
+              成员管理
             </Button>
             <Button
               variant="outline"
               size="sm"
               className="h-8"
               onClick={() => setStartOpen(true)}
-              title="开始抓包（服务器网卡 / 远程 Agent）"
+              title="开始抓包（服务器网卡 / 抓包探针）"
               aria-label="开始抓包"
             >
               <Play className="h-4 w-4" />
@@ -458,6 +473,25 @@ export default function App() {
               aria-label={isDark ? "切换为亮色模式" : "切换为暗色模式"}
             >
               {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 px-2"
+              onClick={() => setSettingsOpen(true)}
+              title={
+                identity
+                  ? `当前身份：${identity.owner}${identity.isAdmin ? "（管理员）" : ""}；点击打开设置`
+                  : "未登录：点击打开设置（填令牌或注册身份）"
+              }
+            >
+              <UserRound className="h-4 w-4" />
+              <span className="max-w-[140px] truncate font-mono text-xs">
+                {identity?.owner ?? "未登录"}
+              </span>
+              {identity?.isAdmin && (
+                <span className="rounded bg-primary/10 px-1 py-0.5 text-[10px] text-primary">admin</span>
+              )}
             </Button>
             <Button
               variant="ghost"
@@ -555,12 +589,14 @@ export default function App() {
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {/* 代理服务器配置弹窗 */}
       <ProxyConfigDialog open={proxyConfigOpen} onClose={() => setProxyConfigOpen(false)} onNavigateToSession={handleNavigateToSession} />
-      {/* 下载远程 Agent 弹窗（跨环境抓包上报） */}
+      {/* 下载抓包探针弹窗（跨环境抓包上报） */}
       <AgentDownloadDialog
         open={agentDownloadOpen}
         onClose={() => setAgentDownloadOpen(false)}
         onNavigateToSession={handleNavigateToSession}
       />
+      {/* 成员管理弹窗（邀请码 / 成员账号列表与撤销） */}
+      <MembersAdminDialog open={membersOpen} onClose={() => setMembersOpen(false)} />
       {/* 开始抓包弹窗（本机网卡 / 远程 agent 源） */}
       <StartCaptureDialog
         open={startOpen}

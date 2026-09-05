@@ -113,7 +113,7 @@ export function SessionOverviewPage({ sessionId, onNavigate }: SessionOverviewPa
       : (status?.duration_sec ?? meta?.duration_sec ?? 0);
   const connectionCount = connectionsData?.count ?? 0;
   const sourceLabel = isAgentSource
-    ? "远程 Agent"
+    ? "抓包探针"
     : meta?.source === "proxy"
       ? "移动代理"
       : "服务器网卡";

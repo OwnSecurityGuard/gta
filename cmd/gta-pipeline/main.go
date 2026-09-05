@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"database/sql"
+
 	pluginpb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	"gta/pkg/analyze"
 	"gta/pkg/auth"
@@ -55,6 +57,11 @@ func main() {
 	// gta-singbox-agent 二进制路径：代理抓包租约（CreateProxyLease）创建时按租约拉起。
 	agentBin := flag.String("agent-bin", "", "path to gta-singbox-agent binary (default: <workdir>/bin/gta-singbox-agent[.exe])")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	// 存储驱动：默认 sqlite（每会话一个 capture.sqlite + 全局 control.sqlite）；
+	// 设 "postgres" 时启用 PostgreSQL，DSN 由 -db-dsn / 环境变量 GTA_DB_DSN 提供。
+	// 优先级：flag 显式 > 环境变量 GTA_DB_* > 默认 sqlite。
+	dbDriver := flag.String("db-driver", "", "storage driver: sqlite (default) | postgres")
+	dbDSN := flag.String("db-dsn", "", "postgres DSN (required when -db-driver=postgres); env GTA_DB_DSN")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("gta-pipeline " + version.String())
@@ -88,6 +95,21 @@ func main() {
 	*registryAddr = eff("registry-addr", registryAddrFlag, cfg.Pipeline.RegistryAddr, config.DefaultRegistryAddr)
 	*agentIngestAddr = eff("agent-ingest-addr", agentIngestAddrFlag, cfg.Pipeline.AgentIngestAddr, config.DefaultAgentIngestAddr)
 
+	// 存储驱动解析（flag 显式 > 环境变量 GTA_DB_* > 默认 sqlite）。
+	if !flagSet["db-driver"] && *dbDriver == "" {
+		*dbDriver = os.Getenv("GTA_DB_DRIVER")
+	}
+	if *dbDriver == "" {
+		*dbDriver = "sqlite"
+	}
+	if !flagSet["db-dsn"] && *dbDSN == "" {
+		*dbDSN = os.Getenv("GTA_DB_DSN")
+	}
+	if store.IsPostgres(*dbDriver) && *dbDSN == "" {
+		slog.Error("storage driver=postgres requires -db-dsn (or GTA_DB_DSN)")
+		os.Exit(1)
+	}
+
 	absWorkDir, err := config.ResolveWorkDir(*workDir, flagSet["workdir"], cfg.WorkDir)
 	if err != nil {
 		slog.Error("resolve workdir", "error", err)
@@ -112,7 +134,12 @@ func main() {
 		*controlPath = filepath.Join(absWorkDir, "control.sqlite")
 	}
 
-	controlStore, err := store.NewControlStore(*controlPath)
+	// 控制元数据后端：sqlite 走 control.sqlite 文件路径；postgres 走共享 PG DSN。
+	controlDSNOrPath := *controlPath
+	if store.IsPostgres(*dbDriver) {
+		controlDSNOrPath = *dbDSN
+	}
+	controlStore, err := store.OpenControlStore(*dbDriver, controlDSNOrPath)
 	if err != nil {
 		slog.Error("open control store", "error", err)
 		os.Exit(1)
@@ -150,14 +177,27 @@ func main() {
 		}
 	}
 
-	// authResolver：GTA_AUTH_TOKENS 驱动的 Bearer 鉴权，供 PluginRegistry 与
-	// AgentIngest 两个 gRPC server 共用。未配置 token 时为匿名模式（拦截器放行、
-	// 不注入 Principal），本地单机用法行为不变。
-	authResolver, err := auth.LoadFromEnv()
+	// authResolver：env bootstrap（GTA_AUTH_TOKENS）+ users 表（自助注册/邀请用户）
+	// 组合的 Bearer 鉴权，供 PluginRegistry 与 AgentIngest 两个 gRPC server 共用。
+	// 两者皆空时为匿名模式（拦截器放行、不注入 Principal），本地单机用法行为不变。
+	// users 表让插件凭自助注册 token 注册即归属 owner（否则一律匿名、对所有人可见）。
+	envResolver, err := auth.LoadFromEnv()
 	if err != nil {
 		slog.Error("load auth tokens", "error", err)
 		os.Exit(1)
 	}
+	// users/projects 等辅助表始终在本地 sqlite（与 gta-mcp 的 auxDB 同一文件）：
+	// sqlite 模式复用 control.sqlite；postgres 模式用独立 control-aux.sqlite。
+	usersDB := controlStore.DB()
+	if store.IsPostgres(*dbDriver) {
+		usersDB, err = sql.Open("sqlite", filepath.Join(absWorkDir, "control-aux.sqlite"))
+		if err != nil {
+			slog.Error("open aux sqlite for users", "error", err)
+			os.Exit(1)
+		}
+		defer usersDB.Close()
+	}
+	authResolver := auth.NewFirstResolver(envResolver, auth.NewDBResolver(usersDB))
 
 	// RegistryServer：被动接受插件注册，插件进程由外部编排（systemd/脚本）独立启动。
 	registry := plugin.NewRegistryServer(10)
@@ -196,7 +236,7 @@ func main() {
 		}
 	}()
 
-	engine := newPipelineService(absWorkDir, controlStore, registry, rules, protocolCfg, *registryAddr)
+	engine := newPipelineService(absWorkDir, controlStore, registry, rules, protocolCfg, *registryAddr, *dbDriver, *dbDSN)
 	// 代理抓包租约：gta-singbox-agent 不再随 pipeline 常驻拉起，
 	// 由 CreateProxyLease 按用户/设备租约独立启动（见 proxy_lease.go）。
 	engine.agentBin = *agentBin
@@ -320,7 +360,7 @@ func main() {
 // controlStoreSessionOwners 用 ControlStore 实现 agent.SessionOwnerChecker：
 // 查 sessions.owner 做会话归属校验，避免 pkg/capture 反向依赖 pkg/store。
 type controlStoreSessionOwners struct {
-	store *store.ControlStore
+	store store.ControlStoreBackend
 }
 
 func (o controlStoreSessionOwners) SessionOwner(sessionID string) (string, bool) {

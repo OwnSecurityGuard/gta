@@ -18,6 +18,11 @@ export default defineConfig({
         target: "http://localhost:8781",
         changeOrigin: true,
       },
+      // 自助注册（/access/register）：新用户免邀请获取身份，设置弹窗直连。
+      "/access": {
+        target: "http://localhost:8781",
+        changeOrigin: true,
+      },
       // 老式 SSE 传输端点（GET /sse 建立流，POST /message 发请求）。
       // 必须代理，否则经 Vite 开发服务器(5173)同源访问时会被 SPA 兜底
       // 返回 index.html(<!DOCTYPE>)，导致 MCP 客户端报 "Invalid OAuth error response"。

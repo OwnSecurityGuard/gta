@@ -242,6 +242,9 @@ message StartCaptureRequest {
   bool all_owners = 9;
   // 会话归属的项目（projects.id），可选。gta-mcp 从 HTTP 入参透传。
   string project_id = 10;
+  // plugin_owners 是允许按名解析解码插件的额外 owner 集合（除会话 owner 外）。
+  // gta-mcp 依据"调用者所属项目的插件条目归属"计算；用于项目成员共用项目插件。
+  repeated string plugin_owners = 11;
 }
 
 message StartCaptureResponse {
@@ -368,6 +371,8 @@ message DeregisterPluginResponse {
 message SetSessionPluginRequest {
   string session_id = 1;
   string plugin = 2;
+  // 热切换后允许的额外插件 owner 集合（语义同 StartCaptureRequest.plugin_owners）。
+  repeated string plugin_owners = 3;
 }
 
 // SetSessionPluginResponse 热切换结果。
@@ -431,6 +436,10 @@ message CreateProxyLeaseRequest {
   // 重新创建租约仍拿到同一个端口，此前扫过的二维码继续有效。默认 true。
   // 同样因 proto3 默认值限制取反命名为 no_sticky。
   bool no_sticky = 9;
+  // plugin_owners 允许按名解析解码插件的额外 owner 集合（语义同
+  // StartCaptureRequest）。租约保存该集合，自动开抓包与后续 StartLeaseCapture
+  // 未显式给出时沿用。
+  repeated string plugin_owners = 10;
 }
 
 // ProxyLeaseState 租约配置 + 运行时状态快照。lease_id 与内部抓包会话
@@ -510,6 +519,7 @@ message StartLeaseCaptureRequest {
   repeated int32 include_ports = 4;  // 可选覆盖：连接筛选（目标端口）
   string owner = 5;                  // gta-mcp 透传的调用方属主
   bool all_owners = 6;               // gta-mcp 透传（admin）
+  repeated string plugin_owners = 7; // 允许的额外插件 owner 集合（语义同 StartCaptureRequest）
 }
 
 message StartLeaseCaptureResponse {

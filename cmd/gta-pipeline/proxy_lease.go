@@ -207,6 +207,7 @@ type proxyLease struct {
 	owner        string
 	projectID    string
 	plugin       string
+	pluginOwners []string // 允许解析解码插件的额外 owner 集合（项目成员共用项目插件）
 	includeHosts []string
 	includePorts []int
 	device       string
@@ -320,6 +321,7 @@ func (s *pipelineService) CreateProxyLease(ctx context.Context, req capturecontr
 		owner:        owner,
 		projectID:    req.ProjectID,
 		plugin:       req.Plugin,
+		pluginOwners: req.PluginOwners,
 		includeHosts: req.IncludeHosts,
 		includePorts: includePorts,
 		device:       req.Device,
@@ -411,6 +413,11 @@ func (s *pipelineService) StartLeaseCapture(ctx context.Context, req capturecont
 	if plugin == "" {
 		plugin = lease.plugin
 	}
+	// 插件解析 owner 候选：本次请求显式给出优先，否则沿用租约创建时的集合。
+	pluginOwners := req.PluginOwners
+	if len(pluginOwners) == 0 {
+		pluginOwners = lease.pluginOwners
+	}
 	hosts := req.IncludeHosts
 	if len(hosts) == 0 {
 		hosts = lease.includeHosts
@@ -450,8 +457,9 @@ func (s *pipelineService) StartLeaseCapture(ctx context.Context, req capturecont
 	// 这是「新旧会话完全隔离」的基础（数据不可能跨会话串流）。
 	activity := mobile.NewActivity()
 	res, err := s.StartSession(ctx, capturecontrol.StartSessionRequest{
-		Plugin:    plugin,
-		ProjectID: lease.projectID,
+		Plugin:       plugin,
+		ProjectID:    lease.projectID,
+		PluginOwners: req.PluginOwners,
 		Mobile: &capturecontrol.MobileConfig{
 			ListenAddr: fmt.Sprintf("127.0.0.1:%d", grpcPort),
 			Activity:   activity,

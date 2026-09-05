@@ -8,11 +8,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	randv2 "math/rand/v2"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	randv2 "math/rand/v2"
 	"runtime"
 	"sort"
 	"strings"
@@ -31,6 +31,7 @@ import (
 
 	"gta/docs"
 	"gta/pkg/auth"
+	"gta/pkg/authz"
 	"gta/pkg/config"
 	"gta/pkg/event"
 	"gta/pkg/internalipc"
@@ -52,7 +53,9 @@ type sessionMetadata struct {
 	Owner string `json:"owner,omitempty"`
 	// ProjectID 是会话所属的项目（projects.id）。空串表示未归属任何项目。
 	// 持久化到 metadata.json，供 list_all_sessions 暴露给前端派生在线/离线状态。
-	ProjectID    string                 `json:"project_id,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+	// TenantID 是会话归属租户（默认 'default'）。与 controlStore 的 sessions.tenant_id 镜像。
+	TenantID     string                 `json:"tenant_id,omitempty"`
 	SessionID    string                 `json:"session_id"`
 	StartedAt    string                 `json:"started_at"`
 	StoppedAt    string                 `json:"stopped_at,omitempty"`
@@ -76,14 +79,8 @@ type sessionMetadata struct {
 	ManifestSnapshot string `json:"manifest_snapshot,omitempty"`
 }
 
-// ownerFilterFromCtx 从 ctx 提取 owner 可见性过滤器。
-// 无身份（T12 之前的 HTTP 直连 / 本地用法）视为匿名（owner=""，非 admin）。
-func ownerFilterFromCtx(ctx context.Context) store.SessionOwnerFilter {
-	if p, ok := auth.PrincipalFrom(ctx); ok {
-		return store.SessionOwnerFilter{Owner: p.Owner, AllOwners: p.IsAdmin}
-	}
-	return store.SessionOwnerFilter{}
-}
+// ownerFilterFromCtx 已由 authz.go 的 visibleSessionFilter 取代
+//（项目协作边界下，列表可见性需要附加可见项目集合）。
 
 // pluginEventJSON 是插件事件 SSE 推送的 JSON 负载，与 proto PluginEvent 对应。
 type pluginEventJSON struct {
@@ -110,6 +107,13 @@ type mcpCapture struct {
 	sessionMgr  *sessionManager
 	runRegistry *RunRegistry
 	projects    *projectStore
+	users       *userStore
+	// 自助注册（/access/register）：envResolver 做保留名检查；openRegister 由
+	// 装配处按 "token 鉴权开启 && GTA_AUTH_REGISTER!=off" 计算后写入。
+	envResolver  *auth.StaticResolver
+	openRegister bool
+	// authz 是项目/会话/插件/租约动作的鉴权器（策略在 pkg/authz，role 解析在本包）。
+	authz *projectAuthorizer
 	// 启动码（GTA-XXXX）存取；ownerSecret 用的 token 表在装配处解析填充。
 	accessCodes   *accessCodeStore
 	tokensByOwner map[string]string
@@ -126,11 +130,12 @@ type mcpCapture struct {
 	pdConn   *grpc.ClientConn
 
 	// ControlStore 读取会话元数据（db_path 等）
-	controlStore *store.ControlStore
+	controlStore store.ControlStoreBackend
 
-	// readerOpener 打开指定路径的 capture.sqlite 返回 captureReader。
-	// 生产用 store.NewSQLiteStore；测试可注入共享实例避免 Windows 文件锁。
-	readerOpener func(dbPath string) (captureReader, error)
+	// readerOpener 打开指定会话的 capture 存储返回 captureReader。
+	// 生产按 dbDriver 路由（sqlite 走 capture.sqlite；postgres 走共享 PG 库）；
+	// 测试可注入共享实例避免 Windows 文件锁。
+	readerOpener func(dbPath, sessionID string) (captureReader, error)
 
 	// enableRawDebug 控制原始包工具是否注册到 MCP surface。
 	// 原始包能力仅限插件调试场景，默认不暴露。
@@ -388,7 +393,7 @@ func (sm *sessionManager) deleteSession(sessionID, owner string) error {
 	return os.RemoveAll(sessionDir)
 }
 
-func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mcpServer *server.MCPServer, enableRawDebug bool) (*mcpCapture, error) {
+func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mcpServer *server.MCPServer, enableRawDebug bool, dbDriver, dbDSN string) (*mcpCapture, error) {
 	runRegistry, err := NewRunRegistry(workDir)
 	if err != nil {
 		slog.Warn("init run registry failed", "error", err)
@@ -414,23 +419,45 @@ func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mc
 		return nil, fmt.Errorf("dial plugin dev: %w", err)
 	}
 
-	// ControlStore
+	// ControlStore：sqlite 走 control.sqlite 文件路径；postgres 走共享 PG DSN。
 	controlPath := filepath.Join(workDir, "control.sqlite")
-	controlStore, err := store.NewControlStore(controlPath)
+	controlDSNOrPath := controlPath
+	if store.IsPostgres(dbDriver) {
+		controlDSNOrPath = dbDSN
+	}
+	controlStore, err := store.OpenControlStore(dbDriver, controlDSNOrPath)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("open control store: %w", err)
 	}
 
-	// SQLite-backed 项目存储（取代旧的按 owner 分片 JSON 文件）。
-	projects := newProjectStoreDB(controlStore.DB())
+	// projects / access_codes 等组织-访问子系统始终落在本地 sqlite 文件
+	// （不在本次 PG 化范围）：sqlite 模式复用 control.sqlite；postgres 模式用
+	// 独立的 control-aux.sqlite，避免与 PG 控制库耦合。
+	var auxDB *sql.DB
+	if store.IsPostgres(dbDriver) {
+		auxDBPath := filepath.Join(workDir, "control-aux.sqlite")
+		auxDB, err = sql.Open("sqlite", auxDBPath)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("open aux sqlite: %w", err)
+		}
+	} else {
+		auxDB = controlStore.DB()
+	}
+	projects := newProjectStoreDB(auxDB)
 	if err := projects.Init(); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("init project store: %w", err)
 	}
+	users := newUserStore(auxDB)
+	if err := users.Init(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("init user store: %w", err)
+	}
 
-	// 启动码表（access_codes）落在同一个 control.sqlite。
-	accessCodes := newAccessCodeStore(controlStore.DB())
+	// 启动码表（access_codes）落在同一个 auxDB（sqlite 模式即 control.sqlite）。
+	accessCodes := newAccessCodeStore(auxDB)
 	if err := accessCodes.Init(); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("init access code store: %w", err)
@@ -444,6 +471,8 @@ func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mc
 		sessionMgr:     newSessionManager(workDir),
 		runRegistry:    runRegistry,
 		projects:       projects,
+		users:          users,
+		authz:          newProjectAuthorizer(projects),
 		accessCodes:    accessCodes,
 		tokensByOwner:  loadTokensByOwner(),
 		pipelineClient: client,
@@ -451,7 +480,10 @@ func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mc
 		pdClient:       pdClient,
 		pdConn:         pdConn,
 		controlStore:   controlStore,
-		readerOpener: func(path string) (captureReader, error) {
+		readerOpener: func(path, sessionID string) (captureReader, error) {
+			if store.IsPostgres(dbDriver) {
+				return store.OpenCaptureStoreReadOnly(dbDriver, dbDSN, nil, sessionID)
+			}
 			return store.NewSQLiteStore(path, nil)
 		},
 		enableRawDebug: enableRawDebug,
@@ -520,6 +552,21 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 		agentSource = true
 	}
 	projectID := req.GetString("project_id", "")
+	// 绑定项目要求对该项目可读（成员即可把会话抓进项目，方案 §3.2 session 轴）。
+	var projectTenant string
+	if projectID != "" && m.projects != nil {
+		target, err := m.projects.Get(ctx, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if target == nil {
+			return errorResult(fmt.Errorf("project %s not found", projectID)), nil
+		}
+		if err := m.authz.Can(ctx, authz.ActionProjectRead, projectResource(target)); err != nil {
+			return errorResult(fmt.Errorf("project %s not found", projectID)), nil
+		}
+		projectTenant = target.TenantID
+	}
 	listenAddr := req.GetString("listen_addr", "")
 	slog.Info("start_capture requested", "port", port, "plugin", pluginName, "pcap_file", pcapFile, "source", source, "listen_addr", listenAddr)
 
@@ -531,9 +578,11 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 		ProjectId: projectID,
 	}
 	// 透传调用方身份：pipeline 记录会话归属（SessionMeta.Owner）并做 owner 作用域插件路由。
+	// pluginOwners 附带调用者所属项目的插件归属 owner：项目成员可按名解析项目插件。
 	if p, ok := auth.PrincipalFrom(ctx); ok {
 		grpcReq.Owner = p.Owner
 		grpcReq.AllOwners = p.IsAdmin
+		grpcReq.PluginOwners = m.pluginOwnersFor(ctx, p.Owner)
 	}
 	switch {
 	case source == "proxy":
@@ -571,6 +620,7 @@ func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolReq
 	// 也能通过 pipeline 返回的绝对 db_path 定位到正确的会话库。
 	meta := sessionMetadata{
 		Owner:      auth.OwnerFrom(ctx),
+		TenantID:   projectTenant,
 		ProjectID:  projectID,
 		SessionID:  resp.GetSessionId(),
 		StartedAt:  time.Now().Format(time.RFC3339),
@@ -708,24 +758,24 @@ func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToo
 	if m.pipelineClient != nil {
 		resp, err := m.pipelineClient.GetCaptureStatus(ctx, &pb.GetCaptureStatusRequest{SessionId: sessionID})
 		if err == nil {
-		return successResult(map[string]any{
-			"session_id":    sessionID,
-			"state":         resp.GetState(),
-			"source_name":   resp.GetSourceName(),
-			"packets_in":    resp.GetPacketsIn(),
-			"raw_count":     resp.GetRawCount(),
-			"event_count":   resp.GetEventCount(),
-			"metric_count":  resp.GetMetricCount(),
-			"decode_errors": resp.GetDecodeErrors(),
-			"drops":         resp.GetDrops(),
-			"errors":        resp.GetErrors(),
-			"err":           resp.GetErr(),
-			// agent 连接活性：agent_connected=true 仅表示推流连接已建立，
-			// 与 raw_count 无关——"连上了但一个包都没有"是常见状态，
-			// UI 据此给不同的排查指引（去启动游戏 vs 去检查 agent）。
-			"agent_connected":      resp.GetAgentConnected(),
-			"agent_last_seen_unix": resp.GetAgentLastSeenUnix(),
-		}), nil
+			return successResult(map[string]any{
+				"session_id":    sessionID,
+				"state":         resp.GetState(),
+				"source_name":   resp.GetSourceName(),
+				"packets_in":    resp.GetPacketsIn(),
+				"raw_count":     resp.GetRawCount(),
+				"event_count":   resp.GetEventCount(),
+				"metric_count":  resp.GetMetricCount(),
+				"decode_errors": resp.GetDecodeErrors(),
+				"drops":         resp.GetDrops(),
+				"errors":        resp.GetErrors(),
+				"err":           resp.GetErr(),
+				// agent 连接活性：agent_connected=true 仅表示推流连接已建立，
+				// 与 raw_count 无关——"连上了但一个包都没有"是常见状态，
+				// UI 据此给不同的排查指引（去启动游戏 vs 去检查 agent）。
+				"agent_connected":      resp.GetAgentConnected(),
+				"agent_last_seen_unix": resp.GetAgentLastSeenUnix(),
+			}), nil
 		}
 		// gRPC 查询失败，降级返回 sessionMgr 中的元数据
 		slog.Warn("get_session_status gRPC failed, falling back to metadata", "error", err, "session_id", sessionID)
@@ -889,10 +939,15 @@ func (m *mcpCapture) handleSetSessionPlugin(ctx context.Context, req mcp.CallToo
 	if err := m.authorizeSession(ctx, sessionID); err != nil {
 		return errorResult(err), nil
 	}
-	resp, err := m.pipelineClient.SetSessionPlugin(ctx, &pb.SetSessionPluginRequest{
+	grpcReq := &pb.SetSessionPluginRequest{
 		SessionId: sessionID,
 		Plugin:    pluginName,
-	})
+	}
+	// 项目成员可切到项目插件：附带你属项目插件归属 owner。
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		grpcReq.PluginOwners = m.pluginOwnersFor(ctx, p.Owner)
+	}
+	resp, err := m.pipelineClient.SetSessionPlugin(ctx, grpcReq)
 	if err != nil {
 		return errorResult(fmt.Errorf("set session plugin: %w", err)), nil
 	}
@@ -2201,59 +2256,29 @@ func (m *mcpCapture) openReader(ctx context.Context, sessionID string) (captureR
 	if err != nil || dbPath == "" {
 		return nil, fmt.Errorf("no db path for session %s: %w", sessionID, err)
 	}
-	return m.readerOpener(dbPath)
+	return m.readerOpener(dbPath, sessionID)
 }
 
-// authorizeSession 校验调用方对指定会话的可见性（controlStore + metadata.json 双源）。
-// 规则与 store.SessionOwnerFilter.Matches 一致：admin 全可见；否则仅 owner 匹配的会话。
-// 防泄露规则：controlStore 中存在该会话但调用方不可见时直接拒绝，绝不回退到
-// 文件系统路径（metadata.json 缺失时 readSessionMetadata 会按 os.Stat 合成
-// Owner="" 的元数据，若回退将把他人会话的 db_path 泄露给匿名调用方）。
-// 仅当 controlStore 完全查不到该会话（workDir 漂移等）时才走 metadata.json 兜底。
-func (m *mcpCapture) authorizeSession(ctx context.Context, sessionID string) error {
-	f := ownerFilterFromCtx(ctx)
-	if f.AllOwners {
-		return nil
-	}
-	// 1. controlStore：按 owner 过滤，命中即通过；
-	//    会话存在但不可见 → 拒绝（不回退，见函数注释）。
-	if m.controlStore != nil && sessionID != "" {
-		meta, err := m.controlStore.GetSessionFor(ctx, sessionID, f)
-		if err == nil && meta != nil {
-			return nil
-		}
-		if _, errAll := m.controlStore.GetSession(ctx, sessionID); errAll == nil {
-			return fmt.Errorf("session %s not found or not owned by you", sessionID)
-		}
-		// controlStore 无此会话记录 → 文件系统兜底
-	}
-	// 2. sessionMgr metadata.json（本地文件，需自行比对 Owner）
-	if meta, err := m.sessionMgr.readSessionMetadata(sessionID, f.Owner); err == nil && meta != nil {
-		if f.Matches(store.SessionMeta{Owner: meta.Owner}) {
-			return nil
-		}
-		return fmt.Errorf("session %s not found or not owned by you", sessionID)
-	}
-	return nil
-}
+// authorizeSession 已迁移至 authz.go（ActionSessionRead 收口 + 删除兜底放行）。
 
 // getDBPath 获取指定 session 的 db_path。
-// 优先从 ControlStore 查询（owner 过滤），回退到 sessionMgr（owner 校验）。
+// authorizeSession 先做 ActionSessionRead 鉴权；随后按
+// controlStore（全量读，项目会话对成员可见）→ metadata.json → current 的顺序解析路径。
 func (m *mcpCapture) getDBPath(ctx context.Context, sessionID string) (string, error) {
 	if err := m.authorizeSession(ctx, sessionID); err != nil {
 		slog.Warn("getDBPath: session access denied", "session_id", sessionID, "error", err)
 		return "", err
 	}
-	owner := auth.OwnerFrom(ctx)
-	// 1. 尝试 ControlStore
+	// 1. 尝试 ControlStore（鉴权已通过，读全量避免 owner 过滤误伤项目会话）
 	if m.controlStore != nil && sessionID != "" {
-		meta, err := m.controlStore.GetSessionFor(ctx, sessionID, ownerFilterFromCtx(ctx))
+		meta, err := m.controlStore.GetSession(ctx, sessionID)
 		if err == nil && meta != nil {
 			slog.Info("getDBPath: resolved via controlStore", "session_id", sessionID, "db_path", meta.DBPath)
 			return meta.DBPath, nil
 		}
 		slog.Debug("getDBPath: controlStore miss", "session_id", sessionID, "err", err)
 	}
+	owner := auth.OwnerFrom(ctx)
 	// 2. 回退到 sessionMgr（metadata.json，含 pipeline 返回的绝对 db_path）
 	if sessionID != "" {
 		meta, err := m.sessionMgr.readSessionMetadata(sessionID, owner)
@@ -2273,7 +2298,13 @@ func (m *mcpCapture) getDBPath(ctx context.Context, sessionID string) (string, e
 }
 
 func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	sessions, err := m.sessionMgr.listSessions(ownerFilterFromCtx(ctx))
+	// 项目是协作边界：可见范围 = 自己的会话 ∪ 可见项目的会话（含文件系统侧过滤）。
+	f, err := m.visibleSessionFilter(ctx)
+	if err != nil {
+		slog.Error("list_all_sessions: resolve filter failed", "error", err)
+		return errorResult(err), nil
+	}
+	sessions, err := m.sessionMgr.listSessions(f)
 	if err != nil {
 		slog.Error("list_all_sessions failed", "error", err)
 		return errorResult(err), nil
@@ -2656,6 +2687,11 @@ func main() {
 	logFormat := flag.String("log-format", "json", "log format: json | text")
 	logFile := flag.String("log-file", "", "log file path (default: <workdir>/logs/gta-mcp.log)")
 	allowedOrigins := flag.String("allowed-origins", os.Getenv("GTA_MCP_ALLOWED_ORIGINS"), "CORS 允许的跨域 Origin（逗号分隔，如 http://localhost:5173,https://gta.example.com）；留空不返回 CORS 头（同源用法不受影响）")
+	// 存储驱动：默认 sqlite（每会话 capture.sqlite + 全局 control.sqlite）。
+	// 设 "postgres" 时启用 PostgreSQL，DSN 由 -db-dsn / 环境变量 GTA_DB_DSN 提供。
+	// flag 默认值直接取环境变量，故优先级为 flag 显式 > GTA_DB_* 环境变量 > 默认 sqlite。
+	dbDriver := flag.String("db-driver", os.Getenv("GTA_DB_DRIVER"), "storage driver: sqlite (default) | postgres")
+	dbDSN := flag.String("db-dsn", os.Getenv("GTA_DB_DSN"), "postgres DSN (when -db-driver=postgres); 环境变量 GTA_DB_DSN")
 	// 会话保留策略（存储优化）：TTL 与数量上限防止 sessions/ 无限膨胀。
 	// flag 默认值已读环境变量（GTA_SESSION_RETENTION_DAYS / GTA_MAX_SESSIONS），
 	// 均可设 0 关闭对应策略；gta.yaml sessions.* 在 flag 与环境变量均未设置时生效。
@@ -2666,6 +2702,15 @@ func main() {
 	if *showVersion {
 		fmt.Println("gta-mcp " + version.String())
 		return
+	}
+
+	// 存储驱动默认 sqlite；postgres 必须有 DSN。
+	if *dbDriver == "" {
+		*dbDriver = "sqlite"
+	}
+	if store.IsPostgres(*dbDriver) && *dbDSN == "" {
+		slog.Error("storage driver=postgres requires -db-dsn (or GTA_DB_DSN)")
+		os.Exit(1)
 	}
 
 	flagSet := map[string]bool{}
@@ -2735,7 +2780,7 @@ func main() {
 	// *workDir 的 flag 默认值是 "."，直接传给 newMCPCapture 会让数据目录锚在进程
 	// CWD 上，从而完全绕过 GTA_HOME（容器里 CWD=/ 时表现为
 	// "open control store: unable to open database file (14)"）。
-	capture, err := newMCPCapture(*iface, resolvedPluginsDir, absWorkDir, *pipelineAddr, *addr, s, *enableRawDebug)
+	capture, err := newMCPCapture(*iface, resolvedPluginsDir, absWorkDir, *pipelineAddr, *addr, s, *enableRawDebug, *dbDriver, *dbDSN)
 	if err != nil {
 		slog.Error("init mcp capture", "error", err)
 		os.Exit(1)
@@ -3116,10 +3161,12 @@ func main() {
 	), capture.handleListProjects)
 
 	// 启动码接入：生成/列出 GTA-XXXX 码，成员在目标机输入即可自动注册并回连抓包。
+	// 邀请模式：带 new_owner 时，claim 为新用户创建独立身份（而不是借用码创建者的身份）。
 	s.AddTool(mcp.NewTool("create_access_code",
-		mcp.WithDescription("Generate an access code (GTA-XXXX-XXXX) bound to the current user. A member enters this code when first starting gta-agent to auto-register and connect. Optional: project_id, plugin, port, platform, server."),
+		mcp.WithDescription("Generate an access code (GTA-XXXX-XXXX) bound to the current user. A member enters this code when first starting gta-agent to auto-register and connect. Optional: project_id, plugin, port, platform, server. Invite mode: set new_owner to create a fresh independent identity for that user on claim (user must not already exist)."),
 		mcp.WithString("project_id"), mcp.WithString("plugin"), mcp.WithNumber("port"),
 		mcp.WithString("platform"), mcp.WithString("server"),
+		mcp.WithString("new_owner", mcp.Description("Invite mode: user name to create on claim (letters/digits/._-)")),
 	), capture.handleCreateAccessCode)
 	s.AddTool(mcp.NewTool("list_access_codes",
 		mcp.WithDescription("List access codes visible to the current user (global admin sees all)."),
@@ -3170,8 +3217,30 @@ func main() {
 		mcp.WithString("rules", mcp.Required(), mcp.Description("JSON string array of rule entries")),
 	), capture.handleSetProjectRules)
 
+	s.AddTool(mcp.NewTool("list_users",
+		mcp.WithDescription("List invited users (invited identities only; env bootstrap tokens are not listed here). Token values are never returned. Global admin only."),
+	), capture.handleListUsers)
+
+	s.AddTool(mcp.NewTool("revoke_user",
+		mcp.WithDescription("Revoke an invited user: delete its identity so its token stops working immediately. Global admin only; cannot revoke yourself."),
+		mcp.WithString("owner", mcp.Required(), mcp.Description("User name to revoke")),
+	), capture.handleRevokeUser)
+
+	s.AddTool(mcp.NewTool("transfer_project_owner",
+		mcp.WithDescription("Transfer project ownership to an existing member (admin/member). Owner-only security-sensitive operation; previous owner becomes an admin member."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("new_owner", mcp.Required(), mcp.Description("Existing project member to promote to owner")),
+	), capture.handleTransferProjectOwner)
+
+	s.AddTool(mcp.NewTool("move_session_to_project",
+		mcp.WithDescription("Move a session into a project (or clear binding with empty project_id). Requires session move permission and project membership on the target; tenant must match."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID")),
+		mcp.WithString("project_id", mcp.Description("Target project ID; empty to clear binding")),
+	), capture.handleMoveSessionToProject)
+
+	// Deprecated: 旧名别名，转发 move_session_to_project 的六步鉴权收口。
 	s.AddTool(mcp.NewTool("set_session_project",
-		mcp.WithDescription("Bind a session to a project (screen project_id to clear the binding). Requires the session owner or a project admin."),
+		mcp.WithDescription("Deprecated alias of move_session_to_project."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID")),
 		mcp.WithString("project_id", mcp.Description("Project ID to bind; empty to clear")),
 	), capture.handleSetSessionProject)
@@ -3195,11 +3264,18 @@ func main() {
 	// 跨域调用 MCP 工具）。未配置任何 origin 时不返回 CORS 头，同源用法不受影响。
 	// 鉴权（B3）：GTA_AUTH_TOKENS 配置了 token 时强制 Bearer 校验（auth.Middleware）；
 	// 未配置（匿名模式）时保持旧行为——直接放行、不注入身份。
-	resolver, err := auth.LoadFromEnv()
+	// 身份来源组合（2026-09-05 邀请制）：env bootstrap 优先，users 表兜底
+	//（邀请 claim 创建的身份即时生效，无需重启）。
+	envResolver, err := auth.LoadFromEnv()
 	if err != nil {
 		slog.Error("load auth tokens failed", "error", err)
 		os.Exit(1)
 	}
+	resolver := auth.NewFirstResolver(envResolver, auth.NewDBResolver(capture.users.db))
+	// 自助注册开关：token 鉴权开启即默认允许（新用户免邀请获取身份）；
+	// GTA_AUTH_REGISTER=off 显式关闭（封闭团队走纯邀请制）。匿名模式无意义。
+	capture.envResolver = envResolver
+	capture.openRegister = resolver.Required() && os.Getenv("GTA_AUTH_REGISTER") != "off"
 	authed := buildHTTPHandler(strings.Split(*allowedOrigins, ","), resolver, mux)
 
 	// /singbox/profile 鉴权豁免：手机 sing-box 客户端扫码导入 profile 时无法携带
@@ -3207,6 +3283,8 @@ func main() {
 	// （与扫码页展示的信息一致），不含任何会话/抓包数据，故挂载在鉴权链之外。
 	root := http.NewServeMux()
 	root.HandleFunc("/singbox/profile", capture.handleSingboxProfile)
+	// 自助注册鉴权豁免：注册者本来就是"还没有身份的人"（与 /access/claim 同理）。
+	root.HandleFunc("/access/register", capture.handleRegister)
 	// 启动码 claim / setup.sh 鉴权豁免：agent 首启（还没有 token）与 `curl | bash`
 	// 一键脚本都无法携带 Bearer，两者只凭一次性+限时启动码即可工作（见 access_code.go）。
 	root.HandleFunc("/access/claim", capture.handleAccessClaim)

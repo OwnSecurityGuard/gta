@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     db_path       TEXT NOT NULL,
     extra         TEXT,
     manifest_snapshot TEXT DEFAULT '',
-    project_id      TEXT NOT NULL DEFAULT ''
+    project_id      TEXT NOT NULL DEFAULT '',
+    tenant_id       TEXT NOT NULL DEFAULT 'default'
 );`
 	if _, err := cs.db.Exec(schema); err != nil {
 		return err
@@ -65,6 +66,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 		return err
 	}
 	if err := cs.migrateSessionsAddProjectID(); err != nil {
+		return err
+	}
+	if err := cs.migrateSessionsAddTenantID(); err != nil {
 		return err
 	}
 	// plugin_debug_access 审计表（设计 §6）：sample_bytes 等取证工具的访问留痕。
@@ -134,6 +138,23 @@ func (cs *ControlStore) migrateSessionsAddOwner() error {
 	return nil
 }
 
+// migrateSessionsAddTenantID 为既有数据库补齐 sessions.tenant_id 列（默认 'default'）。
+// Tenant 字段先行（2026-09-05 方案 D4）：单租户部署全部落 'default'，实体后补。
+func (cs *ControlStore) migrateSessionsAddTenantID() error {
+	if hasColumn(cs.db, "sessions", "tenant_id") {
+		return nil
+	}
+	if _, err := cs.db.Exec(`ALTER TABLE sessions ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'`); err != nil {
+		if hasColumn(cs.db, "sessions", "tenant_id") {
+			slog.Info("sessions.tenant_id column added concurrently by another process; skipping migration")
+			return nil
+		}
+		return fmt.Errorf("migrate sessions.tenant_id: %w", err)
+	}
+	slog.Info("migrated control store: added sessions.tenant_id column (backfilled 'default')")
+	return nil
+}
+
 // hasOwnerColumn 复查 sessions 表是否已有 owner 列。
 func hasOwnerColumn(db *sql.DB) bool {
 	return hasColumn(db, "sessions", "owner")
@@ -182,10 +203,10 @@ func (cs *ControlStore) CreateSession(ctx context.Context, meta SessionMeta) err
 		stoppedAt = sql.NullTime{Time: *meta.StoppedAt, Valid: true}
 	}
 	_, err := cs.db.ExecContext(ctx, `
-INSERT INTO sessions(owner, project_id, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
+INSERT INTO sessions(owner, tenant_id, project_id, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
                      raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		meta.Owner, meta.ProjectID, meta.SessionID, meta.StartedAt, stoppedAt, meta.Status, meta.Port, meta.Plugin,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		meta.Owner, normalizeTenant(meta.TenantID), meta.ProjectID, meta.SessionID, meta.StartedAt, stoppedAt, meta.Status, meta.Port, meta.Plugin,
 		meta.Interface, meta.PCAPFile, meta.RawPackets, meta.Events, meta.Metrics,
 		meta.DecodeErrors, meta.DurationSec, meta.DBPath, extraJSON, meta.ManifestSnapshot,
 	)
@@ -193,7 +214,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 }
 
 // sessionSelectCols 是 sessions 查询的列清单（scanSession 与之配套）。
-const sessionSelectCols = `owner, project_id, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
+const sessionSelectCols = `owner, tenant_id, project_id, session_id, started_at, stopped_at, status, port, plugin, interface, pcap_file,
 	raw_packets, events, metrics, decode_errors, duration_sec, db_path, extra, manifest_snapshot`
 
 // GetSession 查询单个会话元数据（不过滤 owner，行为与引入 owner 前一致）。
@@ -220,13 +241,21 @@ func (cs *ControlStore) ListSessions(ctx context.Context) ([]SessionMeta, error)
 	return cs.ListSessionsFor(ctx, SessionOwnerFilter{AllOwners: true})
 }
 
-// ListSessionsFor 按 owner 过滤地列出会话元数据，按 started_at 降序。
+// ListSessionsFor 按可见性过滤地列出会话元数据，按 started_at 降序。
+// 可见性 = owner 匹配 OR 归属 ProjectIDs 中的项目（项目是协作边界）。
 func (cs *ControlStore) ListSessionsFor(ctx context.Context, f SessionOwnerFilter) ([]SessionMeta, error) {
 	query := `SELECT ` + sessionSelectCols + ` FROM sessions`
 	args := []any{}
 	if !f.AllOwners {
-		query += ` WHERE owner=?`
+		query += ` WHERE (owner=?`
 		args = append(args, f.Owner)
+		if len(f.ProjectIDs) > 0 {
+			query += ` OR project_id IN (` + placeholders(len(f.ProjectIDs)) + `)`
+			for _, id := range f.ProjectIDs {
+				args = append(args, id)
+			}
+		}
+		query += `)`
 	}
 	query += ` ORDER BY started_at DESC`
 	rows, err := cs.db.QueryContext(ctx, query, args...)
@@ -245,14 +274,27 @@ func (cs *ControlStore) ListSessionsFor(ctx context.Context, f SessionOwnerFilte
 	return result, rows.Err()
 }
 
-// ListSessionsForProject 列出某项目下的会话元数据，按 started_at 降序、按 owner 可见性过滤。
-func (cs *ControlStore) ListSessionsForProject(ctx context.Context, projectID string, f SessionOwnerFilter) ([]SessionMeta, error) {
+// placeholders 生成 n 个 SQL 占位符（"?,?,..."）。
+func placeholders(n int) string {
+	if n <= 0 {
+		return "NULL"
+	}
+	s := make([]byte, 0, n*2-1)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			s = append(s, ',')
+		}
+		s = append(s, '?')
+	}
+	return string(s)
+}
+
+// ListSessionsForProject 列出某项目下的全部会话元数据，按 started_at 降序。
+// 不做 owner 过滤：项目是协作边界，调用方必须先做 ActionProjectRead 鉴权
+// （2026-09-05 方案 §1.3），否则属于权限旁路。
+func (cs *ControlStore) ListSessionsForProject(ctx context.Context, projectID string, _ SessionOwnerFilter) ([]SessionMeta, error) {
 	query := `SELECT ` + sessionSelectCols + ` FROM sessions WHERE project_id=?`
 	args := []any{projectID}
-	if !f.AllOwners {
-		query += ` AND owner=?`
-		args = append(args, f.Owner)
-	}
 	query += ` ORDER BY started_at DESC`
 	rows, err := cs.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -285,11 +327,11 @@ func (cs *ControlStore) UpdateSession(ctx context.Context, meta SessionMeta) err
 		stoppedAt = sql.NullTime{Time: *meta.StoppedAt, Valid: true}
 	}
 	res, err := cs.db.ExecContext(ctx, `
-UPDATE sessions SET started_at=?, project_id=?, stopped_at=?, status=?, port=?, plugin=?, interface=?, pcap_file=?,
+UPDATE sessions SET started_at=?, tenant_id=?, project_id=?, stopped_at=?, status=?, port=?, plugin=?, interface=?, pcap_file=?,
                     raw_packets=?, events=?, metrics=?, decode_errors=?, duration_sec=?, db_path=?, extra=?,
                     manifest_snapshot=?
 WHERE session_id=?`,
-		meta.StartedAt, meta.ProjectID, stoppedAt, meta.Status, meta.Port, meta.Plugin,
+		meta.StartedAt, normalizeTenant(meta.TenantID), meta.ProjectID, stoppedAt, meta.Status, meta.Port, meta.Plugin,
 		meta.Interface, meta.PCAPFile, meta.RawPackets, meta.Events, meta.Metrics,
 		meta.DecodeErrors, meta.DurationSec, meta.DBPath, extraJSON,
 		meta.ManifestSnapshot, meta.SessionID,
@@ -328,6 +370,10 @@ UPDATE sessions SET status='stopped', stopped_at=? WHERE status='running'`, stop
 
 // SetSessionProject 将会话绑定到某项目（或传空串清空绑定）。
 // 会话不存在时返回错误。
+//
+// Deprecated: 这是无鉴权的裸更新，仅限已鉴权路径内部使用
+// （当前唯一调用方为 moveSessionToProject 的六步校验收口，见 2026-09-05 方案 §5.3）。
+// 新代码一律通过 MCP 层的 moveSessionToProject 走 ActionSessionMoveProject 授权。
 func (cs *ControlStore) SetSessionProject(ctx context.Context, sessionID, projectID string) error {
 	res, err := cs.db.ExecContext(ctx,
 		`UPDATE sessions SET project_id=? WHERE session_id=?`, projectID, sessionID)
@@ -337,6 +383,23 @@ func (cs *ControlStore) SetSessionProject(ctx context.Context, sessionID, projec
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("session %s not found", sessionID)
+	}
+	return nil
+}
+
+// MoveSessionToProject 是 move_session_to_project 的原子落点：带租户 CAS
+// （会话租户与期望值不符时不更新，防止并发迁移期间的跨租户漂移）。
+// 权限校验在调用方（六步收口），本方法只保证原子性。
+func (cs *ControlStore) MoveSessionToProject(ctx context.Context, sessionID, projectID, expectTenant string) error {
+	res, err := cs.db.ExecContext(ctx,
+		`UPDATE sessions SET project_id=? WHERE session_id=? AND tenant_id=?`,
+		projectID, sessionID, expectTenant)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("session %s not found or tenant changed", sessionID)
 	}
 	return nil
 }
@@ -351,7 +414,7 @@ func scanSession(s sessionScanner) (*SessionMeta, error) {
 	var stoppedAt sql.NullTime
 	var extraJSON sql.NullString
 	if err := s.Scan(
-		&meta.Owner, &meta.ProjectID, &meta.SessionID, &meta.StartedAt, &stoppedAt, &meta.Status, &meta.Port, &meta.Plugin,
+		&meta.Owner, &meta.TenantID, &meta.ProjectID, &meta.SessionID, &meta.StartedAt, &stoppedAt, &meta.Status, &meta.Port, &meta.Plugin,
 		&meta.Interface, &meta.PCAPFile, &meta.RawPackets, &meta.Events, &meta.Metrics,
 		&meta.DecodeErrors, &meta.DurationSec, &meta.DBPath, &extraJSON,
 		&meta.ManifestSnapshot,

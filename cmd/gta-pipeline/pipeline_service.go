@@ -19,18 +19,25 @@ import (
 	"gta/pkg/plugin"
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	protocolconfig "gta/pkg/protocol/config"
+	"gta/pkg/schema"
 	"gta/pkg/store"
 )
 
 // pipelineService 是进程级常驻对象，实现 capturecontrol.CaptureEngine 接口。
 // 持有进程级资源（controlStore/registry/rules/workDir）和会话级注册表（tasks map）。
 type pipelineService struct {
-	controlStore *store.ControlStore
+	controlStore store.ControlStoreBackend
 	registry     *plugin.RegistryServer
 	rules        []*analyze.CompiledRule
 	protocolCfg  *protocolconfig.File // 可选：Protocol Behavior Resolver 配置
 	workDir      string
 	logger       *slog.Logger // 进程级 logger，带 component=pipeline_service
+
+	// dbDriver/dbDSN 是事件存储后端配置：sqlite（每会话一个 capture.sqlite）或
+	// postgres（共享 PG 库，按 session_id 隔离）。由 -db-driver/-db-dsn（env
+	// GTA_DB_*/默认 sqlite）解析而来，传给每个会话 store 的工厂方法。
+	dbDriver string
+	dbDSN    string
 
 	// registryAddr 是插件应连接的注册中心地址（即 -registry-addr 的值，如 :9091）。
 	// 通过 GetRegistryAddr 暴露给 gta-mcp，供其 / 插件启动时获知 GTA_REGISTRY_ADDR。
@@ -66,7 +73,7 @@ type pipelineService struct {
 }
 
 // newPipelineService 构造 pipelineService，不启动任何会话。
-func newPipelineService(workDir string, controlStore *store.ControlStore, registry *plugin.RegistryServer, rules []*analyze.CompiledRule, protocolCfg *protocolconfig.File, registryAddr string) *pipelineService {
+func newPipelineService(workDir string, controlStore store.ControlStoreBackend, registry *plugin.RegistryServer, rules []*analyze.CompiledRule, protocolCfg *protocolconfig.File, registryAddr, dbDriver, dbDSN string) *pipelineService {
 	return &pipelineService{
 		workDir:      workDir,
 		controlStore: controlStore,
@@ -75,6 +82,8 @@ func newPipelineService(workDir string, controlStore *store.ControlStore, regist
 		protocolCfg:  protocolCfg,
 		logger:       logging.With("component", "pipeline_service"),
 		registryAddr: registryAddr,
+		dbDriver:     dbDriver,
+		dbDSN:        dbDSN,
 		tasks:        make(map[string]*captureTask),
 		leases:       make(map[string]*proxyLease),
 		agentPorts:   newPortRange(proxyLeaseAgentPortBase, proxyLeaseAgentPortMax),
@@ -83,6 +92,28 @@ func newPipelineService(workDir string, controlStore *store.ControlStore, regist
 		stickyPorts:  make(map[string]int),
 		agentSpawner: spawnSingboxAgentLease,
 	}
+}
+
+// openSessionStore 按 dbDriver 打开（或创建）指定会话的事件存储。
+//
+// sqlite 模式：dsnOrPath 为该会话的 capture.sqlite 路径（每会话独立文件），
+// sessionID 被忽略。
+// postgres 模式：dbDSN 为共享 PG 连接串，sessionID 隔离该会话全部行。
+// 这样 DecodeRaw/Verify 等离线路径与 StartSession 在线路径共用同一路由逻辑。
+func (s *pipelineService) openSessionStore(sessionID, dbPath string, schemaReg *schema.Registry) (store.Store, error) {
+	if store.IsPostgres(s.dbDriver) {
+		return store.OpenCaptureStore(s.dbDriver, s.dbDSN, schemaReg, sessionID)
+	}
+	return store.OpenCaptureStore("sqlite", dbPath, schemaReg, sessionID)
+}
+
+// openSessionStoreReadOnly 是 openSessionStore 的只读版本（供采样/校验场景，
+// 与运行中 writer 并发安全，且不回写会话库）。
+func (s *pipelineService) openSessionStoreReadOnly(sessionID, dbPath string, schemaReg *schema.Registry) (store.Store, error) {
+	if store.IsPostgres(s.dbDriver) {
+		return store.OpenCaptureStoreReadOnly(s.dbDriver, s.dbDSN, schemaReg, sessionID)
+	}
+	return store.OpenCaptureStoreReadOnly("sqlite", dbPath, schemaReg, sessionID)
 }
 
 // 编译期断言：pipelineService 实现 capturecontrol.CaptureEngine 接口。
@@ -155,9 +186,9 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 	}
 	dbPath := filepath.Join(sessionDir, "capture.sqlite")
 
-	st, err := store.NewSQLiteStore(dbPath, nil)
+	st, err := s.openSessionStore(sessionID, dbPath, nil)
 	if err != nil {
-		return capturecontrol.StartSessionResult{}, fmt.Errorf("open sqlite store: %w", err)
+		return capturecontrol.StartSessionResult{}, fmt.Errorf("open store: %w", err)
 	}
 
 	startTime := time.Now()
@@ -192,29 +223,30 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 	sessionCtx, cancel := context.WithCancel(context.Background())
 
 	task := &captureTask{
-		sessionID:   sessionID,
-		dbPath:      dbPath,
-		port:        req.Port,
-		plugin:      req.Plugin,
-		iface:       iface,
-		pcapFile:    pcapFile,
-		sourceName:  sourceName,
-		liveCfg:     liveCfg,
-		mobileCfg:   mobileCfg,
-		agentHub:    s.agentHub,
-		agentOnly:   req.Agent && liveCfg == nil && mobileCfg == nil && pcapFile == "",
-		start:       startTime,
-		reresolve:   make(chan struct{}, 1),
-		registry:    s.registry,
-		owner:       auth.OwnerFrom(ctx),
-		rules:       s.rules,
-		protocolCfg: s.protocolCfg,
-		logger:      s.logger.With("session_id", sessionID),
-		ctx:         sessionCtx,
-		cancel:      cancel,
-		done:        make(chan struct{}),
-		sqliteStore: st,
-		onFinalize:  s.finalizeTask,
+		sessionID:    sessionID,
+		dbPath:       dbPath,
+		port:         req.Port,
+		plugin:       req.Plugin,
+		pluginOwners: req.PluginOwners,
+		iface:        iface,
+		pcapFile:     pcapFile,
+		sourceName:   sourceName,
+		liveCfg:      liveCfg,
+		mobileCfg:    mobileCfg,
+		agentHub:     s.agentHub,
+		agentOnly:    req.Agent && liveCfg == nil && mobileCfg == nil && pcapFile == "",
+		start:        startTime,
+		reresolve:    make(chan struct{}, 1),
+		registry:     s.registry,
+		owner:        auth.OwnerFrom(ctx),
+		rules:        s.rules,
+		protocolCfg:  s.protocolCfg,
+		logger:       s.logger.With("session_id", sessionID),
+		ctx:          sessionCtx,
+		cancel:       cancel,
+		done:         make(chan struct{}),
+		sqliteStore:  st,
+		onFinalize:   s.finalizeTask,
 	}
 
 	// 持有写锁注册 task 并 Start，避免 run goroutine 在 addTask 前退出导致 race
@@ -473,13 +505,14 @@ func (s *pipelineService) DeregisterPlugin(ctx context.Context, instanceID, name
 }
 
 // SetSessionPlugin 运行中热切换某抓包会话的解码插件绑定。
+// pluginOwners 为切换后允许的额外插件 owner 集合（项目成员共用项目插件）。
 // 委托给对应 captureTask；会话不存在或已结束时返回 ErrNoActiveCapture。
-func (s *pipelineService) SetSessionPlugin(_ context.Context, sessionID, plugin string) (string, error) {
+func (s *pipelineService) SetSessionPlugin(_ context.Context, sessionID, plugin string, pluginOwners []string) (string, error) {
 	task, ok := s.getTask(sessionID)
 	if !ok {
 		return "", internalipc.ErrNoActiveCapture
 	}
-	return task.SetSessionPlugin(context.Background(), plugin)
+	return task.SetSessionPlugin(context.Background(), plugin, pluginOwners)
 }
 
 // SubscribePlugins 订阅插件注册表状态变化事件流。

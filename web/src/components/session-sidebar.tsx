@@ -109,7 +109,7 @@ function basename(p: string): string {
 /** 计算会话来源展示标签（列表渲染与搜索过滤共用）。 */
 function sourceLabelOf(session: SessionInfo): string {
   const isFileReplay = !!session.pcap_file;
-  if (session.source === "agent") return "远程 Agent";
+  if (session.source === "agent") return "抓包探针";
   if (session.source === "proxy") {
     return `Mobile Proxy${session.listen_addr ? ` · ${session.listen_addr}` : ""}`;
   }

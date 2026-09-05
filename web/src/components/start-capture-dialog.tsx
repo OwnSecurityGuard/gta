@@ -93,7 +93,7 @@ export function StartCaptureDialog({
   useEffect(() => {
     if (agentConnected && !agentConnectedNotified) {
       setAgentConnectedNotified(true);
-      toast.success("设备已连接", "Agent 正在推流，数据开始产生");
+      toast.success("设备已连接", "探针正在推流，数据开始产生");
     }
     if (agentSessionId == null) setAgentConnectedNotified(false);
   }, [agentConnected, agentConnectedNotified, agentSessionId]);
@@ -257,7 +257,7 @@ export function StartCaptureDialog({
               {(
                 [
                   { id: "nic", label: "服务器网卡" },
-                  { id: "agent", label: "远程 Agent" },
+                  { id: "agent", label: "抓包探针" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -279,8 +279,8 @@ export function StartCaptureDialog({
             </div>
             {source === "agent" && (
               <p className="mt-1.5 text-xs text-muted-foreground">
-                启动后会生成成员机可直接复制的完整 Agent 命令（自动填入服务端地址与令牌），
-                并在页面上等待设备连接——Agent 上线推流后自动变为「已连接」。
+                启动后会生成成员机可直接复制的完整探针命令（自动填入服务端地址与令牌），
+                并在页面上等待设备连接——探针上线推流后自动变为「已连接」。
                 端口可留空（仅作记录用途）。
               </p>
             )}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 
 	"gta/pkg/capture/agent/proto"
 
@@ -35,7 +36,7 @@ func runCapture(ctx context.Context, cfg captureConfig, out chan<- *proto.RawPac
 	if cfg.SnapLen <= 0 {
 		cfg.SnapLen = 1600
 	}
-	h, err := pcap.OpenLive(cfg.Iface, cfg.SnapLen, cfg.Promisc, pcap.BlockForever)
+	h, err := openLiveWithFallback(cfg.Iface, cfg.SnapLen, cfg.Promisc)
 	if err != nil {
 		return fmt.Errorf("open %q: %w", cfg.Iface, err)
 	}
@@ -90,19 +91,115 @@ func notifyCaptureEnded(ended chan<- error, err error) {
 	}
 }
 
-// resolveDefaultIface 挑选默认抓包网卡，供未固化网卡名的下载形态 agent 使用：
-//  1. UDP 出口网卡（Dial 探测不真正发包，最可靠）；
-//  2. 兜底取首个 Up + 非回环 + 绑定了 IPv4 的网卡。
-func resolveDefaultIface() (string, error) {
-	if ip := outboundLocalIP(); ip != "" {
-		if name := ifaceByIP(ip); name != "" {
-			return name, nil
+// openLiveWithFallback 打开 pcap 设备；Windows 下用户/配置给的常是友好名
+// （如 "WLAN"），npcap 只认 \Device\NPF_{GUID}，直开会报 No such device exists。
+// 失败时尝试把友好名翻译成 pcap 设备名（经该网卡的 IP 在设备清单里反查）重开一次。
+func openLiveWithFallback(iface string, snaplen int32, promisc bool) (*pcap.Handle, error) {
+	h, err := pcap.OpenLive(iface, snaplen, promisc, pcap.BlockForever)
+	if err == nil {
+		return h, nil
+	}
+	alt := pcapDeviceByFriendlyName(iface)
+	if alt == "" || alt == iface {
+		return nil, err
+	}
+	h2, err2 := pcap.OpenLive(alt, snaplen, promisc, pcap.BlockForever)
+	if err2 != nil {
+		return nil, err // 保留原始错误，更有指向性
+	}
+	slog.Info("opened pcap device via friendly-name fallback", "given", iface, "device", alt)
+	return h2, nil
+}
+
+// pcapDeviceByFriendlyName 把 Windows 网卡友好名（net.Interfaces 的 Name，
+// 即 ncpa.cpl 里的连接名）翻译成 pcap 设备名：同名网卡拿 IP，再到 pcap 设备
+// 清单里按 IP 反查。找不到返回空串。
+func pcapDeviceByFriendlyName(friendly string) string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		if !strings.EqualFold(iface.Name, friendly) {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			return ""
+		}
+		for _, a := range addrs {
+			ipnet, ok := a.(*net.IPNet)
+			if !ok || ipnet.IP == nil {
+				continue
+			}
+			if dev := pcapDeviceByIP(ipnet.IP); dev != "" {
+				return dev
+			}
 		}
 	}
-	if name := firstUpIface(); name != "" {
-		return name, nil
+	return ""
+}
+
+// pcapDeviceByIP 在 pcap 设备清单里按绑定 IP 反查设备名。
+func pcapDeviceByIP(target net.IP) string {
+	if target == nil {
+		return ""
 	}
-	return "", fmt.Errorf("no usable network interface found; run with --iface to choose one")
+	devs, err := pcap.FindAllDevs()
+	if err != nil {
+		return ""
+	}
+	for _, d := range devs {
+		for _, a := range d.Addresses {
+			if a.IP != nil && a.IP.Equal(target) {
+				return d.Name
+			}
+		}
+	}
+	return ""
+}
+
+// resolveDefaultIface 挑选默认抓包网卡，供未固化网卡名的下载形态 agent 使用。
+//
+// 不能用 net.Interfaces() 的名字直接 OpenLive：Windows 下那是友好名（WLAN/以太网），
+// npcap 只认 \Device\NPF_{GUID}（兼容模式下对连接名的支持也不可靠），跨机器部署时
+// 会踩 "No such device exists"。因此直接枚举 pcap 设备清单，按
+// 「出口 IP 匹配 → 首个有 IPv4 的设备」两级挑选，返回值保证 pcap 能打开。
+func resolveDefaultIface() (string, error) {
+	devs, err := pcap.FindAllDevs()
+	if err != nil {
+		return "", fmt.Errorf("enumerate pcap devices: %w", err)
+	}
+	if len(devs) == 0 {
+		return "", errors.New(
+			"pcap 没有枚举到任何网卡：目标机需要安装 Npcap（https://npcap.com，" +
+				"安装时勾选 WinPcap API-compatible Mode）；已安装的话尝试重装并重启")
+	}
+	// 1) 出口网卡：UDP 拨号探测出口 IP（不真正发包），按 IP 精确匹配设备。
+	if ipStr := outboundLocalIP(); ipStr != "" {
+		if dev := pcapDeviceByIP(net.ParseIP(ipStr)); dev != "" {
+			return dev, nil
+		}
+	}
+	// 2) 兜底：首个绑定了 IPv4 的设备。
+	var withIPv4 []string
+	for _, d := range devs {
+		for _, a := range d.Addresses {
+			if a.IP != nil && a.IP.To4() != nil {
+				withIPv4 = append(withIPv4, d.Name)
+				break
+			}
+		}
+	}
+	if len(withIPv4) > 0 {
+		return withIPv4[0], nil
+	}
+	// 3) 全都没有 IPv4：列出设备清单辅助排障。
+	var sb strings.Builder
+	for _, d := range devs {
+		fmt.Fprintf(&sb, "\n  %s (%s)", d.Name, d.Description)
+	}
+	return "", fmt.Errorf("pcap 设备均未绑定 IPv4，无法自动选择网卡：%s", sb.String())
 }
 
 // outboundLocalIP 用 UDP 拨号到公网地址探测本机出口网卡 IP（不真正发包）。
@@ -116,81 +213,4 @@ func outboundLocalIP() string {
 		return a.IP.String()
 	}
 	return ""
-}
-
-// ifaceByIP 返回绑定了指定 IP 的网卡名。
-func ifaceByIP(ipStr string) string {
-	target := net.ParseIP(ipStr)
-	if target == nil {
-		return ""
-	}
-	for _, iface := range allIfaces() {
-		for _, a := range iface.Addrs {
-			if a.ip != nil && a.ip.Equal(target) {
-				return iface.name
-			}
-		}
-	}
-	return ""
-}
-
-// firstUpIface 返回首个处于 Up 状态、非回环且绑定了 IPv4 的网卡名。
-func firstUpIface() string {
-	for _, iface := range allIfaces() {
-		if iface.name == "" {
-			continue
-		}
-		for _, a := range iface.Addrs {
-			if a.ip != nil && a.ip.To4() != nil {
-				return iface.name
-			}
-		}
-	}
-	return ""
-}
-
-// ifaceAddr 是 ifaceByIP / firstUpIface 共用的网卡地址描述。
-type ifaceAddr struct {
-	ip net.IP
-}
-
-// ifaceEntry 描述一个候选网卡。
-type ifaceEntry struct {
-	name  string
-	Addrs []ifaceAddr
-}
-
-// allIfaces 遍历本机网卡，过滤掉未启用/回环项。
-func allIfaces() []ifaceEntry {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil
-	}
-	out := []ifaceEntry{}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		entry := ifaceEntry{name: iface.Name}
-		for _, a := range addrs {
-			ipnet, ok := a.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			ip := ipnet.IP
-			if ip == nil {
-				continue
-			}
-			ip = ip.To4()
-			entry.Addrs = append(entry.Addrs, ifaceAddr{ip: ip})
-		}
-		if len(entry.Addrs) > 0 {
-			out = append(out, entry)
-		}
-	}
-	return out
 }

@@ -48,7 +48,7 @@ type rawDecodeResult struct {
 // forEachRawDecoded 分批读取会话的 raw_packets 并在进程内解码，
 // 对每个原始包调用 onResult。原始字节仅在此函数内存在，绝不外传前端。
 // opts.Limit>0 时最多处理 Limit 个原始包。
-func forEachRawDecoded(ctx context.Context, st *store.SQLiteStore, dispatcher *decode.Dispatcher, opts decodeRawOptions, onResult func(rawDecodeResult)) error {
+func forEachRawDecoded(ctx context.Context, st store.Store, dispatcher *decode.Dispatcher, opts decodeRawOptions, onResult func(rawDecodeResult)) error {
 	offset := 0
 	var totalRaw int64
 	for {
@@ -141,10 +141,10 @@ func (s *pipelineService) DecodeRawPackets(ctx context.Context, req capturecontr
 		return capturecontrol.DecodeRawPacketsResult{}, fmt.Errorf("plugin %s not found or not a decoder", req.Plugin)
 	}
 
-	// 4. 打开 SQLiteStore
-	st, err := store.NewSQLiteStore(dbPath, schemaReg)
+	// 4. 按 dbDriver 打开会话存储（sqlite 走 capture.sqlite；postgres 走共享 PG 库）。
+	st, err := s.openSessionStore(req.SessionID, dbPath, schemaReg)
 	if err != nil {
-		return capturecontrol.DecodeRawPacketsResult{}, fmt.Errorf("open sqlite: %w", err)
+		return capturecontrol.DecodeRawPacketsResult{}, fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
 
@@ -285,10 +285,10 @@ func (s *pipelineService) TestPlugin(ctx context.Context, req capturecontrol.Tes
 		return capturecontrol.TestPluginResult{}, fmt.Errorf("plugin %s not found or not a decoder", req.Plugin)
 	}
 
-	// 打开 SQLiteStore（只读：与运行中 writer 并发安全，且不回写会话库）
-	st, err := store.NewSQLiteStoreReadOnly(dbPath, schemaReg)
+	// 按 dbDriver 打开会话存储（只读：与运行中 writer 并发安全，且不回写会话库）
+	st, err := s.openSessionStoreReadOnly(req.SessionID, dbPath, schemaReg)
 	if err != nil {
-		return capturecontrol.TestPluginResult{}, fmt.Errorf("open sqlite: %w", err)
+		return capturecontrol.TestPluginResult{}, fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
 

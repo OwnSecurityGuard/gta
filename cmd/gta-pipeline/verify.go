@@ -59,9 +59,9 @@ func (s *pipelineService) Verify(ctx context.Context, req capturecontrol.VerifyR
 		return capturecontrol.VerifyResult{}, fmt.Errorf("plugin %s not found or not a decoder", req.Plugin)
 	}
 
-	st, err := store.NewSQLiteStoreReadOnly(meta.DBPath, schemaReg)
+	st, err := s.openSessionStoreReadOnly(req.SessionID, meta.DBPath, schemaReg)
 	if err != nil {
-		return capturecontrol.VerifyResult{}, fmt.Errorf("open sqlite: %w", err)
+		return capturecontrol.VerifyResult{}, fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
 
@@ -183,9 +183,9 @@ func (s *pipelineService) SampleBytes(ctx context.Context, req capturecontrol.Sa
 	}
 
 	// 只读打开；schemaReg 取默认空 registry（仅读 raw_packets，无需 schema）。
-	st, err := store.NewSQLiteStoreReadOnly(meta.DBPath, nil)
+	st, err := s.openSessionStoreReadOnly(req.SessionID, meta.DBPath, nil)
 	if err != nil {
-		return capturecontrol.SampleBytesResult{}, fmt.Errorf("open sqlite: %w", err)
+		return capturecontrol.SampleBytesResult{}, fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
 

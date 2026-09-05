@@ -60,13 +60,16 @@ export function ProjectPage({
   const recentSessions: ProjectRecentSession[] =
     data?.recent_sessions ?? project?.recent_sessions ?? [];
 
-  // 管理员判权（与后端 CanManage 语义一致）：
-  // 项目创建者本人（owner）、项目内 admin 角色成员、或全局管理员。
+  // 权限入口由后端下发（get_project.capabilities，authz.Action 列表），
+  // 前端不再自行判权（2026-09-05：权限判定统一收口在 pkg/authz）。
+  // capabilities 缺失时（旧后端）回退到本地启发式判断。
   const identity = useIdentity();
-  const isProjectAdmin =
-    (project?.created_by != null && project.created_by === identity?.owner) ||
-    identity?.isAdmin === true ||
-    (project?.members?.some((m) => m.user === identity?.owner && m.role === "admin") ?? false);
+  const caps = data?.capabilities;
+  const isProjectAdmin = caps
+    ? caps.includes("project:manage_members") || caps.includes("project:manage_plugins")
+    : (project?.created_by != null && project.created_by === identity?.owner) ||
+      identity?.isAdmin === true ||
+      (project?.members?.some((m) => m.user === identity?.owner && m.role === "admin") ?? false);
 
   // —— 增删成员 / 插件 / 规则 ——
   const addMember = useAddProjectMember(projectId);
@@ -92,19 +95,31 @@ export function ProjectPage({
   const [pluginName, setPluginName] = useState("");
   const [ruleName, setRuleName] = useState("");
 
-  function handleAddMember() {
+  // 与后端 validOwnerName 同规则的即时预校验。
+  const OWNER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+
+  async function handleAddMember() {
     const user = memberUser.trim();
     if (!user) return;
-    addMember.mutate(
-      { user, role: memberRole },
-      {
-        onSuccess: () => {
-          setMemberUser("");
-          toast.success("已添加成员", user);
-        },
-        onError: (err) => toast.error("添加失败", err.message),
-      },
-    );
+    if (!OWNER_NAME_RE.test(user)) {
+      toast.error("用户名格式不正确", "字母或数字开头，可含 . _ -，最长 64 字符");
+      return;
+    }
+    try {
+      const res = await addMember.mutateAsync({ user, role: memberRole });
+      setMemberUser("");
+      if (res.pending) {
+        // 预邀请：对方还没注册这个用户名。
+        toast.success(
+          "已加入（预邀请）",
+          `${user} 尚未注册：对方在「设置 → 没有令牌？快速开始」注册同名身份后自动生效`,
+        );
+      } else {
+        toast.success("已添加成员", user);
+      }
+    } catch (err) {
+      toast.error("添加失败", err instanceof Error ? err.message : String(err));
+    }
   }
 
   function handleRemoveMember(user: string) {
@@ -252,12 +267,25 @@ export function ProjectPage({
         <section>
           <h2 className="text-sm font-medium text-foreground">成员</h2>
           <div className="mt-2 rounded-2xl border border-border bg-card/60 p-4">
+            {/* Owner 不在 members 表（SSOT 是 projects.owner），单独成行。 */}
+            {project.owner ? (
+              <ul className="mb-1.5 space-y-1.5">
+                <li className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm">{project.owner}</span>
+                    <Badge variant="default">Owner</Badge>
+                  </div>
+                </li>
+              </ul>
+            ) : null}
             {members.length === 0 ? (
-              <p className="text-sm text-muted-foreground">暂无成员。</p>
+              <p className="text-sm text-muted-foreground">暂无其他成员。</p>
             ) : (
               <ul className="space-y-1.5">
                 {members.map((m) => {
-                  const isOwner = project.created_by === m.user;
+                  const isProjectOwner = project.owner === m.user;
+                  // 「待注册」仅在 token 多用户模式下有意义（匿名单机 identity=local）。
+                  const showPending = !isProjectOwner && !m.registered && identity !== null && identity.owner !== "local";
                   return (
                     <li
                       key={m.user}
@@ -265,11 +293,20 @@ export function ProjectPage({
                     >
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="truncate text-sm">{m.user}</span>
-                        <Badge variant={isOwner ? "default" : "outline"}>
-                          {isOwner ? "创建者" : m.role === "admin" ? "管理员" : "成员"}
+                        <Badge variant={isProjectOwner ? "default" : "outline"}>
+                          {isProjectOwner ? "Owner" : m.role === "admin" ? "管理员" : "成员"}
                         </Badge>
+                        {showPending && (
+                          <Badge
+                            variant="outline"
+                            className="text-muted-foreground"
+                            title="该用户名尚未注册：对方在「设置 → 快速开始」注册同名身份后自动生效"
+                          >
+                            待注册
+                          </Badge>
+                        )}
                       </div>
-                      {isProjectAdmin && !isOwner && (
+                      {isProjectAdmin && !isProjectOwner && (
                         <button
                           type="button"
                           onClick={() => handleRemoveMember(m.user)}
@@ -311,6 +348,12 @@ export function ProjectPage({
                   添加
                 </button>
               </div>
+            )}
+            {isProjectAdmin && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                成员以用户名标识：对方若尚未注册，会以「待注册」状态预邀请加入；对方在
+                「设置 → 没有令牌？快速开始」注册同名身份后自动生效，即可看到本项目并使用项目插件。
+              </p>
             )}
           </div>
         </section>

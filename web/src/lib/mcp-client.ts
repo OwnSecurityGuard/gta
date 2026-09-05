@@ -44,6 +44,31 @@ export class McpClient {
   }
 
   /**
+   * 自助注册：完全的新用户免邀请获取独立身份（POST /access/register）。
+   * 返回的 token 与邀请凭证同待遇 —— 仅此一次展示，由调用方立即保存。
+   * 服务端关闭注册（GTA_AUTH_REGISTER=off / 匿名模式）时返回 403。
+   */
+  async register(name: string): Promise<{ owner: string; token: string }> {
+    // baseUrl 形如 "/mcp"（走同源代理）或 "http://host:8781/mcp"（直连）：
+    // 注册端点挂在同源根路径 /access/register 上，这里还原出 origin 再拼接。
+    const u = new URL(this.baseUrl, window.location.origin);
+    const res = await fetch(`${u.origin}/access/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `注册失败（HTTP ${res.status}）`);
+    }
+    const data = (await res.json()) as { ok: boolean; owner: string; token: string };
+    if (!data.ok || !data.token) {
+      throw new Error("注册响应缺少 token");
+    }
+    return { owner: data.owner, token: data.token };
+  }
+
+  /**
    * 发送 JSON-RPC 请求并返回业务层结果
    * 自动处理 MCP 协议的双层 JSON 解析 (response → content[0].text)
    */

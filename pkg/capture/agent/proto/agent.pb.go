@@ -260,6 +260,1487 @@ func (x *PushAck) GetRejected() uint64 {
 	return 0
 }
 
+type RegisterProbeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Hostname      string                 `protobuf:"bytes,1,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	Os            string                 `protobuf:"bytes,2,opt,name=os,proto3" json:"os,omitempty"`
+	Arch          string                 `protobuf:"bytes,3,opt,name=arch,proto3" json:"arch,omitempty"`
+	Version       string                 `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
+	Capabilities  []string               `protobuf:"bytes,5,rep,name=capabilities,proto3" json:"capabilities,omitempty"`                    // pcap / mobile / plugin_host
+	Name          string                 `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`                                    // 可选业务名（如 game-server-01）；空则默认 hostname
+	PrevProbeId   string                 `protobuf:"bytes,7,opt,name=prev_probe_id,json=prevProbeId,proto3" json:"prev_probe_id,omitempty"` // re-register 时携带旧 probe_id 覆盖
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterProbeRequest) Reset() {
+	*x = RegisterProbeRequest{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterProbeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterProbeRequest) ProtoMessage() {}
+
+func (x *RegisterProbeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterProbeRequest.ProtoReflect.Descriptor instead.
+func (*RegisterProbeRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *RegisterProbeRequest) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *RegisterProbeRequest) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
+func (x *RegisterProbeRequest) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
+func (x *RegisterProbeRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *RegisterProbeRequest) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *RegisterProbeRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RegisterProbeRequest) GetPrevProbeId() string {
+	if x != nil {
+		return x.PrevProbeId
+	}
+	return ""
+}
+
+type RegisterProbeAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	ProbeToken    string                 `protobuf:"bytes,2,opt,name=probe_token,json=probeToken,proto3" json:"probe_token,omitempty"` // 明文仅此一次下发；服务端只存 SHA-256
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterProbeAck) Reset() {
+	*x = RegisterProbeAck{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterProbeAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterProbeAck) ProtoMessage() {}
+
+func (x *RegisterProbeAck) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterProbeAck.ProtoReflect.Descriptor instead.
+func (*RegisterProbeAck) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RegisterProbeAck) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *RegisterProbeAck) GetProbeToken() string {
+	if x != nil {
+		return x.ProbeToken
+	}
+	return ""
+}
+
+type ProbeHello struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Capabilities  []string               `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeHello) Reset() {
+	*x = ProbeHello{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeHello) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeHello) ProtoMessage() {}
+
+func (x *ProbeHello) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeHello.ProtoReflect.Descriptor instead.
+func (*ProbeHello) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ProbeHello) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeHello) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ProbeHello) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+// ProbeCaptureStatus 是抓包状态机快照（三维度的第二维）。
+// state: idle | starting | running | stopped | failed（失败带 error，进程不退出）。
+type ProbeCaptureStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	State         string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Iface         string                 `protobuf:"bytes,3,opt,name=iface,proto3" json:"iface,omitempty"`
+	Ports         []int32                `protobuf:"varint,4,rep,packed,name=ports,proto3" json:"ports,omitempty"`
+	Hosts         []string               `protobuf:"bytes,5,rep,name=hosts,proto3" json:"hosts,omitempty"`
+	Error         string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeCaptureStatus) Reset() {
+	*x = ProbeCaptureStatus{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeCaptureStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeCaptureStatus) ProtoMessage() {}
+
+func (x *ProbeCaptureStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeCaptureStatus.ProtoReflect.Descriptor instead.
+func (*ProbeCaptureStatus) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ProbeCaptureStatus) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *ProbeCaptureStatus) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ProbeCaptureStatus) GetIface() string {
+	if x != nil {
+		return x.Iface
+	}
+	return ""
+}
+
+func (x *ProbeCaptureStatus) GetPorts() []int32 {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+func (x *ProbeCaptureStatus) GetHosts() []string {
+	if x != nil {
+		return x.Hosts
+	}
+	return nil
+}
+
+func (x *ProbeCaptureStatus) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// ProbeDataStatus 是数据面快照（第三维）。last_packet 与 last_upload 缺一不可：
+// 前者新后者旧 = 抓到了但推不上去（上行断）；两者皆旧 = 该机没流量或过滤太窄。
+type ProbeDataStatus struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	LastPacketUnixMs int64                  `protobuf:"varint,1,opt,name=last_packet_unix_ms,json=lastPacketUnixMs,proto3" json:"last_packet_unix_ms,omitempty"` // 0 = 从未抓到帧
+	LastUploadUnixMs int64                  `protobuf:"varint,2,opt,name=last_upload_unix_ms,json=lastUploadUnixMs,proto3" json:"last_upload_unix_ms,omitempty"` // 0 = 从未成功推流（未被确认）
+	PacketsCaptured  uint64                 `protobuf:"varint,3,opt,name=packets_captured,json=packetsCaptured,proto3" json:"packets_captured,omitempty"`
+	PacketsAcked     uint64                 `protobuf:"varint,4,opt,name=packets_acked,json=packetsAcked,proto3" json:"packets_acked,omitempty"`
+	SpoolDepth       uint64                 `protobuf:"varint,5,opt,name=spool_depth,json=spoolDepth,proto3" json:"spool_depth,omitempty"`
+	Dropped          uint64                 `protobuf:"varint,6,opt,name=dropped,proto3" json:"dropped,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ProbeDataStatus) Reset() {
+	*x = ProbeDataStatus{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeDataStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeDataStatus) ProtoMessage() {}
+
+func (x *ProbeDataStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeDataStatus.ProtoReflect.Descriptor instead.
+func (*ProbeDataStatus) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ProbeDataStatus) GetLastPacketUnixMs() int64 {
+	if x != nil {
+		return x.LastPacketUnixMs
+	}
+	return 0
+}
+
+func (x *ProbeDataStatus) GetLastUploadUnixMs() int64 {
+	if x != nil {
+		return x.LastUploadUnixMs
+	}
+	return 0
+}
+
+func (x *ProbeDataStatus) GetPacketsCaptured() uint64 {
+	if x != nil {
+		return x.PacketsCaptured
+	}
+	return 0
+}
+
+func (x *ProbeDataStatus) GetPacketsAcked() uint64 {
+	if x != nil {
+		return x.PacketsAcked
+	}
+	return 0
+}
+
+func (x *ProbeDataStatus) GetSpoolDepth() uint64 {
+	if x != nil {
+		return x.SpoolDepth
+	}
+	return 0
+}
+
+func (x *ProbeDataStatus) GetDropped() uint64 {
+	if x != nil {
+		return x.Dropped
+	}
+	return 0
+}
+
+type ProbeArchiveStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Bytes         uint64                 `protobuf:"varint,1,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	Segments      uint32                 `protobuf:"varint,2,opt,name=segments,proto3" json:"segments,omitempty"`
+	OldestUnix    int64                  `protobuf:"varint,3,opt,name=oldest_unix,json=oldestUnix,proto3" json:"oldest_unix,omitempty"` // 0 = 空
+	NewestUnix    int64                  `protobuf:"varint,4,opt,name=newest_unix,json=newestUnix,proto3" json:"newest_unix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeArchiveStatus) Reset() {
+	*x = ProbeArchiveStatus{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeArchiveStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeArchiveStatus) ProtoMessage() {}
+
+func (x *ProbeArchiveStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeArchiveStatus.ProtoReflect.Descriptor instead.
+func (*ProbeArchiveStatus) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ProbeArchiveStatus) GetBytes() uint64 {
+	if x != nil {
+		return x.Bytes
+	}
+	return 0
+}
+
+func (x *ProbeArchiveStatus) GetSegments() uint32 {
+	if x != nil {
+		return x.Segments
+	}
+	return 0
+}
+
+func (x *ProbeArchiveStatus) GetOldestUnix() int64 {
+	if x != nil {
+		return x.OldestUnix
+	}
+	return 0
+}
+
+func (x *ProbeArchiveStatus) GetNewestUnix() int64 {
+	if x != nil {
+		return x.NewestUnix
+	}
+	return 0
+}
+
+type ProbeHeartbeat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Capture       *ProbeCaptureStatus    `protobuf:"bytes,1,opt,name=capture,proto3" json:"capture,omitempty"`
+	Data          *ProbeDataStatus       `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	Archive       *ProbeArchiveStatus    `protobuf:"bytes,3,opt,name=archive,proto3" json:"archive,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeHeartbeat) Reset() {
+	*x = ProbeHeartbeat{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeHeartbeat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeHeartbeat) ProtoMessage() {}
+
+func (x *ProbeHeartbeat) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeHeartbeat.ProtoReflect.Descriptor instead.
+func (*ProbeHeartbeat) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ProbeHeartbeat) GetCapture() *ProbeCaptureStatus {
+	if x != nil {
+		return x.Capture
+	}
+	return nil
+}
+
+func (x *ProbeHeartbeat) GetData() *ProbeDataStatus {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *ProbeHeartbeat) GetArchive() *ProbeArchiveStatus {
+	if x != nil {
+		return x.Archive
+	}
+	return nil
+}
+
+type CommandResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandResult) Reset() {
+	*x = CommandResult{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandResult) ProtoMessage() {}
+
+func (x *CommandResult) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
+func (*CommandResult) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CommandResult) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CommandResult) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *CommandResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type ArchiveSegmentInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SegId         string                 `protobuf:"bytes,1,opt,name=seg_id,json=segId,proto3" json:"seg_id,omitempty"`
+	FirstUnix     int64                  `protobuf:"varint,2,opt,name=first_unix,json=firstUnix,proto3" json:"first_unix,omitempty"`
+	LastUnix      int64                  `protobuf:"varint,3,opt,name=last_unix,json=lastUnix,proto3" json:"last_unix,omitempty"`
+	Packets       uint64                 `protobuf:"varint,4,opt,name=packets,proto3" json:"packets,omitempty"`
+	Bytes         uint64                 `protobuf:"varint,5,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	LinkType      uint32                 `protobuf:"varint,6,opt,name=link_type,json=linkType,proto3" json:"link_type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArchiveSegmentInfo) Reset() {
+	*x = ArchiveSegmentInfo{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArchiveSegmentInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArchiveSegmentInfo) ProtoMessage() {}
+
+func (x *ArchiveSegmentInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArchiveSegmentInfo.ProtoReflect.Descriptor instead.
+func (*ArchiveSegmentInfo) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ArchiveSegmentInfo) GetSegId() string {
+	if x != nil {
+		return x.SegId
+	}
+	return ""
+}
+
+func (x *ArchiveSegmentInfo) GetFirstUnix() int64 {
+	if x != nil {
+		return x.FirstUnix
+	}
+	return 0
+}
+
+func (x *ArchiveSegmentInfo) GetLastUnix() int64 {
+	if x != nil {
+		return x.LastUnix
+	}
+	return 0
+}
+
+func (x *ArchiveSegmentInfo) GetPackets() uint64 {
+	if x != nil {
+		return x.Packets
+	}
+	return 0
+}
+
+func (x *ArchiveSegmentInfo) GetBytes() uint64 {
+	if x != nil {
+		return x.Bytes
+	}
+	return 0
+}
+
+func (x *ArchiveSegmentInfo) GetLinkType() uint32 {
+	if x != nil {
+		return x.LinkType
+	}
+	return 0
+}
+
+// ArchiveSegmentsReply 是 ArchiveQuery 指令的应答（经 ControlEvent 上行）。
+type ArchiveSegmentsReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Segments      []*ArchiveSegmentInfo  `protobuf:"bytes,1,rep,name=segments,proto3" json:"segments,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArchiveSegmentsReply) Reset() {
+	*x = ArchiveSegmentsReply{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArchiveSegmentsReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArchiveSegmentsReply) ProtoMessage() {}
+
+func (x *ArchiveSegmentsReply) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArchiveSegmentsReply.ProtoReflect.Descriptor instead.
+func (*ArchiveSegmentsReply) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ArchiveSegmentsReply) GetSegments() []*ArchiveSegmentInfo {
+	if x != nil {
+		return x.Segments
+	}
+	return nil
+}
+
+type ControlEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Payload:
+	//
+	//	*ControlEvent_Hello
+	//	*ControlEvent_Heartbeat
+	//	*ControlEvent_Result
+	//	*ControlEvent_ArchiveSegments
+	Payload       isControlEvent_Payload `protobuf_oneof:"payload"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ControlEvent) Reset() {
+	*x = ControlEvent{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ControlEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ControlEvent) ProtoMessage() {}
+
+func (x *ControlEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ControlEvent.ProtoReflect.Descriptor instead.
+func (*ControlEvent) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ControlEvent) GetPayload() isControlEvent_Payload {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *ControlEvent) GetHello() *ProbeHello {
+	if x != nil {
+		if x, ok := x.Payload.(*ControlEvent_Hello); ok {
+			return x.Hello
+		}
+	}
+	return nil
+}
+
+func (x *ControlEvent) GetHeartbeat() *ProbeHeartbeat {
+	if x != nil {
+		if x, ok := x.Payload.(*ControlEvent_Heartbeat); ok {
+			return x.Heartbeat
+		}
+	}
+	return nil
+}
+
+func (x *ControlEvent) GetResult() *CommandResult {
+	if x != nil {
+		if x, ok := x.Payload.(*ControlEvent_Result); ok {
+			return x.Result
+		}
+	}
+	return nil
+}
+
+func (x *ControlEvent) GetArchiveSegments() *ArchiveSegmentsReply {
+	if x != nil {
+		if x, ok := x.Payload.(*ControlEvent_ArchiveSegments); ok {
+			return x.ArchiveSegments
+		}
+	}
+	return nil
+}
+
+type isControlEvent_Payload interface {
+	isControlEvent_Payload()
+}
+
+type ControlEvent_Hello struct {
+	Hello *ProbeHello `protobuf:"bytes,1,opt,name=hello,proto3,oneof"`
+}
+
+type ControlEvent_Heartbeat struct {
+	Heartbeat *ProbeHeartbeat `protobuf:"bytes,2,opt,name=heartbeat,proto3,oneof"`
+}
+
+type ControlEvent_Result struct {
+	Result *CommandResult `protobuf:"bytes,3,opt,name=result,proto3,oneof"`
+}
+
+type ControlEvent_ArchiveSegments struct {
+	ArchiveSegments *ArchiveSegmentsReply `protobuf:"bytes,4,opt,name=archive_segments,json=archiveSegments,proto3,oneof"`
+}
+
+func (*ControlEvent_Hello) isControlEvent_Payload() {}
+
+func (*ControlEvent_Heartbeat) isControlEvent_Payload() {}
+
+func (*ControlEvent_Result) isControlEvent_Payload() {}
+
+func (*ControlEvent_ArchiveSegments) isControlEvent_Payload() {}
+
+// AssignCapture 指派抓包：iface 空 = 自动探测；ports/hosts/bpf 全空 = 不过滤。
+type AssignCapture struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Iface         string                 `protobuf:"bytes,2,opt,name=iface,proto3" json:"iface,omitempty"`
+	Ports         []int32                `protobuf:"varint,3,rep,packed,name=ports,proto3" json:"ports,omitempty"`
+	Hosts         []string               `protobuf:"bytes,4,rep,name=hosts,proto3" json:"hosts,omitempty"`
+	Bpf           string                 `protobuf:"bytes,5,opt,name=bpf,proto3" json:"bpf,omitempty"`          // 显式 BPF；非空时覆盖 ports/hosts 派生
+	Snaplen       int32                  `protobuf:"varint,6,opt,name=snaplen,proto3" json:"snaplen,omitempty"` // 0 = 默认 1600
+	Promisc       bool                   `protobuf:"varint,7,opt,name=promisc,proto3" json:"promisc,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AssignCapture) Reset() {
+	*x = AssignCapture{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AssignCapture) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AssignCapture) ProtoMessage() {}
+
+func (x *AssignCapture) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AssignCapture.ProtoReflect.Descriptor instead.
+func (*AssignCapture) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AssignCapture) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *AssignCapture) GetIface() string {
+	if x != nil {
+		return x.Iface
+	}
+	return ""
+}
+
+func (x *AssignCapture) GetPorts() []int32 {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+func (x *AssignCapture) GetHosts() []string {
+	if x != nil {
+		return x.Hosts
+	}
+	return nil
+}
+
+func (x *AssignCapture) GetBpf() string {
+	if x != nil {
+		return x.Bpf
+	}
+	return ""
+}
+
+func (x *AssignCapture) GetSnaplen() int32 {
+	if x != nil {
+		return x.Snaplen
+	}
+	return 0
+}
+
+func (x *AssignCapture) GetPromisc() bool {
+	if x != nil {
+		return x.Promisc
+	}
+	return false
+}
+
+type StopCaptureCmd struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StopCaptureCmd) Reset() {
+	*x = StopCaptureCmd{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopCaptureCmd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopCaptureCmd) ProtoMessage() {}
+
+func (x *StopCaptureCmd) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopCaptureCmd.ProtoReflect.Descriptor instead.
+func (*StopCaptureCmd) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{15}
+}
+
+// UpdateFilter 热更新过滤条件，不中断抓包（SetBPFFilter）。
+// bpf 为空串时按 ports/hosts 重新派生（全空 = 清除过滤）。
+type UpdateFilter struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ports         []int32                `protobuf:"varint,1,rep,packed,name=ports,proto3" json:"ports,omitempty"`
+	Hosts         []string               `protobuf:"bytes,2,rep,name=hosts,proto3" json:"hosts,omitempty"`
+	Bpf           string                 `protobuf:"bytes,3,opt,name=bpf,proto3" json:"bpf,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateFilter) Reset() {
+	*x = UpdateFilter{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateFilter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateFilter) ProtoMessage() {}
+
+func (x *UpdateFilter) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateFilter.ProtoReflect.Descriptor instead.
+func (*UpdateFilter) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *UpdateFilter) GetPorts() []int32 {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+func (x *UpdateFilter) GetHosts() []string {
+	if x != nil {
+		return x.Hosts
+	}
+	return nil
+}
+
+func (x *UpdateFilter) GetBpf() string {
+	if x != nil {
+		return x.Bpf
+	}
+	return ""
+}
+
+// SetConfig 运行配置部分更新；键必须是探针侧白名单内的键，其余键报错。
+type SetConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kvs           map[string]string      `protobuf:"bytes,1,rep,name=kvs,proto3" json:"kvs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetConfig) Reset() {
+	*x = SetConfig{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetConfig) ProtoMessage() {}
+
+func (x *SetConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetConfig.ProtoReflect.Descriptor instead.
+func (*SetConfig) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *SetConfig) GetKvs() map[string]string {
+	if x != nil {
+		return x.Kvs
+	}
+	return nil
+}
+
+type ArchiveQuery struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FromUnix      int64                  `protobuf:"varint,1,opt,name=from_unix,json=fromUnix,proto3" json:"from_unix,omitempty"`
+	ToUnix        int64                  `protobuf:"varint,2,opt,name=to_unix,json=toUnix,proto3" json:"to_unix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArchiveQuery) Reset() {
+	*x = ArchiveQuery{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArchiveQuery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArchiveQuery) ProtoMessage() {}
+
+func (x *ArchiveQuery) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArchiveQuery.ProtoReflect.Descriptor instead.
+func (*ArchiveQuery) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ArchiveQuery) GetFromUnix() int64 {
+	if x != nil {
+		return x.FromUnix
+	}
+	return 0
+}
+
+func (x *ArchiveQuery) GetToUnix() int64 {
+	if x != nil {
+		return x.ToUnix
+	}
+	return 0
+}
+
+type ArchiveUpload struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TargetSessionId string                 `protobuf:"bytes,1,opt,name=target_session_id,json=targetSessionId,proto3" json:"target_session_id,omitempty"` // 回放数据喂给的新会话
+	FromUnix        int64                  `protobuf:"varint,2,opt,name=from_unix,json=fromUnix,proto3" json:"from_unix,omitempty"`
+	ToUnix          int64                  `protobuf:"varint,3,opt,name=to_unix,json=toUnix,proto3" json:"to_unix,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ArchiveUpload) Reset() {
+	*x = ArchiveUpload{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArchiveUpload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArchiveUpload) ProtoMessage() {}
+
+func (x *ArchiveUpload) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArchiveUpload.ProtoReflect.Descriptor instead.
+func (*ArchiveUpload) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ArchiveUpload) GetTargetSessionId() string {
+	if x != nil {
+		return x.TargetSessionId
+	}
+	return ""
+}
+
+func (x *ArchiveUpload) GetFromUnix() int64 {
+	if x != nil {
+		return x.FromUnix
+	}
+	return 0
+}
+
+func (x *ArchiveUpload) GetToUnix() int64 {
+	if x != nil {
+		return x.ToUnix
+	}
+	return 0
+}
+
+type RetryCmd struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RetryCmd) Reset() {
+	*x = RetryCmd{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RetryCmd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RetryCmd) ProtoMessage() {}
+
+func (x *RetryCmd) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RetryCmd.ProtoReflect.Descriptor instead.
+func (*RetryCmd) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{20}
+}
+
+type Command struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // 幂等键；探针侧 LRU 去重
+	// Types that are valid to be assigned to Payload:
+	//
+	//	*Command_Assign
+	//	*Command_Stop
+	//	*Command_Filter
+	//	*Command_Config
+	//	*Command_ArchiveQuery
+	//	*Command_ArchiveUpload
+	//	*Command_Retry
+	Payload       isCommand_Payload `protobuf_oneof:"payload"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Command) Reset() {
+	*x = Command{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Command) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Command) ProtoMessage() {}
+
+func (x *Command) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Command.ProtoReflect.Descriptor instead.
+func (*Command) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *Command) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Command) GetPayload() isCommand_Payload {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *Command) GetAssign() *AssignCapture {
+	if x != nil {
+		if x, ok := x.Payload.(*Command_Assign); ok {
+			return x.Assign
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetStop() *StopCaptureCmd {
+	if x != nil {
+		if x, ok := x.Payload.(*Command_Stop); ok {
+			return x.Stop
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetFilter() *UpdateFilter {
+	if x != nil {
+		if x, ok := x.Payload.(*Command_Filter); ok {
+			return x.Filter
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetConfig() *SetConfig {
+	if x != nil {
+		if x, ok := x.Payload.(*Command_Config); ok {
+			return x.Config
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetArchiveQuery() *ArchiveQuery {
+	if x != nil {
+		if x, ok := x.Payload.(*Command_ArchiveQuery); ok {
+			return x.ArchiveQuery
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetArchiveUpload() *ArchiveUpload {
+	if x != nil {
+		if x, ok := x.Payload.(*Command_ArchiveUpload); ok {
+			return x.ArchiveUpload
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetRetry() *RetryCmd {
+	if x != nil {
+		if x, ok := x.Payload.(*Command_Retry); ok {
+			return x.Retry
+		}
+	}
+	return nil
+}
+
+type isCommand_Payload interface {
+	isCommand_Payload()
+}
+
+type Command_Assign struct {
+	Assign *AssignCapture `protobuf:"bytes,2,opt,name=assign,proto3,oneof"`
+}
+
+type Command_Stop struct {
+	Stop *StopCaptureCmd `protobuf:"bytes,3,opt,name=stop,proto3,oneof"`
+}
+
+type Command_Filter struct {
+	Filter *UpdateFilter `protobuf:"bytes,4,opt,name=filter,proto3,oneof"`
+}
+
+type Command_Config struct {
+	Config *SetConfig `protobuf:"bytes,5,opt,name=config,proto3,oneof"`
+}
+
+type Command_ArchiveQuery struct {
+	ArchiveQuery *ArchiveQuery `protobuf:"bytes,6,opt,name=archive_query,json=archiveQuery,proto3,oneof"`
+}
+
+type Command_ArchiveUpload struct {
+	ArchiveUpload *ArchiveUpload `protobuf:"bytes,7,opt,name=archive_upload,json=archiveUpload,proto3,oneof"`
+}
+
+type Command_Retry struct {
+	Retry *RetryCmd `protobuf:"bytes,8,opt,name=retry,proto3,oneof"`
+}
+
+func (*Command_Assign) isCommand_Payload() {}
+
+func (*Command_Stop) isCommand_Payload() {}
+
+func (*Command_Filter) isCommand_Payload() {}
+
+func (*Command_Config) isCommand_Payload() {}
+
+func (*Command_ArchiveQuery) isCommand_Payload() {}
+
+func (*Command_ArchiveUpload) isCommand_Payload() {}
+
+func (*Command_Retry) isCommand_Payload() {}
+
+type ArchiveChunk struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TargetSessionId string                 `protobuf:"bytes,1,opt,name=target_session_id,json=targetSessionId,proto3" json:"target_session_id,omitempty"`
+	Seq             uint64                 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
+	Packet          *RawPacket             `protobuf:"bytes,3,opt,name=packet,proto3" json:"packet,omitempty"` // 逐包；packet 为空且 final=true 表示流结束
+	Final           bool                   `protobuf:"varint,4,opt,name=final,proto3" json:"final,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ArchiveChunk) Reset() {
+	*x = ArchiveChunk{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArchiveChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArchiveChunk) ProtoMessage() {}
+
+func (x *ArchiveChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArchiveChunk.ProtoReflect.Descriptor instead.
+func (*ArchiveChunk) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ArchiveChunk) GetTargetSessionId() string {
+	if x != nil {
+		return x.TargetSessionId
+	}
+	return ""
+}
+
+func (x *ArchiveChunk) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *ArchiveChunk) GetPacket() *RawPacket {
+	if x != nil {
+		return x.Packet
+	}
+	return nil
+}
+
+func (x *ArchiveChunk) GetFinal() bool {
+	if x != nil {
+		return x.Final
+	}
+	return false
+}
+
+type UploadArchiveAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Packets       uint64                 `protobuf:"varint,1,opt,name=packets,proto3" json:"packets,omitempty"`
+	Dropped       uint64                 `protobuf:"varint,2,opt,name=dropped,proto3" json:"dropped,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadArchiveAck) Reset() {
+	*x = UploadArchiveAck{}
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadArchiveAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadArchiveAck) ProtoMessage() {}
+
+func (x *UploadArchiveAck) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_capture_agent_proto_agent_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadArchiveAck.ProtoReflect.Descriptor instead.
+func (*UploadArchiveAck) Descriptor() ([]byte, []int) {
+	return file_pkg_capture_agent_proto_agent_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *UploadArchiveAck) GetPackets() uint64 {
+	if x != nil {
+		return x.Packets
+	}
+	return 0
+}
+
+func (x *UploadArchiveAck) GetDropped() uint64 {
+	if x != nil {
+		return x.Dropped
+	}
+	return 0
+}
+
 var File_pkg_capture_agent_proto_agent_proto protoreflect.FileDescriptor
 
 const file_pkg_capture_agent_proto_agent_proto_rawDesc = "" +
@@ -287,9 +1768,123 @@ const file_pkg_capture_agent_proto_agent_proto_rawDesc = "" +
 	"\apackets\x18\x02 \x01(\x04R\apackets\x12\x1c\n" +
 	"\tdelivered\x18\x03 \x01(\x04R\tdelivered\x12\x18\n" +
 	"\adropped\x18\x04 \x01(\x04R\adropped\x12\x1a\n" +
-	"\brejected\x18\x05 \x01(\x04R\brejected2C\n" +
+	"\brejected\x18\x05 \x01(\x04R\brejected\"\xcc\x01\n" +
+	"\x14RegisterProbeRequest\x12\x1a\n" +
+	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x0e\n" +
+	"\x02os\x18\x02 \x01(\tR\x02os\x12\x12\n" +
+	"\x04arch\x18\x03 \x01(\tR\x04arch\x12\x18\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion\x12\"\n" +
+	"\fcapabilities\x18\x05 \x03(\tR\fcapabilities\x12\x12\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\x12\"\n" +
+	"\rprev_probe_id\x18\a \x01(\tR\vprevProbeId\"N\n" +
+	"\x10RegisterProbeAck\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x1f\n" +
+	"\vprobe_token\x18\x02 \x01(\tR\n" +
+	"probeToken\"e\n" +
+	"\n" +
+	"ProbeHello\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\"\n" +
+	"\fcapabilities\x18\x03 \x03(\tR\fcapabilities\"\xa1\x01\n" +
+	"\x12ProbeCaptureStatus\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x14\n" +
+	"\x05iface\x18\x03 \x01(\tR\x05iface\x12\x14\n" +
+	"\x05ports\x18\x04 \x03(\x05R\x05ports\x12\x14\n" +
+	"\x05hosts\x18\x05 \x03(\tR\x05hosts\x12\x14\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\"\xfa\x01\n" +
+	"\x0fProbeDataStatus\x12-\n" +
+	"\x13last_packet_unix_ms\x18\x01 \x01(\x03R\x10lastPacketUnixMs\x12-\n" +
+	"\x13last_upload_unix_ms\x18\x02 \x01(\x03R\x10lastUploadUnixMs\x12)\n" +
+	"\x10packets_captured\x18\x03 \x01(\x04R\x0fpacketsCaptured\x12#\n" +
+	"\rpackets_acked\x18\x04 \x01(\x04R\fpacketsAcked\x12\x1f\n" +
+	"\vspool_depth\x18\x05 \x01(\x04R\n" +
+	"spoolDepth\x12\x18\n" +
+	"\adropped\x18\x06 \x01(\x04R\adropped\"\x88\x01\n" +
+	"\x12ProbeArchiveStatus\x12\x14\n" +
+	"\x05bytes\x18\x01 \x01(\x04R\x05bytes\x12\x1a\n" +
+	"\bsegments\x18\x02 \x01(\rR\bsegments\x12\x1f\n" +
+	"\voldest_unix\x18\x03 \x01(\x03R\n" +
+	"oldestUnix\x12\x1f\n" +
+	"\vnewest_unix\x18\x04 \x01(\x03R\n" +
+	"newestUnix\"\xb2\x01\n" +
+	"\x0eProbeHeartbeat\x127\n" +
+	"\acapture\x18\x01 \x01(\v2\x1d.gta.agent.ProbeCaptureStatusR\acapture\x12.\n" +
+	"\x04data\x18\x02 \x01(\v2\x1a.gta.agent.ProbeDataStatusR\x04data\x127\n" +
+	"\aarchive\x18\x03 \x01(\v2\x1d.gta.agent.ProbeArchiveStatusR\aarchive\"E\n" +
+	"\rCommandResult\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xb4\x01\n" +
+	"\x12ArchiveSegmentInfo\x12\x15\n" +
+	"\x06seg_id\x18\x01 \x01(\tR\x05segId\x12\x1d\n" +
+	"\n" +
+	"first_unix\x18\x02 \x01(\x03R\tfirstUnix\x12\x1b\n" +
+	"\tlast_unix\x18\x03 \x01(\x03R\blastUnix\x12\x18\n" +
+	"\apackets\x18\x04 \x01(\x04R\apackets\x12\x14\n" +
+	"\x05bytes\x18\x05 \x01(\x04R\x05bytes\x12\x1b\n" +
+	"\tlink_type\x18\x06 \x01(\rR\blinkType\"Q\n" +
+	"\x14ArchiveSegmentsReply\x129\n" +
+	"\bsegments\x18\x01 \x03(\v2\x1d.gta.agent.ArchiveSegmentInfoR\bsegments\"\x85\x02\n" +
+	"\fControlEvent\x12-\n" +
+	"\x05hello\x18\x01 \x01(\v2\x15.gta.agent.ProbeHelloH\x00R\x05hello\x129\n" +
+	"\theartbeat\x18\x02 \x01(\v2\x19.gta.agent.ProbeHeartbeatH\x00R\theartbeat\x122\n" +
+	"\x06result\x18\x03 \x01(\v2\x18.gta.agent.CommandResultH\x00R\x06result\x12L\n" +
+	"\x10archive_segments\x18\x04 \x01(\v2\x1f.gta.agent.ArchiveSegmentsReplyH\x00R\x0farchiveSegmentsB\t\n" +
+	"\apayload\"\xb6\x01\n" +
+	"\rAssignCapture\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
+	"\x05iface\x18\x02 \x01(\tR\x05iface\x12\x14\n" +
+	"\x05ports\x18\x03 \x03(\x05R\x05ports\x12\x14\n" +
+	"\x05hosts\x18\x04 \x03(\tR\x05hosts\x12\x10\n" +
+	"\x03bpf\x18\x05 \x01(\tR\x03bpf\x12\x18\n" +
+	"\asnaplen\x18\x06 \x01(\x05R\asnaplen\x12\x18\n" +
+	"\apromisc\x18\a \x01(\bR\apromisc\"\x10\n" +
+	"\x0eStopCaptureCmd\"L\n" +
+	"\fUpdateFilter\x12\x14\n" +
+	"\x05ports\x18\x01 \x03(\x05R\x05ports\x12\x14\n" +
+	"\x05hosts\x18\x02 \x03(\tR\x05hosts\x12\x10\n" +
+	"\x03bpf\x18\x03 \x01(\tR\x03bpf\"t\n" +
+	"\tSetConfig\x12/\n" +
+	"\x03kvs\x18\x01 \x03(\v2\x1d.gta.agent.SetConfig.KvsEntryR\x03kvs\x1a6\n" +
+	"\bKvsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"D\n" +
+	"\fArchiveQuery\x12\x1b\n" +
+	"\tfrom_unix\x18\x01 \x01(\x03R\bfromUnix\x12\x17\n" +
+	"\ato_unix\x18\x02 \x01(\x03R\x06toUnix\"q\n" +
+	"\rArchiveUpload\x12*\n" +
+	"\x11target_session_id\x18\x01 \x01(\tR\x0ftargetSessionId\x12\x1b\n" +
+	"\tfrom_unix\x18\x02 \x01(\x03R\bfromUnix\x12\x17\n" +
+	"\ato_unix\x18\x03 \x01(\x03R\x06toUnix\"\n" +
+	"\n" +
+	"\bRetryCmd\"\x9c\x03\n" +
+	"\aCommand\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x122\n" +
+	"\x06assign\x18\x02 \x01(\v2\x18.gta.agent.AssignCaptureH\x00R\x06assign\x12/\n" +
+	"\x04stop\x18\x03 \x01(\v2\x19.gta.agent.StopCaptureCmdH\x00R\x04stop\x121\n" +
+	"\x06filter\x18\x04 \x01(\v2\x17.gta.agent.UpdateFilterH\x00R\x06filter\x12.\n" +
+	"\x06config\x18\x05 \x01(\v2\x14.gta.agent.SetConfigH\x00R\x06config\x12>\n" +
+	"\rarchive_query\x18\x06 \x01(\v2\x17.gta.agent.ArchiveQueryH\x00R\farchiveQuery\x12A\n" +
+	"\x0earchive_upload\x18\a \x01(\v2\x18.gta.agent.ArchiveUploadH\x00R\rarchiveUpload\x12+\n" +
+	"\x05retry\x18\b \x01(\v2\x13.gta.agent.RetryCmdH\x00R\x05retryB\t\n" +
+	"\apayload\"\x90\x01\n" +
+	"\fArchiveChunk\x12*\n" +
+	"\x11target_session_id\x18\x01 \x01(\tR\x0ftargetSessionId\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12,\n" +
+	"\x06packet\x18\x03 \x01(\v2\x14.gta.agent.RawPacketR\x06packet\x12\x14\n" +
+	"\x05final\x18\x04 \x01(\bR\x05final\"F\n" +
+	"\x10UploadArchiveAck\x12\x18\n" +
+	"\apackets\x18\x01 \x01(\x04R\apackets\x12\x18\n" +
+	"\adropped\x18\x02 \x01(\x04R\adropped2C\n" +
 	"\vAgentIngest\x124\n" +
-	"\x04Push\x12\x16.gta.agent.PacketBatch\x1a\x12.gta.agent.PushAck(\x01B\x1dZ\x1bgta/pkg/capture/agent/protob\x06proto3"
+	"\x04Push\x12\x16.gta.agent.PacketBatch\x1a\x12.gta.agent.PushAck(\x012\xe2\x01\n" +
+	"\fAgentControl\x12M\n" +
+	"\rRegisterProbe\x12\x1f.gta.agent.RegisterProbeRequest\x1a\x1b.gta.agent.RegisterProbeAck\x12:\n" +
+	"\aConnect\x12\x17.gta.agent.ControlEvent\x1a\x12.gta.agent.Command(\x010\x01\x12G\n" +
+	"\rUploadArchive\x12\x17.gta.agent.ArchiveChunk\x1a\x1b.gta.agent.UploadArchiveAck(\x01B\x1dZ\x1bgta/pkg/capture/agent/protob\x06proto3"
 
 var (
 	file_pkg_capture_agent_proto_agent_proto_rawDescOnce sync.Once
@@ -303,23 +1898,68 @@ func file_pkg_capture_agent_proto_agent_proto_rawDescGZIP() []byte {
 	return file_pkg_capture_agent_proto_agent_proto_rawDescData
 }
 
-var file_pkg_capture_agent_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_pkg_capture_agent_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_pkg_capture_agent_proto_agent_proto_goTypes = []any{
-	(*PacketBatch)(nil), // 0: gta.agent.PacketBatch
-	(*RawPacket)(nil),   // 1: gta.agent.RawPacket
-	(*PushAck)(nil),     // 2: gta.agent.PushAck
-	nil,                 // 3: gta.agent.RawPacket.MetadataEntry
+	(*PacketBatch)(nil),          // 0: gta.agent.PacketBatch
+	(*RawPacket)(nil),            // 1: gta.agent.RawPacket
+	(*PushAck)(nil),              // 2: gta.agent.PushAck
+	(*RegisterProbeRequest)(nil), // 3: gta.agent.RegisterProbeRequest
+	(*RegisterProbeAck)(nil),     // 4: gta.agent.RegisterProbeAck
+	(*ProbeHello)(nil),           // 5: gta.agent.ProbeHello
+	(*ProbeCaptureStatus)(nil),   // 6: gta.agent.ProbeCaptureStatus
+	(*ProbeDataStatus)(nil),      // 7: gta.agent.ProbeDataStatus
+	(*ProbeArchiveStatus)(nil),   // 8: gta.agent.ProbeArchiveStatus
+	(*ProbeHeartbeat)(nil),       // 9: gta.agent.ProbeHeartbeat
+	(*CommandResult)(nil),        // 10: gta.agent.CommandResult
+	(*ArchiveSegmentInfo)(nil),   // 11: gta.agent.ArchiveSegmentInfo
+	(*ArchiveSegmentsReply)(nil), // 12: gta.agent.ArchiveSegmentsReply
+	(*ControlEvent)(nil),         // 13: gta.agent.ControlEvent
+	(*AssignCapture)(nil),        // 14: gta.agent.AssignCapture
+	(*StopCaptureCmd)(nil),       // 15: gta.agent.StopCaptureCmd
+	(*UpdateFilter)(nil),         // 16: gta.agent.UpdateFilter
+	(*SetConfig)(nil),            // 17: gta.agent.SetConfig
+	(*ArchiveQuery)(nil),         // 18: gta.agent.ArchiveQuery
+	(*ArchiveUpload)(nil),        // 19: gta.agent.ArchiveUpload
+	(*RetryCmd)(nil),             // 20: gta.agent.RetryCmd
+	(*Command)(nil),              // 21: gta.agent.Command
+	(*ArchiveChunk)(nil),         // 22: gta.agent.ArchiveChunk
+	(*UploadArchiveAck)(nil),     // 23: gta.agent.UploadArchiveAck
+	nil,                          // 24: gta.agent.RawPacket.MetadataEntry
+	nil,                          // 25: gta.agent.SetConfig.KvsEntry
 }
 var file_pkg_capture_agent_proto_agent_proto_depIdxs = []int32{
-	1, // 0: gta.agent.PacketBatch.packets:type_name -> gta.agent.RawPacket
-	3, // 1: gta.agent.RawPacket.metadata:type_name -> gta.agent.RawPacket.MetadataEntry
-	0, // 2: gta.agent.AgentIngest.Push:input_type -> gta.agent.PacketBatch
-	2, // 3: gta.agent.AgentIngest.Push:output_type -> gta.agent.PushAck
-	3, // [3:4] is the sub-list for method output_type
-	2, // [2:3] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	1,  // 0: gta.agent.PacketBatch.packets:type_name -> gta.agent.RawPacket
+	24, // 1: gta.agent.RawPacket.metadata:type_name -> gta.agent.RawPacket.MetadataEntry
+	6,  // 2: gta.agent.ProbeHeartbeat.capture:type_name -> gta.agent.ProbeCaptureStatus
+	7,  // 3: gta.agent.ProbeHeartbeat.data:type_name -> gta.agent.ProbeDataStatus
+	8,  // 4: gta.agent.ProbeHeartbeat.archive:type_name -> gta.agent.ProbeArchiveStatus
+	11, // 5: gta.agent.ArchiveSegmentsReply.segments:type_name -> gta.agent.ArchiveSegmentInfo
+	5,  // 6: gta.agent.ControlEvent.hello:type_name -> gta.agent.ProbeHello
+	9,  // 7: gta.agent.ControlEvent.heartbeat:type_name -> gta.agent.ProbeHeartbeat
+	10, // 8: gta.agent.ControlEvent.result:type_name -> gta.agent.CommandResult
+	12, // 9: gta.agent.ControlEvent.archive_segments:type_name -> gta.agent.ArchiveSegmentsReply
+	25, // 10: gta.agent.SetConfig.kvs:type_name -> gta.agent.SetConfig.KvsEntry
+	14, // 11: gta.agent.Command.assign:type_name -> gta.agent.AssignCapture
+	15, // 12: gta.agent.Command.stop:type_name -> gta.agent.StopCaptureCmd
+	16, // 13: gta.agent.Command.filter:type_name -> gta.agent.UpdateFilter
+	17, // 14: gta.agent.Command.config:type_name -> gta.agent.SetConfig
+	18, // 15: gta.agent.Command.archive_query:type_name -> gta.agent.ArchiveQuery
+	19, // 16: gta.agent.Command.archive_upload:type_name -> gta.agent.ArchiveUpload
+	20, // 17: gta.agent.Command.retry:type_name -> gta.agent.RetryCmd
+	1,  // 18: gta.agent.ArchiveChunk.packet:type_name -> gta.agent.RawPacket
+	0,  // 19: gta.agent.AgentIngest.Push:input_type -> gta.agent.PacketBatch
+	3,  // 20: gta.agent.AgentControl.RegisterProbe:input_type -> gta.agent.RegisterProbeRequest
+	13, // 21: gta.agent.AgentControl.Connect:input_type -> gta.agent.ControlEvent
+	22, // 22: gta.agent.AgentControl.UploadArchive:input_type -> gta.agent.ArchiveChunk
+	2,  // 23: gta.agent.AgentIngest.Push:output_type -> gta.agent.PushAck
+	4,  // 24: gta.agent.AgentControl.RegisterProbe:output_type -> gta.agent.RegisterProbeAck
+	21, // 25: gta.agent.AgentControl.Connect:output_type -> gta.agent.Command
+	23, // 26: gta.agent.AgentControl.UploadArchive:output_type -> gta.agent.UploadArchiveAck
+	23, // [23:27] is the sub-list for method output_type
+	19, // [19:23] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_pkg_capture_agent_proto_agent_proto_init() }
@@ -327,15 +1967,30 @@ func file_pkg_capture_agent_proto_agent_proto_init() {
 	if File_pkg_capture_agent_proto_agent_proto != nil {
 		return
 	}
+	file_pkg_capture_agent_proto_agent_proto_msgTypes[13].OneofWrappers = []any{
+		(*ControlEvent_Hello)(nil),
+		(*ControlEvent_Heartbeat)(nil),
+		(*ControlEvent_Result)(nil),
+		(*ControlEvent_ArchiveSegments)(nil),
+	}
+	file_pkg_capture_agent_proto_agent_proto_msgTypes[21].OneofWrappers = []any{
+		(*Command_Assign)(nil),
+		(*Command_Stop)(nil),
+		(*Command_Filter)(nil),
+		(*Command_Config)(nil),
+		(*Command_ArchiveQuery)(nil),
+		(*Command_ArchiveUpload)(nil),
+		(*Command_Retry)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_capture_agent_proto_agent_proto_rawDesc), len(file_pkg_capture_agent_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   26,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_pkg_capture_agent_proto_agent_proto_goTypes,
 		DependencyIndexes: file_pkg_capture_agent_proto_agent_proto_depIdxs,

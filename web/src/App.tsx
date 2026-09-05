@@ -15,11 +15,12 @@ import { StartCaptureDialog } from "@/components/start-capture-dialog";
 import { ProxyConfigDialog } from "@/components/proxy-config-dialog";
 import { AgentDownloadDialog } from "@/components/agent-download-dialog";
 import { MembersAdminDialog } from "@/components/members-admin-dialog";
+import { ProbeAdminDialog } from "@/components/probe-admin-dialog";
 import { MyCapturePage } from "@/components/my-capture-page";
 import { ProjectPage } from "@/components/project-page";
 import { SessionOverviewPage } from "@/components/session-overview-page";
 import { Button } from "@/components/ui/button";
-import { Sun, Moon, Settings, Play, Square, Cable, KeyRound, Download, ChevronDown, Check, UserRound, Users } from "lucide-react";
+import { Sun, Moon, Settings, Play, Square, Cable, KeyRound, Download, ChevronDown, Check, UserRound, Users, Server } from "lucide-react";
 import { RAW_DEBUG_ENABLED } from "@/lib/env";
 import { usePluginEventStream, useStopCapture, useSessions } from "@/hooks/use-mcp";
 import { useAuthError, useIdentity } from "@/hooks/use-auth";
@@ -92,6 +93,7 @@ export default function App() {
   const [proxyConfigOpen, setProxyConfigOpen] = useState(false);
   const [agentDownloadOpen, setAgentDownloadOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [probesOpen, setProbesOpen] = useState(false);
   const [isDark, setIsDark] = useState(() => {
     const stored = localStorage.getItem("gta-theme");
     if (stored) return stored === "dark";
@@ -432,6 +434,17 @@ export default function App() {
               variant="outline"
               size="sm"
               className="h-8"
+              onClick={() => setProbesOpen(true)}
+              title="探针管理（接入的抓包机器：状态 / 停抓 / 本地留存导入）"
+              aria-label="探针管理"
+            >
+              <Server className="h-4 w-4" />
+              探针
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
               onClick={() => setMembersOpen(true)}
               title="成员管理（邀请码 / 成员账号列表与撤销）"
               aria-label="成员管理"
@@ -597,6 +610,15 @@ export default function App() {
       />
       {/* 成员管理弹窗（邀请码 / 成员账号列表与撤销） */}
       <MembersAdminDialog open={membersOpen} onClose={() => setMembersOpen(false)} />
+      {/* 探针管理弹窗（三维度状态 / 停抓 / 改名 / 吊销 / 本地留存离线导入） */}
+      <ProbeAdminDialog
+        open={probesOpen}
+        onClose={() => setProbesOpen(false)}
+        onImported={(sessionId) => {
+          setSelectedSessionId(sessionId);
+          setActiveTab("overview");
+        }}
+      />
       {/* 开始抓包弹窗（本机网卡 / 远程 agent 源） */}
       <StartCaptureDialog
         open={startOpen}

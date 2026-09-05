@@ -17,6 +17,7 @@ import (
 	"gta/pkg/internalipc/capturecontrol"
 	"gta/pkg/logging"
 	"gta/pkg/plugin"
+	"gta/pkg/probe"
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 	protocolconfig "gta/pkg/protocol/config"
 	"gta/pkg/schema"
@@ -50,6 +51,8 @@ type pipelineService struct {
 	//（是否连上 / 最近一次收到数据的时间），让 UI 能区分「已连接但没流量」
 	// 与「没连上」——这两个状态的处置建议完全不同。
 	agentLiveness *agent.IngestServer
+	// probeMgr 非 nil 时启用探针管理面：会话结束联动探针停抓（OnSessionClosed）。
+	probeMgr *probe.Manager
 
 	mu    sync.RWMutex
 	tasks map[string]*captureTask
@@ -127,6 +130,9 @@ func (s *pipelineService) SetAgentHub(h *agent.Hub) { s.agentHub = h }
 // GetStatus 通过它上报 agent_connected / agent_last_seen_unix。
 func (s *pipelineService) SetAgentLiveness(srv *agent.IngestServer) { s.agentLiveness = srv }
 
+// SetProbeManager 注入探针管理面（main.go 在启用 -agent-ingest-addr 时调用）。
+func (s *pipelineService) SetProbeManager(m *probe.Manager) { s.probeMgr = m }
+
 // addTask 注册 task 到 map（写锁）。
 func (s *pipelineService) addTask(t *captureTask) {
 	s.mu.Lock()
@@ -203,6 +209,15 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 		slog.Warn("unable to capture manifest snapshot", "plugin", req.Plugin, "error", err)
 	}
 
+	// 会话来源标记（探针链路：source=probe-archive + probe_id/时间窗）。
+	// 落 sessions.extra 列（JSON），GetSession/ListSessions 均可读回。
+	var extra map[string]any
+	for k, v := range req.Metadata {
+		if extra == nil {
+			extra = make(map[string]any, len(req.Metadata))
+		}
+		extra[k] = v
+	}
 	if err := s.controlStore.CreateSession(ctx, store.SessionMeta{
 		Owner:            auth.OwnerFrom(ctx),
 		SessionID:        sessionID,
@@ -215,6 +230,7 @@ func (s *pipelineService) StartSession(ctx context.Context, req capturecontrol.S
 		DBPath:           dbPath,
 		ManifestSnapshot: manifestSnapshot,
 		ProjectID:        req.ProjectID,
+		Extra:            extra,
 	}); err != nil {
 		_ = st.Close()
 		return capturecontrol.StartSessionResult{}, fmt.Errorf("create session record: %w", err)
@@ -391,6 +407,11 @@ func (s *pipelineService) finalizeTask(task *captureTask) {
 	// 使同一个二维码可以反复开始/停止抓包。非租约会话是 no-op。
 	// 此时不持 s.mu，与 leaseMu 无锁序冲突。
 	s.clearLeaseCapture(task.sessionID)
+	// 探针联动：会话结束（用户停会话/探针抓包异常退出）时清除期望状态并让
+	// 探针停止抓包归档收尾（探针进程常驻）。probeMgr 未启用时为 no-op。
+	if s.probeMgr != nil {
+		s.probeMgr.OnSessionClosed(task.sessionID)
+	}
 }
 
 // StopAll 优雅停止所有活跃抓包会话，并等待各自 finalize 完成（写 ControlStore running→stopped）。

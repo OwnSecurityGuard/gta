@@ -128,3 +128,177 @@ var AgentIngest_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "pkg/capture/agent/proto/agent.proto",
 }
+
+const (
+	AgentControl_RegisterProbe_FullMethodName = "/gta.agent.AgentControl/RegisterProbe"
+	AgentControl_Connect_FullMethodName       = "/gta.agent.AgentControl/Connect"
+	AgentControl_UploadArchive_FullMethodName = "/gta.agent.AgentControl/UploadArchive"
+)
+
+// AgentControlClient is the client API for AgentControl service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type AgentControlClient interface {
+	// RegisterProbe 注册探针并换发长期凭证。鉴权：用户 token（claim 所得）。
+	// 同一机器重复注册（token 丢失重接）携带 prev_probe_id 覆盖旧记录。
+	RegisterProbe(ctx context.Context, in *RegisterProbeRequest, opts ...grpc.CallOption) (*RegisterProbeAck, error)
+	// Connect 控制双向流。鉴权：probe_token。开流首包必须是 ProbeHello。
+	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ControlEvent, Command], error)
+	// UploadArchive 归档回放上传。鉴权：probe_token。
+	UploadArchive(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ArchiveChunk, UploadArchiveAck], error)
+}
+
+type agentControlClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewAgentControlClient(cc grpc.ClientConnInterface) AgentControlClient {
+	return &agentControlClient{cc}
+}
+
+func (c *agentControlClient) RegisterProbe(ctx context.Context, in *RegisterProbeRequest, opts ...grpc.CallOption) (*RegisterProbeAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterProbeAck)
+	err := c.cc.Invoke(ctx, AgentControl_RegisterProbe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentControlClient) Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ControlEvent, Command], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentControl_ServiceDesc.Streams[0], AgentControl_Connect_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ControlEvent, Command]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentControl_ConnectClient = grpc.BidiStreamingClient[ControlEvent, Command]
+
+func (c *agentControlClient) UploadArchive(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ArchiveChunk, UploadArchiveAck], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentControl_ServiceDesc.Streams[1], AgentControl_UploadArchive_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ArchiveChunk, UploadArchiveAck]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentControl_UploadArchiveClient = grpc.ClientStreamingClient[ArchiveChunk, UploadArchiveAck]
+
+// AgentControlServer is the server API for AgentControl service.
+// All implementations must embed UnimplementedAgentControlServer
+// for forward compatibility.
+type AgentControlServer interface {
+	// RegisterProbe 注册探针并换发长期凭证。鉴权：用户 token（claim 所得）。
+	// 同一机器重复注册（token 丢失重接）携带 prev_probe_id 覆盖旧记录。
+	RegisterProbe(context.Context, *RegisterProbeRequest) (*RegisterProbeAck, error)
+	// Connect 控制双向流。鉴权：probe_token。开流首包必须是 ProbeHello。
+	Connect(grpc.BidiStreamingServer[ControlEvent, Command]) error
+	// UploadArchive 归档回放上传。鉴权：probe_token。
+	UploadArchive(grpc.ClientStreamingServer[ArchiveChunk, UploadArchiveAck]) error
+	mustEmbedUnimplementedAgentControlServer()
+}
+
+// UnimplementedAgentControlServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedAgentControlServer struct{}
+
+func (UnimplementedAgentControlServer) RegisterProbe(context.Context, *RegisterProbeRequest) (*RegisterProbeAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterProbe not implemented")
+}
+func (UnimplementedAgentControlServer) Connect(grpc.BidiStreamingServer[ControlEvent, Command]) error {
+	return status.Error(codes.Unimplemented, "method Connect not implemented")
+}
+func (UnimplementedAgentControlServer) UploadArchive(grpc.ClientStreamingServer[ArchiveChunk, UploadArchiveAck]) error {
+	return status.Error(codes.Unimplemented, "method UploadArchive not implemented")
+}
+func (UnimplementedAgentControlServer) mustEmbedUnimplementedAgentControlServer() {}
+func (UnimplementedAgentControlServer) testEmbeddedByValue()                      {}
+
+// UnsafeAgentControlServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to AgentControlServer will
+// result in compilation errors.
+type UnsafeAgentControlServer interface {
+	mustEmbedUnimplementedAgentControlServer()
+}
+
+func RegisterAgentControlServer(s grpc.ServiceRegistrar, srv AgentControlServer) {
+	// If the following call panics, it indicates UnimplementedAgentControlServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&AgentControl_ServiceDesc, srv)
+}
+
+func _AgentControl_RegisterProbe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterProbeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).RegisterProbe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_RegisterProbe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).RegisterProbe(ctx, req.(*RegisterProbeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentControl_Connect_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentControlServer).Connect(&grpc.GenericServerStream[ControlEvent, Command]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentControl_ConnectServer = grpc.BidiStreamingServer[ControlEvent, Command]
+
+func _AgentControl_UploadArchive_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentControlServer).UploadArchive(&grpc.GenericServerStream[ArchiveChunk, UploadArchiveAck]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentControl_UploadArchiveServer = grpc.ClientStreamingServer[ArchiveChunk, UploadArchiveAck]
+
+// AgentControl_ServiceDesc is the grpc.ServiceDesc for AgentControl service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var AgentControl_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "gta.agent.AgentControl",
+	HandlerType: (*AgentControlServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "RegisterProbe",
+			Handler:    _AgentControl_RegisterProbe_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Connect",
+			Handler:       _AgentControl_Connect_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "UploadArchive",
+			Handler:       _AgentControl_UploadArchive_Handler,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "pkg/capture/agent/proto/agent.proto",
+}

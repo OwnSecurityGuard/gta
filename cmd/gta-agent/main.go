@@ -1,12 +1,14 @@
-// gta-agent 是团队成员本机一键启动的单二进制 agent：
+// gta-agent 是成员机上的常驻探针（v2 探针优化，docs/plans/2026-09-05）：
 //
-//  1. 抓包推流：本机网卡抓包（需 -tags pcap 编译），按批推送到
-//     gta-pipeline 的 AgentIngest server（默认 :9092），保留完整帧与 link_type；
-//  2. 托管本地插件：发现本机插件进程并以隧道模式拉起
-//     （GTA_TUNNEL=1 + GTA_REGISTRY_ADDR + GTA_AUTH_TOKEN 注入），
-//     插件经 SDK RunRegisterLoopWithOptions 自动注册到共享服务端。
+//  1. 抓包推流：本机网卡抓包（需 -tags pcap 编译），经 spool 落盘后推送到
+//     gta-pipeline 的 AgentIngest server（默认 :9092），归档模式下按留存策略
+//     在本机长期保留（Ack 不删段），支持按时间窗回放导入平台；
+//  2. 控制面：本地回环 HTTP（127.0.0.1:19500，给坐在机器前的人/脚本）+
+//     远端 AgentControl 双向流（desired-state 对齐，平台页面直接操控）；
+//  3. 托管本地插件：发现本机插件进程并以隧道模式拉起。
 //
-// 用法：gta-agent --token gta_xxx --server host[:port] [--session <id> --iface <name>]
+// 身份与回连存 probe.json（首启引导：命令行 flag / 固化配置 / 启动码）；
+// 抓包参数是会话级配置，由平台指派或本地控制面临时给定，不落 probe.json。
 package main
 
 import (
@@ -22,8 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"gta/pkg/capture/agent/proto"
-	"gta/pkg/spool"
 	"gta/pkg/version"
 )
 
@@ -66,13 +66,13 @@ func main() {
 	fs.StringVar(&registryAddr, "registry-addr", "", "插件注册地址覆盖（默认由 --server 推导，如 host:9091）")
 	fs.StringVar(&ingestAddr, "ingest-addr", "", "AgentIngest 推流地址覆盖（默认由 --server 推导，如 host:9092）")
 	fs.StringVar(&token, "token", "", "团队 token（gta_xxx）；留空为匿名模式（服务端 owner=local）")
-	fs.StringVar(&sessionID, "session", "", "目标抓包会话 id；留空禁用抓包（仅托管插件）")
+	fs.StringVar(&sessionID, "session", "", "目标抓包会话 id；留空则抓包由控制面/平台指令启动")
 	fs.StringVar(&iface, "iface", "", "抓包网卡名；--session 留空时忽略")
 	fs.StringVar(&bpf, "filter", "", "BPF 过滤表达式（控制上行带宽）")
 	fs.StringVar(&pluginDir, "plugin-dir", "plugins", "本地插件发现根目录")
 	fs.IntVar(&batchSize, "batch-size", 128, "推流批大小（包数阈值）")
 	fs.DurationVar(&batchInterval, "batch-interval", 200*time.Millisecond, "推流批时间阈值（低流量兜底刷批间隔）")
-	fs.StringVar(&spoolDir, "spool-dir", "", "上行链路磁盘缓冲目录（断电续传）；留空自动取 <用户缓存>/gta-agent/spool/<session>")
+	fs.StringVar(&spoolDir, "spool-dir", "", "上行链路磁盘缓冲目录根（断电续传+留存）；留空自动取 <用户缓存>/gta-agent/spool")
 	fs.IntVar(&snapLen, "snaplen", 1600, "pcap snaplen")
 	fs.BoolVar(&promisc, "promisc", true, "混杂模式")
 	fs.StringVar(&accessCode, "code", "", "启动码 GTA-XXXX-XXXX：无 server/token 时用它自动领取配置并回连")
@@ -86,52 +86,29 @@ func main() {
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
-	// 固化配置（-tags embedded 下载形态）：任何命令行参数为空时以其作为默认值。
-	// 这样下载回来的 agent 无需填任何参数（含 token）即可回连、托管插件并抓包。
+	// ---- 身份与回连的装配（优先级：flag > probe.json > 固化配置 > 启动码）----
+	cfg, cfgLoaded := loadAgentConfig()
+	if !cfgLoaded {
+		// 首启：注册探针默认开启归档留存（24h / 4GB，可用控制面/远端指令调整）。
+		cfg.Archive.Enabled = true
+	}
+
+	// 固化配置（-tags embedded 下载形态）或 sidecar config.embedded.json：
+	// 仅当更高优先级来源没有给值时作为默认值。
 	embedded, hasEmbedded := loadEmbeddedConfig()
-	// 预置（多平台下载）产物未带 embedded 标签：运行时从可执行文件同目录载入
-	// config.embedded.json（download zip 里同放的 sidecar 配置），保持免参数行为。
 	if !hasEmbedded {
 		if sc, ok := loadSidecarConfig(); ok {
 			embedded, hasEmbedded = sc, true
 		}
 	}
-	if hasEmbedded && embedded != nil {
-		if server == "" {
-			server = embedded.Server
-		}
-		if registryAddr == "" {
-			registryAddr = embedded.RegistryAddr
-		}
-		if ingestAddr == "" {
-			ingestAddr = embedded.IngestAddr
-		}
-		if token == "" {
-			token = embedded.Token
-		}
-		if sessionID == "" {
-			sessionID = embedded.SessionID
-		}
-		if iface == "" {
-			iface = embedded.Iface
-		}
-		if bpf == "" {
-			bpf = embedded.BPF
-		}
-		if pluginDir == "" {
-			pluginDir = embedded.PluginDir
-		}
-		if spoolDir == "" {
-			spoolDir = embedded.SpoolDir
-		}
-	}
 
 	// 启动码：显式传 --code，或既无 server/token 又无固化配置（首启引导）时，
-	// 用码自动领取 server/token/session 等作为默认配置。领取到的配置优先级最
-	// 低于命令行参数（命令行以空串判断覆盖），避免显式传入被启动码覆盖。
+	// 用码自动领取 server/token/session 等作为默认配置。
 	hasClaimed := false
 	var bindFromClaim []string
-	if accessCode != "" || (server == "" && token == "" && !hasEmbedded) {
+	effServer := firstNonEmpty(server, cfg.Server, embeddedStr(embedded, "server"))
+	effToken := firstNonEmpty(token, cfg.UserToken, embeddedStr(embedded, "token"))
+	if accessCode != "" || (effServer == "" && effToken == "" && !hasEmbedded) {
 		if accessCode == "" {
 			// 交互式：stdin 读一行（首启引导）。非 TTY 下读 os.Stdin。
 			fmt.Print("请输入启动码 GTA-XXXX-XXXX: ")
@@ -152,35 +129,69 @@ func main() {
 			slog.Error("领取启动码失败（请确认 --mcp <host:8781> 可达且码有效）", "error", err)
 			os.Exit(1)
 		}
-		if server == "" {
-			server = claimed.Server
-		}
-		if registryAddr == "" {
-			registryAddr = claimed.RegistryAddr
-		}
-		if ingestAddr == "" {
-			ingestAddr = claimed.IngestAddr
-		}
-		if token == "" {
-			token = claimed.Token
-		}
+		bindFromClaim = claimed.BindPlugins
 		if sessionID == "" {
 			sessionID = claimed.SessionID
 		}
 		if bpf == "" {
 			bpf = claimed.BPF
 		}
-		bindFromClaim = claimed.BindPlugins
+		// 领取到的身份与回连落 probe.json（此后改参走控制面，不再依赖启动码）。
+		if cfg.Server == "" {
+			cfg.Server = claimed.Server
+		}
+		if cfg.UserToken == "" {
+			cfg.UserToken = claimed.Token
+		}
+		if cfg.RegistryAddr == "" {
+			cfg.RegistryAddr = claimed.RegistryAddr
+		}
+		if cfg.IngestAddr == "" {
+			cfg.IngestAddr = claimed.IngestAddr
+		}
 		hasClaimed = true
 		slog.Info("access code claimed", "code", accessCode, "session", claimed.SessionID)
 	}
 
-	// 参数校验：非法值 fail-fast，避免静默错误行为。
-	// 固化模式下 session 自带、网卡可自动探测，故不再强制 --iface。
-	if sessionID != "" && iface == "" && !hasEmbedded && !hasClaimed {
-		slog.Error("--iface is required when --session is set (capture target)")
-		os.Exit(1)
+	// 命令行 flag 非空时覆盖 probe.json 并写回（首启引导一次性生效；
+	// 此后一切改参走本地控制面 / 远端指令，不再需要命令行）。
+	dirty := false
+	mergeFlag(&cfg.Server, server, &dirty)
+	mergeFlag(&cfg.UserToken, token, &dirty)
+	mergeFlag(&cfg.RegistryAddr, registryAddr, &dirty)
+	mergeFlag(&cfg.IngestAddr, ingestAddr, &dirty)
+	// 固化配置仍是最初的兜底（仅当 cfg 仍为空）。
+	if hasEmbedded && embedded != nil {
+		if cfg.Server == "" {
+			cfg.Server = embedded.Server
+			dirty = true
+		}
+		if cfg.UserToken == "" {
+			cfg.UserToken = embedded.Token
+			dirty = true
+		}
+		if cfg.RegistryAddr == "" {
+			cfg.RegistryAddr = embedded.RegistryAddr
+			dirty = true
+		}
+		if cfg.IngestAddr == "" {
+			cfg.IngestAddr = embedded.IngestAddr
+			dirty = true
+		}
+		if pluginDir == "plugins" && embedded.PluginDir != "" {
+			pluginDir = embedded.PluginDir
+		}
+		if spoolDir == "" {
+			spoolDir = embedded.SpoolDir
+		}
 	}
+	if dirty {
+		if err := saveAgentConfig(cfg); err != nil {
+			slog.Warn("save probe.json failed (continuing with in-memory config)", "error", err)
+		}
+	}
+
+	// 参数校验：非法值 fail-fast，避免静默错误行为。
 	if batchSize <= 0 {
 		slog.Error("--batch-size must be positive", "value", batchSize)
 		os.Exit(1)
@@ -194,10 +205,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	registry, ingest, err := deriveAddrs(server, registryAddr, ingestAddr)
-	if err != nil {
-		slog.Error("address configuration error", "error", err)
-		os.Exit(1)
+	if spoolDir == "" {
+		spoolDir = spoolBase()
+	}
+	spoolDir = filepath.Clean(spoolDir)
+	spoolBaseCustom = spoolDir
+
+	// 无任何回连目标：本地单机模式（本地控制面可用，插件托管与远端控制不启用）。
+	localOnly := cfg.Server == "" && cfg.RegistryAddr == "" && cfg.IngestAddr == ""
+	var registry, ingest string
+	var err error
+	if !localOnly {
+		var derr error
+		if registry, ingest, derr = deriveAddrs(cfg.Server, cfg.RegistryAddr, cfg.IngestAddr); derr != nil {
+			slog.Error("address configuration error", "error", derr)
+			os.Exit(1)
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, osKillSignal)
@@ -205,13 +228,39 @@ func main() {
 
 	slog.Info("gta-agent starting",
 		"registry", registry, "ingest", ingest,
-		"token_set", token != "", "session", sessionID, "iface", iface,
-		"plugin_dir", pluginDir, "batch_size", batchSize, "batch_interval", batchInterval,
+		"user_token_set", cfg.UserToken != "", "probe_id", cfg.ProbeID,
+		"session", sessionID, "iface", iface,
+		"plugin_dir", pluginDir, "spool", spoolDir,
+		"archive", cfg.Archive.Enabled, "batch_size", batchSize,
 	)
 
 	var wg sync.WaitGroup
 
-	// 1) 插件托管（无需抓包即可工作）。固化/启动码模式下仅托管白名单内的插件。
+	// 1) 抓包状态机 + 归档器（无论是否立即抓包都常驻，等控制面/平台指令）。
+	runner := newCaptureRunner()
+	runner.batchSize = batchSize
+	runner.batchInterval = batchInterval
+	runner.setRetention(retentionFrom(cfg))
+
+	arch := newArchiver(runner, cfg)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		arch.Run(ctx)
+	}()
+
+	// 2) 本地控制面（回环 HTTP；坐在这台机器前的人/脚本用）。
+	lc := newLocalControl(runner, cfg, ingest)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := lc.Serve(ctx, "127.0.0.1:19500"); err != nil {
+			slog.Warn("local control stopped", "error", err)
+		}
+	}()
+
+	// 3) 插件托管（无需抓包即可工作）。固化/启动码模式下仅托管白名单内的插件。
+	// localOnly 时没有 registry 可注册，跳过。
 	var bind []string
 	switch {
 	case hasClaimed:
@@ -219,12 +268,45 @@ func main() {
 	case hasEmbedded && embedded != nil:
 		bind = embedded.BindPlugins
 	}
-	sup := &pluginSupervisor{dir: pluginDir, registryAddr: registry, token: token, bind: bind}
-	sup.run(ctx, &wg)
-	slog.Info("plugin supervisor configured", "bind_plugins", bind)
+	if !localOnly {
+		sup := &pluginSupervisor{dir: pluginDir, registryAddr: registry, token: cfg.UserToken, bind: bind}
+		sup.run(ctx, &wg)
+		slog.Info("plugin supervisor configured", "bind_plugins", bind)
+	}
 
-	// 2) 抓包推流（可选）。固化模式未固化网卡名时自动探测默认网卡。
-	var ic *ingestClient
+	// 4) 探针注册 + 远端控制通道。匿名（无凭证也注册不了）时跳过：
+	// 本地控制面照常可用，等带 token 重启后再接入平台。
+	registered := false
+	if !localOnly {
+		registered, err = ensureRegistered(ctx, cfg, ingest)
+		if err != nil {
+			slog.Warn("probe registration failed; remote control disabled for now", "error", err)
+			registered = false
+		}
+	}
+	if registered {
+		ca := NewControlAgent(ingest, cfg.ProbeID, cfg.ProbeToken, runner, cfg, arch)
+		ca.onCfgSaved = arch.applyRetention // archive_* 配置变更立即生效
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ca.Run(ctx)
+		}()
+	} else {
+		slog.Info("probe not registered (anonymous local mode): remote control disabled")
+	}
+
+	// 5) 命令行直启抓包（向后兼容一次性脚本用法；正常运行由控制面/平台启动）。
+	// 固化模式的 session/iface/bpf 也走这里（下载形态免参数开机即抓）。
+	if sessionID == "" && hasEmbedded && embedded != nil {
+		sessionID = embedded.SessionID
+		if iface == "" {
+			iface = embedded.Iface
+		}
+		if bpf == "" {
+			bpf = embedded.BPF
+		}
+	}
 	if sessionID != "" {
 		if iface == "" {
 			iface, err = resolveDefaultIface()
@@ -233,62 +315,21 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		capCfg := captureConfig{Iface: iface, BPF: bpf, SnapLen: int32(snapLen), Promisc: promisc}
-		packets := make(chan *proto.RawPacket, 1024)
-		capEnded := make(chan error, 1)
-		if err := runCapture(ctx, capCfg, packets, capEnded); err != nil {
-			slog.Error("capture unavailable, exiting (plugin hosting only mode requires dropping --session/--iface)", "error", err)
-			os.Exit(1)
+		pushToken := cfg.UserToken
+		if registered {
+			pushToken = cfg.ProbeToken
 		}
-		// 上行链路磁盘缓冲（断电续传）：抓到的包先落盘再发送，断线/重启后从
-		// 磁盘断点续传。spool 是 ingestClient 的必填字段——缺失会 nil panic 且
-		// 彻底失去不丢包能力，故打开失败直接 fail-fast。
-		if spoolDir == "" {
-			spoolDir = defaultSpoolDir(sessionID)
+		if err := runner.Start(CaptureParams{
+			SessionID: sessionID, Iface: iface, BPF: bpf,
+			SnapLen: int32(snapLen), Promisc: promisc,
+		}, ingest, pushToken); err != nil {
+			slog.Error("initial capture failed to start (probe stays up; start via local control or platform)", "error", err)
 		}
-		spoolQ, err := spool.Open(spoolDir, spool.Options{})
-		if err != nil {
-			slog.Error("open ingest spool failed; agent cannot guarantee no packet loss on disconnect",
-				"dir", spoolDir, "error", err)
-			os.Exit(1)
-		}
-		slog.Info("ingest spool opened", "dir", spoolDir)
-		ic = &ingestClient{
-			addr:          ingest,
-			token:         token,
-			sessionID:     sessionID,
-			iface:         iface,
-			batchSize:     batchSize,
-			batchInterval: batchInterval,
-			spool:         spoolQ,
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ic.run(ctx, packets)
-		}()
-		// 抓包 goroutine 意外死亡（网卡关闭/pcap 错误）时不能静默挂着：
-		// 记录错误并触发整体停机，让用户看到原因。
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			select {
-			case <-ctx.Done():
-			case err := <-capEnded:
-				if err == nil {
-					return
-				}
-				slog.Error("capture ended unexpectedly, stopping agent", "error", err)
-				stop()
-			}
-		}()
-	} else {
-		slog.Info("capture disabled (start with --session and --iface to capture)")
 	}
 
 	<-ctx.Done()
 	slog.Info("gta-agent shutting down")
-	// 等待插件监督与推流 goroutine 收尾（插件 kill、尾批 flush、PushAck 汇总），
+	// 等待归档器、本地控制面、插件监督与控制通道 goroutine 收尾，
 	// 上限略大于 ackTimeout，超时则放弃等待直接退出。
 	joined := make(chan struct{})
 	go func() {
@@ -300,21 +341,39 @@ func main() {
 	case <-time.After(2 * ackTimeout):
 		slog.Warn("shutdown timeout: some goroutines did not stop in time")
 	}
-	// 收尾刷盘并释放 spool 文件句柄；磁盘上的未确认数据保留，下次启动续传。
-	if ic != nil && ic.spool != nil {
-		if err := ic.spool.Close(); err != nil {
-			slog.Warn("close ingest spool", "error", err)
-		}
+	// 收尾刷盘并释放 spool 句柄；磁盘上的数据保留（未确认续传 / 归档留存）。
+	if err := runner.Close(); err != nil {
+		slog.Warn("close capture spool", "error", err)
 	}
 	slog.Info("gta-agent stopped")
 }
 
-// defaultSpoolDir 返回上行链路磁盘缓冲的默认目录：用户缓存目录下按会话隔离，
-// 跨进程重启/断电均可从同一目录续传。
-func defaultSpoolDir(sessionID string) string {
-	base, err := os.UserCacheDir()
-	if err != nil || base == "" {
-		base = os.TempDir()
+// firstNonEmpty 返回第一个非空参数（全空返回空串）。
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
 	}
-	return filepath.Join(base, "gta-agent", "spool", sessionID)
+	return ""
+}
+
+// defaultSpoolDir 返回某会话的 spool 目录（spoolBase 下按会话隔离，
+// 归档扫描与断电续传共用同一目录布局）。
+func defaultSpoolDir(sessionID string) string {
+	return filepath.Join(spoolBase(), sessionID)
+}
+
+// embeddedStr 安全读取可能为 nil 的固化配置字段。
+func embeddedStr(e *embeddedAgentConfig, field string) string {
+	if e == nil {
+		return ""
+	}
+	switch field {
+	case "server":
+		return e.Server
+	case "token":
+		return e.Token
+	}
+	return ""
 }

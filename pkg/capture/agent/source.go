@@ -173,6 +173,11 @@ func (s *Source) Stats() capture.Stats {
 // SessionID 返回本 Source 消费的会话 id。
 func (s *Source) SessionID() string { return s.cfg.SessionID }
 
+// PacketFromProto 把 proto.RawPacket 转成 event.Packet（包外复用：probe 回放导入路径）。
+func PacketFromProto(rp *proto.RawPacket, iface string) event.Packet {
+	return packetFromProto(rp, iface)
+}
+
 // packetsFromBatch 把一批 proto 包转成 event.Packet，并统计收包字节。
 // 保留完整帧与 link_type（与 pcap-live 一致），不退化成 LinkTypeProxyPayload。
 func packetsFromBatch(batch *proto.PacketBatch) []event.Packet {

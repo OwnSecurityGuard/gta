@@ -105,6 +105,18 @@ type ControlStoreBackend interface {
 	RecordDebugAccess(ctx context.Context, d DebugAccess) (int64, error)
 	// DebugAccesses 返回某会话的审计行（最新在前）。
 	DebugAccesses(ctx context.Context, sessionID string) ([]DebugAccess, error)
+	// 探针注册表（probes / probe_archive_segments，见 probe_store.go）。
+	UpsertProbe(ctx context.Context, m ProbeMeta) error
+	GetProbe(ctx context.Context, probeID string) (*ProbeMeta, error)
+	GetProbeByTokenHash(ctx context.Context, tokenHash string) (*ProbeMeta, error)
+	ListProbes(ctx context.Context) ([]ProbeMeta, error)
+	UpdateProbeStatus(ctx context.Context, probeID string, st ProbeRuntimeStatus) error
+	SetProbeConnection(ctx context.Context, probeID, state string, seen time.Time) error
+	RenameProbe(ctx context.Context, probeID, name string) error
+	RevokeProbe(ctx context.Context, probeID string) error
+	DeleteProbe(ctx context.Context, probeID string) error
+	ReplaceProbeSegments(ctx context.Context, probeID string, segs []ArchiveSegmentMeta) error
+	ListProbeSegments(ctx context.Context, probeID string, fromMs, toMs int64) ([]ArchiveSegmentMeta, error)
 	Close() error
 	DB() *sql.DB
 }

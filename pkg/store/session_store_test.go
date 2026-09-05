@@ -122,6 +122,8 @@ func TestControlStore_OnlyControlPlaneTables(t *testing.T) {
 	allowed := map[string]bool{
 		"sessions":            true,
 		"plugin_debug_access": true,
+		"probes":              true,             // 探针注册表（probe_store.go）
+		"probe_archive_segments": true,          // 探针归档摘要缓存
 		"sqlite_sequence":     true, // AUTOINCREMENT 自动生成
 	}
 	for _, name := range tables {

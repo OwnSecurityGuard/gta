@@ -34,6 +34,10 @@ const (
 	ActionLeaseRelease         Action = "lease:release"
 	ActionAccessCodeCreate     Action = "access_code:create"
 	ActionAccessCodeClaim      Action = "access_code:claim"
+	ActionProbeRead            Action = "probe:read"
+	ActionProbeUse             Action = "probe:use"
+	ActionProbeControl         Action = "probe:control"
+	ActionProbeManage          Action = "probe:manage"
 	ActionUserManage           Action = "user:manage"
 )
 
@@ -46,6 +50,7 @@ const (
 	KindPlugin     Kind = "plugin"
 	KindLease      Kind = "lease"
 	KindAccessCode Kind = "access_code"
+	KindProbe      Kind = "probe"
 	KindUser       Kind = "user"
 )
 
@@ -173,6 +178,8 @@ func Decide(p Principal, a Action, r Resource, role Role) error {
 		return decideSession(p, a, r, role)
 	case KindPlugin, KindLease:
 		return decideProjectScoped(p, a, r, role)
+	case KindProbe:
+		return decideProbe(p, a, r)
 	case KindUser:
 		// 用户管理（发放邀请之外的列表 / 撤销）仅 global admin；
 		// admin 已在 Decide 开头放行，落到这里的一律拒绝。
@@ -235,6 +242,21 @@ var sessionProjectActionRole = map[Action]Role{
 // memberCreatorAllowed 报告某动作是否允许 member 操作"自己创建的"资源。
 func memberCreatorAllowed(a Action) bool {
 	return a == ActionSessionDelete || a == ActionSessionMoveProject
+}
+
+// decideProbe 处理探针动作：探针是个人资源，仅注册者（creator）本人可用，
+// 不做项目轴与角色矩阵（2026-09-05 review 定稿：默认只能自己使用，别人无法使用）。
+// global admin 已在 Decide 开头放行；Resource.CreatorID 填 probes.owner。
+func decideProbe(p Principal, a Action, r Resource) error {
+	switch a {
+	case ActionProbeRead, ActionProbeUse, ActionProbeControl, ActionProbeManage:
+	default:
+		return fmt.Errorf("%w: unsupported probe action %s", ErrForbidden, a)
+	}
+	if r.CreatorID != "" && r.CreatorID == p.User {
+		return nil
+	}
+	return fmt.Errorf("%w: probe %s is not accessible to %s", ErrForbidden, r.ID, p.User)
 }
 
 // decideProjectScoped 处理 plugin / lease 这类"项目内使用、项目外归 creator"的资源。

@@ -37,6 +37,9 @@ type Principal struct {
 	// Tenant 是调用者所属租户。当前 token 格式不带组织信息，恒为空串
 	//（鉴权层归一为 authz.DefaultTenant）；字段先行，多租户实体后补。
 	Tenant string
+	// ProbeID 是探针长期凭证（gta_prb_*）解析出的探针 id；普通用户 token 为空。
+	// 探针凭它连接控制通道与推流，服务端据此做 assigned-probe 校验。
+	ProbeID string
 }
 
 // Resolver 把凭证字符串解析成身份。接口故意只留一个方法：

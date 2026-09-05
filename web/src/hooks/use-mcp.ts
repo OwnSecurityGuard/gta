@@ -49,6 +49,15 @@ import type {
 } from "@/types/proxy";
 import type { GetAgentDownloadOptionsResult } from "@/types/agent";
 import type {
+  ListProbesResult,
+  GetProbeResult,
+  ProbeStartCaptureResult,
+  ProbeStopCaptureResult,
+  ProbeOkResult,
+  ProbeListArchiveResult,
+  ProbeImportArchiveResult,
+} from "@/types/probe";
+import type {
   CreateAccessCodeResult,
   ListAccessCodesResult,
   ListUsersResult,
@@ -929,6 +938,160 @@ export function useRevokeUser() {
       mcpClient.callTool<RevokeUserResult>("revoke_user", { owner: vars.owner }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+}
+
+// ===== 探针管理（v2 探针优化）=====
+
+/** list_probes：列出调用方可见的探针（creator 轴过滤，admin 全量）。 */
+export function useListProbes() {
+  return useQuery({
+    queryKey: ["probes"],
+    queryFn: () => mcpClient.callTool<ListProbesResult>("list_probes"),
+    refetchInterval: 5_000, // 三维度状态（connection/capture/data）轮询刷新
+  });
+}
+
+/** get_probe：单个探针的三维度状态快照。 */
+export function useProbe(probeId: string | null) {
+  return useQuery({
+    queryKey: ["probe", probeId],
+    queryFn: () =>
+      mcpClient.callTool<GetProbeResult>("get_probe", { probe_id: probeId ?? undefined }),
+    enabled: !!probeId,
+  });
+}
+
+/** probe_start_capture：选定探针建会话并下发抓包（Sessions 一级页的"创建抓包"）。 */
+export function useProbeStartCapture() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      probeId: string;
+      ports?: number[];
+      hosts?: string[];
+      iface?: string;
+      plugin?: string;
+      projectId?: string;
+    }) =>
+      mcpClient.callTool<ProbeStartCaptureResult>("probe_start_capture", {
+        probe_id: vars.probeId,
+        ports: vars.ports ?? [],
+        hosts: vars.hosts ?? [],
+        iface: vars.iface ?? "",
+        plugin: vars.plugin ?? "",
+        project_id: vars.projectId ?? "",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["probes"] });
+    },
+  });
+}
+
+/** probe_stop_capture：停止探针抓包并结束其会话。 */
+export function useProbeStopCapture() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { probeId: string }) =>
+      mcpClient.callTool<ProbeStopCaptureResult>("probe_stop_capture", {
+        probe_id: vars.probeId,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["probes"] });
+    },
+  });
+}
+
+/** probe_update_filter：热更新探针抓包过滤（不中断抓包）。 */
+export function useProbeUpdateFilter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { probeId: string; ports?: number[]; hosts?: string[] }) =>
+      mcpClient.callTool<ProbeOkResult>("probe_update_filter", {
+        probe_id: vars.probeId,
+        ports: vars.ports ?? [],
+        hosts: vars.hosts ?? [],
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["probes"] });
+    },
+  });
+}
+
+/** probe_retry_capture：让 failed 的探针重试上一次 assign。 */
+export function useProbeRetryCapture() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { probeId: string }) =>
+      mcpClient.callTool<ProbeOkResult>("probe_retry_capture", { probe_id: vars.probeId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["probes"] });
+    },
+  });
+}
+
+/** probe_rename：改探针显示名。 */
+export function useProbeRename() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { probeId: string; name: string }) =>
+      mcpClient.callTool<ProbeOkResult>("probe_rename", {
+        probe_id: vars.probeId,
+        name: vars.name,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["probes"] });
+    },
+  });
+}
+
+/** probe_revoke：作废探针长期凭证（探针下次启动需重新接入）。 */
+export function useProbeRevoke() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { probeId: string }) =>
+      mcpClient.callTool<ProbeOkResult>("probe_revoke", { probe_id: vars.probeId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["probes"] });
+    },
+  });
+}
+
+/** probe_list_archive：查询探针本地归档段（refresh=true 时探针在线则实时查询）。 */
+export function useProbeListArchive(
+  probeId: string | null,
+  options: { fromUnix?: number; toUnix?: number; refresh?: boolean } = {},
+) {
+  return useQuery({
+    queryKey: ["probeArchive", probeId, options],
+    queryFn: () =>
+      mcpClient.callTool<ProbeListArchiveResult>("probe_list_archive", {
+        probe_id: probeId ?? undefined,
+        from_unix: options.fromUnix ?? 0,
+        to_unix: options.toUnix ?? 0,
+        refresh: options.refresh ?? false,
+      }),
+    enabled: !!probeId,
+  });
+}
+
+/** probe_import_archive：把探针本地归档按时间窗回放导入为新会话。 */
+export function useProbeImportArchive() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { probeId: string; fromUnix?: number; toUnix?: number; projectId?: string }) =>
+      mcpClient.callTool<ProbeImportArchiveResult>("probe_import_archive", {
+        probe_id: vars.probeId,
+        from_unix: vars.fromUnix ?? 0,
+        to_unix: vars.toUnix ?? 0,
+        project_id: vars.projectId ?? "",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["probes"] });
     },
   });
 }

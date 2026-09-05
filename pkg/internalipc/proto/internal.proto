@@ -58,6 +58,24 @@ service CaptureControl {
   rpc ReleaseProxyLease(ReleaseProxyLeaseRequest) returns (ReleaseProxyLeaseResponse);
   // StartLeaseCapture 在常驻租约上开一次新的抓包会话。
   //
+  // ---- Probe 管理（探针注册/状态/控制全部在 pipeline 侧，gta-mcp 代理调用）----
+  // 探针是个人资源：owner 校验在 pipeline 侧做 creator 轴判定（本人或 admin）。
+  rpc ListProbes(ListProbesRequest) returns (ListProbesResponse);
+  rpc GetProbe(GetProbeRequest) returns (GetProbeResponse);
+  // ProbeStartCapture 选定探针建会话并下发 AssignCapture（建会话 + 指派一体）。
+  rpc ProbeStartCapture(ProbeStartCaptureRequest) returns (ProbeStartCaptureResponse);
+  rpc ProbeStopCapture(ProbeStopCaptureRequest) returns (ProbeStopCaptureResponse);
+  // ProbeUpdateFilter 热更新抓包过滤（BPF 重编译，不中断抓包）。
+  rpc ProbeUpdateFilter(ProbeUpdateFilterRequest) returns (ProbeUpdateFilterResponse);
+  // ProbeRetryCapture 让 failed 状态的探针重试上一次 assign。
+  rpc ProbeRetryCapture(ProbeRetryCaptureRequest) returns (ProbeRetryCaptureResponse);
+  rpc ProbeRename(ProbeRenameRequest) returns (ProbeRenameResponse);
+  // ProbeRevoke 作废 probe_token（探针下次启动需重新接入）。
+  rpc ProbeRevoke(ProbeRevokeRequest) returns (ProbeRevokeResponse);
+  rpc ProbeListArchive(ProbeListArchiveRequest) returns (ProbeListArchiveResponse);
+  // ProbeImportArchive 把探针本地归档按时间窗回放导入为新会话（source=probe-archive）。
+  rpc ProbeImportArchive(ProbeImportArchiveRequest) returns (ProbeImportArchiveResponse);
+  //
   // 租约的代理出口（agent 进程 + 手机 CONNECT 端口）在整个租约生命周期内不变，
   // 本 RPC 只切换「抓不抓、抓到哪个会话」。手机侧无需重配代理、VPN 不中断。
   // 每次调用都是一个全新的会话（独立 session_id / 独立 SQLite / 独立 mobile
@@ -543,4 +561,151 @@ message StopLeaseCaptureResponse {
   int64 raw_packets = 4;   // 本次会话落盘的原始包数
   int64 events = 5;        // 解码事件数
   double duration_sec = 6; // 本次抓包时长
+}
+
+// ============================================================================
+// Probe 管理（gta-mcp 代理调用；探针身份、控制通道与状态全部在 pipeline 侧）。
+// owner/all_owners 语义同 ListPlugins：gta-mcp 从 HTTP auth ctx 透传，
+// pipeline 据此做 creator 轴过滤（探针是个人资源，仅注册者本人可见可用）。
+// ============================================================================
+
+// ProbeInfo 是探针的三维度状态快照（docs/plans/2026-09-05 §5）：
+// connection（在线判定由控制流活性推导）/ capture（状态机）/ data（包时间与计数）。
+message ProbeInfo {
+  string probe_id = 1;
+  string name = 2;                   // 机器名（默认 hostname，可改）
+  string owner = 3;
+  string tenant_id = 4;
+  string capabilities = 5;           // csv: pcap,mobile,plugin_host
+  string version = 6;
+  string hostname = 7;
+  string os = 8;
+  string arch = 9;
+  // 维度一：连接
+  string connection_state = 10;      // online | offline
+  string last_seen_at = 11;          // RFC3339；离线时 UI 显示"上次在线 X 前"
+  // 维度二：抓包
+  string capture_state = 12;         // idle|starting|running|stopped|failed
+  string last_session_id = 13;
+  string status_error = 14;          // failed 时的错误
+  string capture_iface = 15;
+  string capture_ports = 16;         // csv，展示用
+  // 维度三：数据
+  int64 last_packet_unix_ms = 17;    // 0 = 从未抓到帧
+  int64 last_upload_unix_ms = 18;    // 0 = 从未成功推流
+  uint64 packets_captured = 19;
+  uint64 packets_acked = 20;
+  uint64 spool_depth = 21;
+  uint64 dropped = 22;
+  // 归档（本地留存摘要）
+  uint64 archive_bytes = 23;
+  uint32 archive_segments = 24;
+  int64 archive_oldest_unix = 25;
+  int64 archive_newest_unix = 26;
+  string created_at = 27;
+}
+
+message ListProbesRequest {
+  string owner = 1;                  // gta-mcp 透传
+  bool all_owners = 2;               // admin 全量
+}
+message ListProbesResponse { repeated ProbeInfo probes = 1; }
+
+message GetProbeRequest {
+  string probe_id = 1;
+  string owner = 2;
+  bool all_owners = 3;
+}
+message GetProbeResponse { ProbeInfo probe = 1; }
+
+message ProbeStartCaptureRequest {
+  string probe_id = 1;
+  repeated int32 ports = 2;
+  repeated string hosts = 3;
+  string iface = 4;                  // 空 = 探针自动探测默认网卡
+  string plugin = 5;                 // 解码插件绑定（同 StartCaptureRequest.plugin）
+  string project_id = 6;             // 会话归属项目（会话是用户任务，探针不挂项目）
+  string owner = 7;
+  bool all_owners = 8;
+  repeated string plugin_owners = 9;
+}
+message ProbeStartCaptureResponse {
+  string session_id = 1;
+  // db_path 是新会话 capture.sqlite 的绝对路径（gta-mcp 写本地 metadata.json 用）。
+  string db_path = 2;
+}
+
+message ProbeStopCaptureRequest {
+  string probe_id = 1;
+  string owner = 2;
+  bool all_owners = 3;
+}
+message ProbeStopCaptureResponse { string session_id = 1; } // 被停止的会话；未在抓包为空
+
+message ProbeUpdateFilterRequest {
+  string probe_id = 1;
+  repeated int32 ports = 2;
+  repeated string hosts = 3;
+  string owner = 4;
+  bool all_owners = 5;
+}
+message ProbeUpdateFilterResponse { bool ok = 1; }
+
+message ProbeRetryCaptureRequest {
+  string probe_id = 1;
+  string owner = 2;
+  bool all_owners = 3;
+}
+message ProbeRetryCaptureResponse { bool ok = 1; }
+
+message ProbeRenameRequest {
+  string probe_id = 1;
+  string name = 2;
+  string owner = 3;
+  bool all_owners = 4;
+}
+message ProbeRenameResponse { bool ok = 1; }
+
+message ProbeRevokeRequest {
+  string probe_id = 1;
+  string owner = 2;
+  bool all_owners = 3;
+}
+message ProbeRevokeResponse { bool ok = 1; }
+
+// ProbeArchiveSegmentMeta 是服务端缓存的归档段摘要（探针心跳/查询时刷新）。
+message ProbeArchiveSegmentMeta {
+  string seg_id = 1;
+  int64 first_unix = 2;
+  int64 last_unix = 3;
+  uint64 packets = 4;
+  uint64 bytes = 5;
+  uint32 link_type = 6;
+}
+
+message ProbeListArchiveRequest {
+  string probe_id = 1;
+  int64 from_unix = 2;
+  int64 to_unix = 3;
+  string owner = 4;
+  bool all_owners = 5;
+  bool refresh = 6;                  // true 时探针在线则先向探针实时查询刷新缓存
+}
+message ProbeListArchiveResponse {
+  repeated ProbeArchiveSegmentMeta segments = 1;
+  bool from_cache = 2;               // true = 探针离线，结果来自缓存（可能过期）
+}
+
+message ProbeImportArchiveRequest {
+  string probe_id = 1;
+  int64 from_unix = 2;
+  int64 to_unix = 3;
+  string project_id = 4;             // 导入产生的新会话归属项目（可选）
+  string owner = 5;
+  bool all_owners = 6;
+}
+message ProbeImportArchiveResponse {
+  string session_id = 1;
+  // db_path 同 ProbeStartCaptureResponse.db_path。
+  string db_path = 2;
 }

@@ -135,13 +135,55 @@ CREATE TABLE IF NOT EXISTS plugin_debug_access (
     returned_packets  INTEGER,
     returned_bytes    INTEGER,
     truncated         INTEGER
+);
+CREATE TABLE IF NOT EXISTS probes (
+    probe_id        TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    owner           TEXT NOT NULL,
+    tenant_id       TEXT NOT NULL DEFAULT 'default',
+    capabilities    TEXT NOT NULL DEFAULT '',
+    token_hash      TEXT NOT NULL DEFAULT '',
+    version         TEXT NOT NULL DEFAULT '',
+    hostname        TEXT NOT NULL DEFAULT '',
+    os              TEXT NOT NULL DEFAULT '',
+    arch            TEXT NOT NULL DEFAULT '',
+    connection_state TEXT NOT NULL DEFAULT '',
+    last_seen_at    TIMESTAMP,
+    capture_state   TEXT NOT NULL DEFAULT '',
+    last_session_id TEXT NOT NULL DEFAULT '',
+    status_error    TEXT NOT NULL DEFAULT '',
+    capture_iface   TEXT NOT NULL DEFAULT '',
+    capture_ports   TEXT NOT NULL DEFAULT '',
+    last_packet_ms  BIGINT NOT NULL DEFAULT 0,
+    last_upload_ms  BIGINT NOT NULL DEFAULT 0,
+    packets_captured BIGINT NOT NULL DEFAULT 0,
+    packets_acked   BIGINT NOT NULL DEFAULT 0,
+    spool_depth     BIGINT NOT NULL DEFAULT 0,
+    dropped         BIGINT NOT NULL DEFAULT 0,
+    archive_bytes   BIGINT NOT NULL DEFAULT 0,
+    archive_segments INTEGER NOT NULL DEFAULT 0,
+    archive_oldest_ms BIGINT NOT NULL DEFAULT 0,
+    archive_newest_ms BIGINT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP NOT NULL
+);
+CREATE TABLE IF NOT EXISTS probe_archive_segments (
+    probe_id   TEXT NOT NULL,
+    seg_id     TEXT NOT NULL,
+    first_ms   BIGINT NOT NULL,
+    last_ms    BIGINT NOT NULL,
+    packets    BIGINT NOT NULL DEFAULT 0,
+    bytes      BIGINT NOT NULL DEFAULT 0,
+    link_type  INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (probe_id, seg_id)
 );`
 
 // pgControlIndexes 控制元数据表索引。
 const pgControlIndexes = `
 CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);`
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_probes_owner ON probes(owner);`
 
 // InitPGEventSchema 在一个 PG 库里创建全部事件相关表 + 索引（幂等）。
 // PG 模式下所有 session 共享同一库，故每次服务启动只建一次。

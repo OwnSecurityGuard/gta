@@ -3923,6 +3923,1527 @@ func (x *StopLeaseCaptureResponse) GetDurationSec() float64 {
 	return 0
 }
 
+// ProbeInfo 是探针的三维度状态快照（docs/plans/2026-09-05 §5）：
+// connection（在线判定由控制流活性推导）/ capture（状态机）/ data（包时间与计数）。
+type ProbeInfo struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId      string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	Name         string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"` // 机器名（默认 hostname，可改）
+	Owner        string                 `protobuf:"bytes,3,opt,name=owner,proto3" json:"owner,omitempty"`
+	TenantId     string                 `protobuf:"bytes,4,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Capabilities string                 `protobuf:"bytes,5,opt,name=capabilities,proto3" json:"capabilities,omitempty"` // csv: pcap,mobile,plugin_host
+	Version      string                 `protobuf:"bytes,6,opt,name=version,proto3" json:"version,omitempty"`
+	Hostname     string                 `protobuf:"bytes,7,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	Os           string                 `protobuf:"bytes,8,opt,name=os,proto3" json:"os,omitempty"`
+	Arch         string                 `protobuf:"bytes,9,opt,name=arch,proto3" json:"arch,omitempty"`
+	// 维度一：连接
+	ConnectionState string `protobuf:"bytes,10,opt,name=connection_state,json=connectionState,proto3" json:"connection_state,omitempty"` // online | offline
+	LastSeenAt      string `protobuf:"bytes,11,opt,name=last_seen_at,json=lastSeenAt,proto3" json:"last_seen_at,omitempty"`              // RFC3339；离线时 UI 显示"上次在线 X 前"
+	// 维度二：抓包
+	CaptureState  string `protobuf:"bytes,12,opt,name=capture_state,json=captureState,proto3" json:"capture_state,omitempty"` // idle|starting|running|stopped|failed
+	LastSessionId string `protobuf:"bytes,13,opt,name=last_session_id,json=lastSessionId,proto3" json:"last_session_id,omitempty"`
+	StatusError   string `protobuf:"bytes,14,opt,name=status_error,json=statusError,proto3" json:"status_error,omitempty"` // failed 时的错误
+	CaptureIface  string `protobuf:"bytes,15,opt,name=capture_iface,json=captureIface,proto3" json:"capture_iface,omitempty"`
+	CapturePorts  string `protobuf:"bytes,16,opt,name=capture_ports,json=capturePorts,proto3" json:"capture_ports,omitempty"` // csv，展示用
+	// 维度三：数据
+	LastPacketUnixMs int64  `protobuf:"varint,17,opt,name=last_packet_unix_ms,json=lastPacketUnixMs,proto3" json:"last_packet_unix_ms,omitempty"` // 0 = 从未抓到帧
+	LastUploadUnixMs int64  `protobuf:"varint,18,opt,name=last_upload_unix_ms,json=lastUploadUnixMs,proto3" json:"last_upload_unix_ms,omitempty"` // 0 = 从未成功推流
+	PacketsCaptured  uint64 `protobuf:"varint,19,opt,name=packets_captured,json=packetsCaptured,proto3" json:"packets_captured,omitempty"`
+	PacketsAcked     uint64 `protobuf:"varint,20,opt,name=packets_acked,json=packetsAcked,proto3" json:"packets_acked,omitempty"`
+	SpoolDepth       uint64 `protobuf:"varint,21,opt,name=spool_depth,json=spoolDepth,proto3" json:"spool_depth,omitempty"`
+	Dropped          uint64 `protobuf:"varint,22,opt,name=dropped,proto3" json:"dropped,omitempty"`
+	// 归档（本地留存摘要）
+	ArchiveBytes      uint64 `protobuf:"varint,23,opt,name=archive_bytes,json=archiveBytes,proto3" json:"archive_bytes,omitempty"`
+	ArchiveSegments   uint32 `protobuf:"varint,24,opt,name=archive_segments,json=archiveSegments,proto3" json:"archive_segments,omitempty"`
+	ArchiveOldestUnix int64  `protobuf:"varint,25,opt,name=archive_oldest_unix,json=archiveOldestUnix,proto3" json:"archive_oldest_unix,omitempty"`
+	ArchiveNewestUnix int64  `protobuf:"varint,26,opt,name=archive_newest_unix,json=archiveNewestUnix,proto3" json:"archive_newest_unix,omitempty"`
+	CreatedAt         string `protobuf:"bytes,27,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ProbeInfo) Reset() {
+	*x = ProbeInfo{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeInfo) ProtoMessage() {}
+
+func (x *ProbeInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeInfo.ProtoReflect.Descriptor instead.
+func (*ProbeInfo) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *ProbeInfo) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetCapabilities() string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetConnectionState() string {
+	if x != nil {
+		return x.ConnectionState
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetLastSeenAt() string {
+	if x != nil {
+		return x.LastSeenAt
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetCaptureState() string {
+	if x != nil {
+		return x.CaptureState
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetLastSessionId() string {
+	if x != nil {
+		return x.LastSessionId
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetStatusError() string {
+	if x != nil {
+		return x.StatusError
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetCaptureIface() string {
+	if x != nil {
+		return x.CaptureIface
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetCapturePorts() string {
+	if x != nil {
+		return x.CapturePorts
+	}
+	return ""
+}
+
+func (x *ProbeInfo) GetLastPacketUnixMs() int64 {
+	if x != nil {
+		return x.LastPacketUnixMs
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetLastUploadUnixMs() int64 {
+	if x != nil {
+		return x.LastUploadUnixMs
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetPacketsCaptured() uint64 {
+	if x != nil {
+		return x.PacketsCaptured
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetPacketsAcked() uint64 {
+	if x != nil {
+		return x.PacketsAcked
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetSpoolDepth() uint64 {
+	if x != nil {
+		return x.SpoolDepth
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetDropped() uint64 {
+	if x != nil {
+		return x.Dropped
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetArchiveBytes() uint64 {
+	if x != nil {
+		return x.ArchiveBytes
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetArchiveSegments() uint32 {
+	if x != nil {
+		return x.ArchiveSegments
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetArchiveOldestUnix() int64 {
+	if x != nil {
+		return x.ArchiveOldestUnix
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetArchiveNewestUnix() int64 {
+	if x != nil {
+		return x.ArchiveNewestUnix
+	}
+	return 0
+}
+
+func (x *ProbeInfo) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+type ListProbesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Owner         string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`                           // gta-mcp 透传
+	AllOwners     bool                   `protobuf:"varint,2,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"` // admin 全量
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListProbesRequest) Reset() {
+	*x = ListProbesRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProbesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProbesRequest) ProtoMessage() {}
+
+func (x *ListProbesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProbesRequest.ProtoReflect.Descriptor instead.
+func (*ListProbesRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *ListProbesRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ListProbesRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type ListProbesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Probes        []*ProbeInfo           `protobuf:"bytes,1,rep,name=probes,proto3" json:"probes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListProbesResponse) Reset() {
+	*x = ListProbesResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProbesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProbesResponse) ProtoMessage() {}
+
+func (x *ListProbesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProbesResponse.ProtoReflect.Descriptor instead.
+func (*ListProbesResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *ListProbesResponse) GetProbes() []*ProbeInfo {
+	if x != nil {
+		return x.Probes
+	}
+	return nil
+}
+
+type GetProbeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	Owner         string                 `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,3,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProbeRequest) Reset() {
+	*x = GetProbeRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProbeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProbeRequest) ProtoMessage() {}
+
+func (x *GetProbeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProbeRequest.ProtoReflect.Descriptor instead.
+func (*GetProbeRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *GetProbeRequest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *GetProbeRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *GetProbeRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type GetProbeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Probe         *ProbeInfo             `protobuf:"bytes,1,opt,name=probe,proto3" json:"probe,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProbeResponse) Reset() {
+	*x = GetProbeResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProbeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProbeResponse) ProtoMessage() {}
+
+func (x *GetProbeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProbeResponse.ProtoReflect.Descriptor instead.
+func (*GetProbeResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *GetProbeResponse) GetProbe() *ProbeInfo {
+	if x != nil {
+		return x.Probe
+	}
+	return nil
+}
+
+type ProbeStartCaptureRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	Ports         []int32                `protobuf:"varint,2,rep,packed,name=ports,proto3" json:"ports,omitempty"`
+	Hosts         []string               `protobuf:"bytes,3,rep,name=hosts,proto3" json:"hosts,omitempty"`
+	Iface         string                 `protobuf:"bytes,4,opt,name=iface,proto3" json:"iface,omitempty"`                          // 空 = 探针自动探测默认网卡
+	Plugin        string                 `protobuf:"bytes,5,opt,name=plugin,proto3" json:"plugin,omitempty"`                        // 解码插件绑定（同 StartCaptureRequest.plugin）
+	ProjectId     string                 `protobuf:"bytes,6,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"` // 会话归属项目（会话是用户任务，探针不挂项目）
+	Owner         string                 `protobuf:"bytes,7,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,8,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	PluginOwners  []string               `protobuf:"bytes,9,rep,name=plugin_owners,json=pluginOwners,proto3" json:"plugin_owners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeStartCaptureRequest) Reset() {
+	*x = ProbeStartCaptureRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeStartCaptureRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeStartCaptureRequest) ProtoMessage() {}
+
+func (x *ProbeStartCaptureRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeStartCaptureRequest.ProtoReflect.Descriptor instead.
+func (*ProbeStartCaptureRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *ProbeStartCaptureRequest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeStartCaptureRequest) GetPorts() []int32 {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+func (x *ProbeStartCaptureRequest) GetHosts() []string {
+	if x != nil {
+		return x.Hosts
+	}
+	return nil
+}
+
+func (x *ProbeStartCaptureRequest) GetIface() string {
+	if x != nil {
+		return x.Iface
+	}
+	return ""
+}
+
+func (x *ProbeStartCaptureRequest) GetPlugin() string {
+	if x != nil {
+		return x.Plugin
+	}
+	return ""
+}
+
+func (x *ProbeStartCaptureRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *ProbeStartCaptureRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ProbeStartCaptureRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+func (x *ProbeStartCaptureRequest) GetPluginOwners() []string {
+	if x != nil {
+		return x.PluginOwners
+	}
+	return nil
+}
+
+type ProbeStartCaptureResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// db_path 是新会话 capture.sqlite 的绝对路径（gta-mcp 写本地 metadata.json 用）。
+	DbPath        string `protobuf:"bytes,2,opt,name=db_path,json=dbPath,proto3" json:"db_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeStartCaptureResponse) Reset() {
+	*x = ProbeStartCaptureResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeStartCaptureResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeStartCaptureResponse) ProtoMessage() {}
+
+func (x *ProbeStartCaptureResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeStartCaptureResponse.ProtoReflect.Descriptor instead.
+func (*ProbeStartCaptureResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *ProbeStartCaptureResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ProbeStartCaptureResponse) GetDbPath() string {
+	if x != nil {
+		return x.DbPath
+	}
+	return ""
+}
+
+type ProbeStopCaptureRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	Owner         string                 `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,3,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeStopCaptureRequest) Reset() {
+	*x = ProbeStopCaptureRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeStopCaptureRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeStopCaptureRequest) ProtoMessage() {}
+
+func (x *ProbeStopCaptureRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeStopCaptureRequest.ProtoReflect.Descriptor instead.
+func (*ProbeStopCaptureRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{60}
+}
+
+func (x *ProbeStopCaptureRequest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeStopCaptureRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ProbeStopCaptureRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type ProbeStopCaptureResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeStopCaptureResponse) Reset() {
+	*x = ProbeStopCaptureResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeStopCaptureResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeStopCaptureResponse) ProtoMessage() {}
+
+func (x *ProbeStopCaptureResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeStopCaptureResponse.ProtoReflect.Descriptor instead.
+func (*ProbeStopCaptureResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *ProbeStopCaptureResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type ProbeUpdateFilterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	Ports         []int32                `protobuf:"varint,2,rep,packed,name=ports,proto3" json:"ports,omitempty"`
+	Hosts         []string               `protobuf:"bytes,3,rep,name=hosts,proto3" json:"hosts,omitempty"`
+	Owner         string                 `protobuf:"bytes,4,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,5,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeUpdateFilterRequest) Reset() {
+	*x = ProbeUpdateFilterRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeUpdateFilterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeUpdateFilterRequest) ProtoMessage() {}
+
+func (x *ProbeUpdateFilterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeUpdateFilterRequest.ProtoReflect.Descriptor instead.
+func (*ProbeUpdateFilterRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *ProbeUpdateFilterRequest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeUpdateFilterRequest) GetPorts() []int32 {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+func (x *ProbeUpdateFilterRequest) GetHosts() []string {
+	if x != nil {
+		return x.Hosts
+	}
+	return nil
+}
+
+func (x *ProbeUpdateFilterRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ProbeUpdateFilterRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type ProbeUpdateFilterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeUpdateFilterResponse) Reset() {
+	*x = ProbeUpdateFilterResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[63]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeUpdateFilterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeUpdateFilterResponse) ProtoMessage() {}
+
+func (x *ProbeUpdateFilterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[63]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeUpdateFilterResponse.ProtoReflect.Descriptor instead.
+func (*ProbeUpdateFilterResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{63}
+}
+
+func (x *ProbeUpdateFilterResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type ProbeRetryCaptureRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	Owner         string                 `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,3,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeRetryCaptureRequest) Reset() {
+	*x = ProbeRetryCaptureRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeRetryCaptureRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeRetryCaptureRequest) ProtoMessage() {}
+
+func (x *ProbeRetryCaptureRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeRetryCaptureRequest.ProtoReflect.Descriptor instead.
+func (*ProbeRetryCaptureRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *ProbeRetryCaptureRequest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeRetryCaptureRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ProbeRetryCaptureRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type ProbeRetryCaptureResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeRetryCaptureResponse) Reset() {
+	*x = ProbeRetryCaptureResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeRetryCaptureResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeRetryCaptureResponse) ProtoMessage() {}
+
+func (x *ProbeRetryCaptureResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeRetryCaptureResponse.ProtoReflect.Descriptor instead.
+func (*ProbeRetryCaptureResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{65}
+}
+
+func (x *ProbeRetryCaptureResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type ProbeRenameRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Owner         string                 `protobuf:"bytes,3,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,4,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeRenameRequest) Reset() {
+	*x = ProbeRenameRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[66]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeRenameRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeRenameRequest) ProtoMessage() {}
+
+func (x *ProbeRenameRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[66]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeRenameRequest.ProtoReflect.Descriptor instead.
+func (*ProbeRenameRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{66}
+}
+
+func (x *ProbeRenameRequest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeRenameRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ProbeRenameRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ProbeRenameRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type ProbeRenameResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeRenameResponse) Reset() {
+	*x = ProbeRenameResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeRenameResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeRenameResponse) ProtoMessage() {}
+
+func (x *ProbeRenameResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeRenameResponse.ProtoReflect.Descriptor instead.
+func (*ProbeRenameResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *ProbeRenameResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type ProbeRevokeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	Owner         string                 `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,3,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeRevokeRequest) Reset() {
+	*x = ProbeRevokeRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[68]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeRevokeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeRevokeRequest) ProtoMessage() {}
+
+func (x *ProbeRevokeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[68]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeRevokeRequest.ProtoReflect.Descriptor instead.
+func (*ProbeRevokeRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{68}
+}
+
+func (x *ProbeRevokeRequest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeRevokeRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ProbeRevokeRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type ProbeRevokeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeRevokeResponse) Reset() {
+	*x = ProbeRevokeResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[69]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeRevokeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeRevokeResponse) ProtoMessage() {}
+
+func (x *ProbeRevokeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[69]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeRevokeResponse.ProtoReflect.Descriptor instead.
+func (*ProbeRevokeResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{69}
+}
+
+func (x *ProbeRevokeResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+// ProbeArchiveSegmentMeta 是服务端缓存的归档段摘要（探针心跳/查询时刷新）。
+type ProbeArchiveSegmentMeta struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SegId         string                 `protobuf:"bytes,1,opt,name=seg_id,json=segId,proto3" json:"seg_id,omitempty"`
+	FirstUnix     int64                  `protobuf:"varint,2,opt,name=first_unix,json=firstUnix,proto3" json:"first_unix,omitempty"`
+	LastUnix      int64                  `protobuf:"varint,3,opt,name=last_unix,json=lastUnix,proto3" json:"last_unix,omitempty"`
+	Packets       uint64                 `protobuf:"varint,4,opt,name=packets,proto3" json:"packets,omitempty"`
+	Bytes         uint64                 `protobuf:"varint,5,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	LinkType      uint32                 `protobuf:"varint,6,opt,name=link_type,json=linkType,proto3" json:"link_type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeArchiveSegmentMeta) Reset() {
+	*x = ProbeArchiveSegmentMeta{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[70]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeArchiveSegmentMeta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeArchiveSegmentMeta) ProtoMessage() {}
+
+func (x *ProbeArchiveSegmentMeta) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[70]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeArchiveSegmentMeta.ProtoReflect.Descriptor instead.
+func (*ProbeArchiveSegmentMeta) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{70}
+}
+
+func (x *ProbeArchiveSegmentMeta) GetSegId() string {
+	if x != nil {
+		return x.SegId
+	}
+	return ""
+}
+
+func (x *ProbeArchiveSegmentMeta) GetFirstUnix() int64 {
+	if x != nil {
+		return x.FirstUnix
+	}
+	return 0
+}
+
+func (x *ProbeArchiveSegmentMeta) GetLastUnix() int64 {
+	if x != nil {
+		return x.LastUnix
+	}
+	return 0
+}
+
+func (x *ProbeArchiveSegmentMeta) GetPackets() uint64 {
+	if x != nil {
+		return x.Packets
+	}
+	return 0
+}
+
+func (x *ProbeArchiveSegmentMeta) GetBytes() uint64 {
+	if x != nil {
+		return x.Bytes
+	}
+	return 0
+}
+
+func (x *ProbeArchiveSegmentMeta) GetLinkType() uint32 {
+	if x != nil {
+		return x.LinkType
+	}
+	return 0
+}
+
+type ProbeListArchiveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	FromUnix      int64                  `protobuf:"varint,2,opt,name=from_unix,json=fromUnix,proto3" json:"from_unix,omitempty"`
+	ToUnix        int64                  `protobuf:"varint,3,opt,name=to_unix,json=toUnix,proto3" json:"to_unix,omitempty"`
+	Owner         string                 `protobuf:"bytes,4,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,5,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	Refresh       bool                   `protobuf:"varint,6,opt,name=refresh,proto3" json:"refresh,omitempty"` // true 时探针在线则先向探针实时查询刷新缓存
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeListArchiveRequest) Reset() {
+	*x = ProbeListArchiveRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[71]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeListArchiveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeListArchiveRequest) ProtoMessage() {}
+
+func (x *ProbeListArchiveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[71]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeListArchiveRequest.ProtoReflect.Descriptor instead.
+func (*ProbeListArchiveRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{71}
+}
+
+func (x *ProbeListArchiveRequest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeListArchiveRequest) GetFromUnix() int64 {
+	if x != nil {
+		return x.FromUnix
+	}
+	return 0
+}
+
+func (x *ProbeListArchiveRequest) GetToUnix() int64 {
+	if x != nil {
+		return x.ToUnix
+	}
+	return 0
+}
+
+func (x *ProbeListArchiveRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ProbeListArchiveRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+func (x *ProbeListArchiveRequest) GetRefresh() bool {
+	if x != nil {
+		return x.Refresh
+	}
+	return false
+}
+
+type ProbeListArchiveResponse struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Segments      []*ProbeArchiveSegmentMeta `protobuf:"bytes,1,rep,name=segments,proto3" json:"segments,omitempty"`
+	FromCache     bool                       `protobuf:"varint,2,opt,name=from_cache,json=fromCache,proto3" json:"from_cache,omitempty"` // true = 探针离线，结果来自缓存（可能过期）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeListArchiveResponse) Reset() {
+	*x = ProbeListArchiveResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[72]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeListArchiveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeListArchiveResponse) ProtoMessage() {}
+
+func (x *ProbeListArchiveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[72]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeListArchiveResponse.ProtoReflect.Descriptor instead.
+func (*ProbeListArchiveResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{72}
+}
+
+func (x *ProbeListArchiveResponse) GetSegments() []*ProbeArchiveSegmentMeta {
+	if x != nil {
+		return x.Segments
+	}
+	return nil
+}
+
+func (x *ProbeListArchiveResponse) GetFromCache() bool {
+	if x != nil {
+		return x.FromCache
+	}
+	return false
+}
+
+type ProbeImportArchiveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProbeId       string                 `protobuf:"bytes,1,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	FromUnix      int64                  `protobuf:"varint,2,opt,name=from_unix,json=fromUnix,proto3" json:"from_unix,omitempty"`
+	ToUnix        int64                  `protobuf:"varint,3,opt,name=to_unix,json=toUnix,proto3" json:"to_unix,omitempty"`
+	ProjectId     string                 `protobuf:"bytes,4,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"` // 导入产生的新会话归属项目（可选）
+	Owner         string                 `protobuf:"bytes,5,opt,name=owner,proto3" json:"owner,omitempty"`
+	AllOwners     bool                   `protobuf:"varint,6,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeImportArchiveRequest) Reset() {
+	*x = ProbeImportArchiveRequest{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[73]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeImportArchiveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeImportArchiveRequest) ProtoMessage() {}
+
+func (x *ProbeImportArchiveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[73]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeImportArchiveRequest.ProtoReflect.Descriptor instead.
+func (*ProbeImportArchiveRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{73}
+}
+
+func (x *ProbeImportArchiveRequest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *ProbeImportArchiveRequest) GetFromUnix() int64 {
+	if x != nil {
+		return x.FromUnix
+	}
+	return 0
+}
+
+func (x *ProbeImportArchiveRequest) GetToUnix() int64 {
+	if x != nil {
+		return x.ToUnix
+	}
+	return 0
+}
+
+func (x *ProbeImportArchiveRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *ProbeImportArchiveRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ProbeImportArchiveRequest) GetAllOwners() bool {
+	if x != nil {
+		return x.AllOwners
+	}
+	return false
+}
+
+type ProbeImportArchiveResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// db_path 同 ProbeStartCaptureResponse.db_path。
+	DbPath        string `protobuf:"bytes,2,opt,name=db_path,json=dbPath,proto3" json:"db_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeImportArchiveResponse) Reset() {
+	*x = ProbeImportArchiveResponse{}
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[74]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeImportArchiveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeImportArchiveResponse) ProtoMessage() {}
+
+func (x *ProbeImportArchiveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_internalipc_proto_internal_proto_msgTypes[74]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeImportArchiveResponse.ProtoReflect.Descriptor instead.
+func (*ProbeImportArchiveResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_internalipc_proto_internal_proto_rawDescGZIP(), []int{74}
+}
+
+func (x *ProbeImportArchiveResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ProbeImportArchiveResponse) GetDbPath() string {
+	if x != nil {
+		return x.DbPath
+	}
+	return ""
+}
+
 var File_pkg_internalipc_proto_internal_proto protoreflect.FileDescriptor
 
 const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
@@ -4281,7 +5802,140 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\vraw_packets\x18\x04 \x01(\x03R\n" +
 	"rawPackets\x12\x16\n" +
 	"\x06events\x18\x05 \x01(\x03R\x06events\x12!\n" +
-	"\fduration_sec\x18\x06 \x01(\x01R\vdurationSec2\xae\x10\n" +
+	"\fduration_sec\x18\x06 \x01(\x01R\vdurationSec\"\xaa\a\n" +
+	"\tProbeInfo\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
+	"\x05owner\x18\x03 \x01(\tR\x05owner\x12\x1b\n" +
+	"\ttenant_id\x18\x04 \x01(\tR\btenantId\x12\"\n" +
+	"\fcapabilities\x18\x05 \x01(\tR\fcapabilities\x12\x18\n" +
+	"\aversion\x18\x06 \x01(\tR\aversion\x12\x1a\n" +
+	"\bhostname\x18\a \x01(\tR\bhostname\x12\x0e\n" +
+	"\x02os\x18\b \x01(\tR\x02os\x12\x12\n" +
+	"\x04arch\x18\t \x01(\tR\x04arch\x12)\n" +
+	"\x10connection_state\x18\n" +
+	" \x01(\tR\x0fconnectionState\x12 \n" +
+	"\flast_seen_at\x18\v \x01(\tR\n" +
+	"lastSeenAt\x12#\n" +
+	"\rcapture_state\x18\f \x01(\tR\fcaptureState\x12&\n" +
+	"\x0flast_session_id\x18\r \x01(\tR\rlastSessionId\x12!\n" +
+	"\fstatus_error\x18\x0e \x01(\tR\vstatusError\x12#\n" +
+	"\rcapture_iface\x18\x0f \x01(\tR\fcaptureIface\x12#\n" +
+	"\rcapture_ports\x18\x10 \x01(\tR\fcapturePorts\x12-\n" +
+	"\x13last_packet_unix_ms\x18\x11 \x01(\x03R\x10lastPacketUnixMs\x12-\n" +
+	"\x13last_upload_unix_ms\x18\x12 \x01(\x03R\x10lastUploadUnixMs\x12)\n" +
+	"\x10packets_captured\x18\x13 \x01(\x04R\x0fpacketsCaptured\x12#\n" +
+	"\rpackets_acked\x18\x14 \x01(\x04R\fpacketsAcked\x12\x1f\n" +
+	"\vspool_depth\x18\x15 \x01(\x04R\n" +
+	"spoolDepth\x12\x18\n" +
+	"\adropped\x18\x16 \x01(\x04R\adropped\x12#\n" +
+	"\rarchive_bytes\x18\x17 \x01(\x04R\farchiveBytes\x12)\n" +
+	"\x10archive_segments\x18\x18 \x01(\rR\x0farchiveSegments\x12.\n" +
+	"\x13archive_oldest_unix\x18\x19 \x01(\x03R\x11archiveOldestUnix\x12.\n" +
+	"\x13archive_newest_unix\x18\x1a \x01(\x03R\x11archiveNewestUnix\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x1b \x01(\tR\tcreatedAt\"H\n" +
+	"\x11ListProbesRequest\x12\x14\n" +
+	"\x05owner\x18\x01 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x02 \x01(\bR\tallOwners\"H\n" +
+	"\x12ListProbesResponse\x122\n" +
+	"\x06probes\x18\x01 \x03(\v2\x1a.gta.internalipc.ProbeInfoR\x06probes\"a\n" +
+	"\x0fGetProbeRequest\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x14\n" +
+	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x03 \x01(\bR\tallOwners\"D\n" +
+	"\x10GetProbeResponse\x120\n" +
+	"\x05probe\x18\x01 \x01(\v2\x1a.gta.internalipc.ProbeInfoR\x05probe\"\x88\x02\n" +
+	"\x18ProbeStartCaptureRequest\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x14\n" +
+	"\x05ports\x18\x02 \x03(\x05R\x05ports\x12\x14\n" +
+	"\x05hosts\x18\x03 \x03(\tR\x05hosts\x12\x14\n" +
+	"\x05iface\x18\x04 \x01(\tR\x05iface\x12\x16\n" +
+	"\x06plugin\x18\x05 \x01(\tR\x06plugin\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x06 \x01(\tR\tprojectId\x12\x14\n" +
+	"\x05owner\x18\a \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\b \x01(\bR\tallOwners\x12#\n" +
+	"\rplugin_owners\x18\t \x03(\tR\fpluginOwners\"S\n" +
+	"\x19ProbeStartCaptureResponse\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
+	"\adb_path\x18\x02 \x01(\tR\x06dbPath\"i\n" +
+	"\x17ProbeStopCaptureRequest\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x14\n" +
+	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x03 \x01(\bR\tallOwners\"9\n" +
+	"\x18ProbeStopCaptureResponse\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"\x96\x01\n" +
+	"\x18ProbeUpdateFilterRequest\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x14\n" +
+	"\x05ports\x18\x02 \x03(\x05R\x05ports\x12\x14\n" +
+	"\x05hosts\x18\x03 \x03(\tR\x05hosts\x12\x14\n" +
+	"\x05owner\x18\x04 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x05 \x01(\bR\tallOwners\"+\n" +
+	"\x19ProbeUpdateFilterResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"j\n" +
+	"\x18ProbeRetryCaptureRequest\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x14\n" +
+	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x03 \x01(\bR\tallOwners\"+\n" +
+	"\x19ProbeRetryCaptureResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"x\n" +
+	"\x12ProbeRenameRequest\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
+	"\x05owner\x18\x03 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x04 \x01(\bR\tallOwners\"%\n" +
+	"\x13ProbeRenameResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"d\n" +
+	"\x12ProbeRevokeRequest\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x14\n" +
+	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x03 \x01(\bR\tallOwners\"%\n" +
+	"\x13ProbeRevokeResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xb9\x01\n" +
+	"\x17ProbeArchiveSegmentMeta\x12\x15\n" +
+	"\x06seg_id\x18\x01 \x01(\tR\x05segId\x12\x1d\n" +
+	"\n" +
+	"first_unix\x18\x02 \x01(\x03R\tfirstUnix\x12\x1b\n" +
+	"\tlast_unix\x18\x03 \x01(\x03R\blastUnix\x12\x18\n" +
+	"\apackets\x18\x04 \x01(\x04R\apackets\x12\x14\n" +
+	"\x05bytes\x18\x05 \x01(\x04R\x05bytes\x12\x1b\n" +
+	"\tlink_type\x18\x06 \x01(\rR\blinkType\"\xb9\x01\n" +
+	"\x17ProbeListArchiveRequest\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x1b\n" +
+	"\tfrom_unix\x18\x02 \x01(\x03R\bfromUnix\x12\x17\n" +
+	"\ato_unix\x18\x03 \x01(\x03R\x06toUnix\x12\x14\n" +
+	"\x05owner\x18\x04 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x05 \x01(\bR\tallOwners\x12\x18\n" +
+	"\arefresh\x18\x06 \x01(\bR\arefresh\"\x7f\n" +
+	"\x18ProbeListArchiveResponse\x12D\n" +
+	"\bsegments\x18\x01 \x03(\v2(.gta.internalipc.ProbeArchiveSegmentMetaR\bsegments\x12\x1d\n" +
+	"\n" +
+	"from_cache\x18\x02 \x01(\bR\tfromCache\"\xc0\x01\n" +
+	"\x19ProbeImportArchiveRequest\x12\x19\n" +
+	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x1b\n" +
+	"\tfrom_unix\x18\x02 \x01(\x03R\bfromUnix\x12\x17\n" +
+	"\ato_unix\x18\x03 \x01(\x03R\x06toUnix\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x04 \x01(\tR\tprojectId\x12\x14\n" +
+	"\x05owner\x18\x05 \x01(\tR\x05owner\x12\x1d\n" +
+	"\n" +
+	"all_owners\x18\x06 \x01(\bR\tallOwners\"T\n" +
+	"\x1aProbeImportArchiveResponse\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
+	"\adb_path\x18\x02 \x01(\tR\x06dbPath2\x8f\x18\n" +
 	"\x0eCaptureControl\x12[\n" +
 	"\fStartCapture\x12$.gta.internalipc.StartCaptureRequest\x1a%.gta.internalipc.StartCaptureResponse\x12X\n" +
 	"\vStopCapture\x12#.gta.internalipc.StopCaptureRequest\x1a$.gta.internalipc.StopCaptureResponse\x12g\n" +
@@ -4302,7 +5956,18 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x10CreateProxyLease\x12(.gta.internalipc.CreateProxyLeaseRequest\x1a).gta.internalipc.CreateProxyLeaseResponse\x12d\n" +
 	"\x0fListProxyLeases\x12'.gta.internalipc.ListProxyLeasesRequest\x1a(.gta.internalipc.ListProxyLeasesResponse\x12^\n" +
 	"\rGetProxyLease\x12%.gta.internalipc.GetProxyLeaseRequest\x1a&.gta.internalipc.GetProxyLeaseResponse\x12j\n" +
-	"\x11ReleaseProxyLease\x12).gta.internalipc.ReleaseProxyLeaseRequest\x1a*.gta.internalipc.ReleaseProxyLeaseResponse\x12j\n" +
+	"\x11ReleaseProxyLease\x12).gta.internalipc.ReleaseProxyLeaseRequest\x1a*.gta.internalipc.ReleaseProxyLeaseResponse\x12U\n" +
+	"\n" +
+	"ListProbes\x12\".gta.internalipc.ListProbesRequest\x1a#.gta.internalipc.ListProbesResponse\x12O\n" +
+	"\bGetProbe\x12 .gta.internalipc.GetProbeRequest\x1a!.gta.internalipc.GetProbeResponse\x12j\n" +
+	"\x11ProbeStartCapture\x12).gta.internalipc.ProbeStartCaptureRequest\x1a*.gta.internalipc.ProbeStartCaptureResponse\x12g\n" +
+	"\x10ProbeStopCapture\x12(.gta.internalipc.ProbeStopCaptureRequest\x1a).gta.internalipc.ProbeStopCaptureResponse\x12j\n" +
+	"\x11ProbeUpdateFilter\x12).gta.internalipc.ProbeUpdateFilterRequest\x1a*.gta.internalipc.ProbeUpdateFilterResponse\x12j\n" +
+	"\x11ProbeRetryCapture\x12).gta.internalipc.ProbeRetryCaptureRequest\x1a*.gta.internalipc.ProbeRetryCaptureResponse\x12X\n" +
+	"\vProbeRename\x12#.gta.internalipc.ProbeRenameRequest\x1a$.gta.internalipc.ProbeRenameResponse\x12X\n" +
+	"\vProbeRevoke\x12#.gta.internalipc.ProbeRevokeRequest\x1a$.gta.internalipc.ProbeRevokeResponse\x12g\n" +
+	"\x10ProbeListArchive\x12(.gta.internalipc.ProbeListArchiveRequest\x1a).gta.internalipc.ProbeListArchiveResponse\x12m\n" +
+	"\x12ProbeImportArchive\x12*.gta.internalipc.ProbeImportArchiveRequest\x1a+.gta.internalipc.ProbeImportArchiveResponse\x12j\n" +
 	"\x11StartLeaseCapture\x12).gta.internalipc.StartLeaseCaptureRequest\x1a*.gta.internalipc.StartLeaseCaptureResponse\x12g\n" +
 	"\x10StopLeaseCapture\x12(.gta.internalipc.StopLeaseCaptureRequest\x1a).gta.internalipc.StopLeaseCaptureResponseB\x1bZ\x19gta/pkg/internalipc/protob\x06proto3"
 
@@ -4318,7 +5983,7 @@ func file_pkg_internalipc_proto_internal_proto_rawDescGZIP() []byte {
 	return file_pkg_internalipc_proto_internal_proto_rawDescData
 }
 
-var file_pkg_internalipc_proto_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 56)
+var file_pkg_internalipc_proto_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 78)
 var file_pkg_internalipc_proto_internal_proto_goTypes = []any{
 	(*DecodeRawPacketsRequest)(nil),     // 0: gta.internalipc.DecodeRawPacketsRequest
 	(*DecodeRawPacketsResponse)(nil),    // 1: gta.internalipc.DecodeRawPacketsResponse
@@ -4373,19 +6038,41 @@ var file_pkg_internalipc_proto_internal_proto_goTypes = []any{
 	(*StartLeaseCaptureResponse)(nil),   // 50: gta.internalipc.StartLeaseCaptureResponse
 	(*StopLeaseCaptureRequest)(nil),     // 51: gta.internalipc.StopLeaseCaptureRequest
 	(*StopLeaseCaptureResponse)(nil),    // 52: gta.internalipc.StopLeaseCaptureResponse
-	nil,                                 // 53: gta.internalipc.TestPluginResponse.TypeHistogramEntry
-	nil,                                 // 54: gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	nil,                                 // 55: gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	(*ProbeInfo)(nil),                   // 53: gta.internalipc.ProbeInfo
+	(*ListProbesRequest)(nil),           // 54: gta.internalipc.ListProbesRequest
+	(*ListProbesResponse)(nil),          // 55: gta.internalipc.ListProbesResponse
+	(*GetProbeRequest)(nil),             // 56: gta.internalipc.GetProbeRequest
+	(*GetProbeResponse)(nil),            // 57: gta.internalipc.GetProbeResponse
+	(*ProbeStartCaptureRequest)(nil),    // 58: gta.internalipc.ProbeStartCaptureRequest
+	(*ProbeStartCaptureResponse)(nil),   // 59: gta.internalipc.ProbeStartCaptureResponse
+	(*ProbeStopCaptureRequest)(nil),     // 60: gta.internalipc.ProbeStopCaptureRequest
+	(*ProbeStopCaptureResponse)(nil),    // 61: gta.internalipc.ProbeStopCaptureResponse
+	(*ProbeUpdateFilterRequest)(nil),    // 62: gta.internalipc.ProbeUpdateFilterRequest
+	(*ProbeUpdateFilterResponse)(nil),   // 63: gta.internalipc.ProbeUpdateFilterResponse
+	(*ProbeRetryCaptureRequest)(nil),    // 64: gta.internalipc.ProbeRetryCaptureRequest
+	(*ProbeRetryCaptureResponse)(nil),   // 65: gta.internalipc.ProbeRetryCaptureResponse
+	(*ProbeRenameRequest)(nil),          // 66: gta.internalipc.ProbeRenameRequest
+	(*ProbeRenameResponse)(nil),         // 67: gta.internalipc.ProbeRenameResponse
+	(*ProbeRevokeRequest)(nil),          // 68: gta.internalipc.ProbeRevokeRequest
+	(*ProbeRevokeResponse)(nil),         // 69: gta.internalipc.ProbeRevokeResponse
+	(*ProbeArchiveSegmentMeta)(nil),     // 70: gta.internalipc.ProbeArchiveSegmentMeta
+	(*ProbeListArchiveRequest)(nil),     // 71: gta.internalipc.ProbeListArchiveRequest
+	(*ProbeListArchiveResponse)(nil),    // 72: gta.internalipc.ProbeListArchiveResponse
+	(*ProbeImportArchiveRequest)(nil),   // 73: gta.internalipc.ProbeImportArchiveRequest
+	(*ProbeImportArchiveResponse)(nil),  // 74: gta.internalipc.ProbeImportArchiveResponse
+	nil,                                 // 75: gta.internalipc.TestPluginResponse.TypeHistogramEntry
+	nil,                                 // 76: gta.internalipc.SampleBytesResponse.LengthHistogramEntry
+	nil,                                 // 77: gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
 }
 var file_pkg_internalipc_proto_internal_proto_depIdxs = []int32{
-	53, // 0: gta.internalipc.TestPluginResponse.type_histogram:type_name -> gta.internalipc.TestPluginResponse.TypeHistogramEntry
+	75, // 0: gta.internalipc.TestPluginResponse.type_histogram:type_name -> gta.internalipc.TestPluginResponse.TypeHistogramEntry
 	3,  // 1: gta.internalipc.TestPluginResponse.sample_events:type_name -> gta.internalipc.TestEventLite
 	4,  // 2: gta.internalipc.TestPluginResponse.error_samples:type_name -> gta.internalipc.TestErrorLite
 	7,  // 3: gta.internalipc.VerifyResponse.violations:type_name -> gta.internalipc.VerifyViolation
 	8,  // 4: gta.internalipc.VerifyResponse.quality:type_name -> gta.internalipc.VerifyQuality
 	11, // 5: gta.internalipc.SampleBytesResponse.packets:type_name -> gta.internalipc.SampledPacket
-	54, // 6: gta.internalipc.SampleBytesResponse.length_histogram:type_name -> gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	55, // 7: gta.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	76, // 6: gta.internalipc.SampleBytesResponse.length_histogram:type_name -> gta.internalipc.SampleBytesResponse.LengthHistogramEntry
+	77, // 7: gta.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
 	13, // 8: gta.internalipc.StartCaptureRequest.live:type_name -> gta.internalipc.PcapLiveConfig
 	14, // 9: gta.internalipc.StartCaptureRequest.file:type_name -> gta.internalipc.PcapFileConfig
 	15, // 10: gta.internalipc.StartCaptureRequest.mobile:type_name -> gta.internalipc.MobileSourceConfig
@@ -4395,53 +6082,76 @@ var file_pkg_internalipc_proto_internal_proto_depIdxs = []int32{
 	41, // 14: gta.internalipc.ListProxyLeasesResponse.leases:type_name -> gta.internalipc.ProxyLeaseState
 	41, // 15: gta.internalipc.GetProxyLeaseResponse.lease:type_name -> gta.internalipc.ProxyLeaseState
 	41, // 16: gta.internalipc.StartLeaseCaptureResponse.lease:type_name -> gta.internalipc.ProxyLeaseState
-	16, // 17: gta.internalipc.CaptureControl.StartCapture:input_type -> gta.internalipc.StartCaptureRequest
-	18, // 18: gta.internalipc.CaptureControl.StopCapture:input_type -> gta.internalipc.StopCaptureRequest
-	20, // 19: gta.internalipc.CaptureControl.GetCaptureStatus:input_type -> gta.internalipc.GetCaptureStatusRequest
-	24, // 20: gta.internalipc.CaptureControl.ListCaptureSessions:input_type -> gta.internalipc.ListCaptureSessionsRequest
-	22, // 21: gta.internalipc.CaptureControl.ListInterfaces:input_type -> gta.internalipc.ListInterfacesRequest
-	0,  // 22: gta.internalipc.CaptureControl.DecodeRawPackets:input_type -> gta.internalipc.DecodeRawPacketsRequest
-	27, // 23: gta.internalipc.CaptureControl.ListPlugins:input_type -> gta.internalipc.ListPluginsRequest
-	30, // 24: gta.internalipc.CaptureControl.GetPluginManifest:input_type -> gta.internalipc.GetPluginManifestRequest
-	32, // 25: gta.internalipc.CaptureControl.DeregisterPlugin:input_type -> gta.internalipc.DeregisterPluginRequest
-	34, // 26: gta.internalipc.CaptureControl.SetSessionPlugin:input_type -> gta.internalipc.SetSessionPluginRequest
-	36, // 27: gta.internalipc.CaptureControl.WatchPlugins:input_type -> gta.internalipc.WatchPluginsRequest
-	2,  // 28: gta.internalipc.CaptureControl.TestPlugin:input_type -> gta.internalipc.TestPluginRequest
-	6,  // 29: gta.internalipc.CaptureControl.Verify:input_type -> gta.internalipc.VerifyRequest
-	10, // 30: gta.internalipc.CaptureControl.SampleBytes:input_type -> gta.internalipc.SampleBytesRequest
-	38, // 31: gta.internalipc.CaptureControl.GetRegistryAddr:input_type -> gta.internalipc.GetRegistryAddrRequest
-	40, // 32: gta.internalipc.CaptureControl.CreateProxyLease:input_type -> gta.internalipc.CreateProxyLeaseRequest
-	43, // 33: gta.internalipc.CaptureControl.ListProxyLeases:input_type -> gta.internalipc.ListProxyLeasesRequest
-	45, // 34: gta.internalipc.CaptureControl.GetProxyLease:input_type -> gta.internalipc.GetProxyLeaseRequest
-	47, // 35: gta.internalipc.CaptureControl.ReleaseProxyLease:input_type -> gta.internalipc.ReleaseProxyLeaseRequest
-	49, // 36: gta.internalipc.CaptureControl.StartLeaseCapture:input_type -> gta.internalipc.StartLeaseCaptureRequest
-	51, // 37: gta.internalipc.CaptureControl.StopLeaseCapture:input_type -> gta.internalipc.StopLeaseCaptureRequest
-	17, // 38: gta.internalipc.CaptureControl.StartCapture:output_type -> gta.internalipc.StartCaptureResponse
-	19, // 39: gta.internalipc.CaptureControl.StopCapture:output_type -> gta.internalipc.StopCaptureResponse
-	21, // 40: gta.internalipc.CaptureControl.GetCaptureStatus:output_type -> gta.internalipc.GetCaptureStatusResponse
-	25, // 41: gta.internalipc.CaptureControl.ListCaptureSessions:output_type -> gta.internalipc.ListCaptureSessionsResponse
-	23, // 42: gta.internalipc.CaptureControl.ListInterfaces:output_type -> gta.internalipc.ListInterfacesResponse
-	1,  // 43: gta.internalipc.CaptureControl.DecodeRawPackets:output_type -> gta.internalipc.DecodeRawPacketsResponse
-	29, // 44: gta.internalipc.CaptureControl.ListPlugins:output_type -> gta.internalipc.ListPluginsResponse
-	31, // 45: gta.internalipc.CaptureControl.GetPluginManifest:output_type -> gta.internalipc.GetPluginManifestResponse
-	33, // 46: gta.internalipc.CaptureControl.DeregisterPlugin:output_type -> gta.internalipc.DeregisterPluginResponse
-	35, // 47: gta.internalipc.CaptureControl.SetSessionPlugin:output_type -> gta.internalipc.SetSessionPluginResponse
-	37, // 48: gta.internalipc.CaptureControl.WatchPlugins:output_type -> gta.internalipc.PluginEvent
-	5,  // 49: gta.internalipc.CaptureControl.TestPlugin:output_type -> gta.internalipc.TestPluginResponse
-	9,  // 50: gta.internalipc.CaptureControl.Verify:output_type -> gta.internalipc.VerifyResponse
-	12, // 51: gta.internalipc.CaptureControl.SampleBytes:output_type -> gta.internalipc.SampleBytesResponse
-	39, // 52: gta.internalipc.CaptureControl.GetRegistryAddr:output_type -> gta.internalipc.GetRegistryAddrResponse
-	42, // 53: gta.internalipc.CaptureControl.CreateProxyLease:output_type -> gta.internalipc.CreateProxyLeaseResponse
-	44, // 54: gta.internalipc.CaptureControl.ListProxyLeases:output_type -> gta.internalipc.ListProxyLeasesResponse
-	46, // 55: gta.internalipc.CaptureControl.GetProxyLease:output_type -> gta.internalipc.GetProxyLeaseResponse
-	48, // 56: gta.internalipc.CaptureControl.ReleaseProxyLease:output_type -> gta.internalipc.ReleaseProxyLeaseResponse
-	50, // 57: gta.internalipc.CaptureControl.StartLeaseCapture:output_type -> gta.internalipc.StartLeaseCaptureResponse
-	52, // 58: gta.internalipc.CaptureControl.StopLeaseCapture:output_type -> gta.internalipc.StopLeaseCaptureResponse
-	38, // [38:59] is the sub-list for method output_type
-	17, // [17:38] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	53, // 17: gta.internalipc.ListProbesResponse.probes:type_name -> gta.internalipc.ProbeInfo
+	53, // 18: gta.internalipc.GetProbeResponse.probe:type_name -> gta.internalipc.ProbeInfo
+	70, // 19: gta.internalipc.ProbeListArchiveResponse.segments:type_name -> gta.internalipc.ProbeArchiveSegmentMeta
+	16, // 20: gta.internalipc.CaptureControl.StartCapture:input_type -> gta.internalipc.StartCaptureRequest
+	18, // 21: gta.internalipc.CaptureControl.StopCapture:input_type -> gta.internalipc.StopCaptureRequest
+	20, // 22: gta.internalipc.CaptureControl.GetCaptureStatus:input_type -> gta.internalipc.GetCaptureStatusRequest
+	24, // 23: gta.internalipc.CaptureControl.ListCaptureSessions:input_type -> gta.internalipc.ListCaptureSessionsRequest
+	22, // 24: gta.internalipc.CaptureControl.ListInterfaces:input_type -> gta.internalipc.ListInterfacesRequest
+	0,  // 25: gta.internalipc.CaptureControl.DecodeRawPackets:input_type -> gta.internalipc.DecodeRawPacketsRequest
+	27, // 26: gta.internalipc.CaptureControl.ListPlugins:input_type -> gta.internalipc.ListPluginsRequest
+	30, // 27: gta.internalipc.CaptureControl.GetPluginManifest:input_type -> gta.internalipc.GetPluginManifestRequest
+	32, // 28: gta.internalipc.CaptureControl.DeregisterPlugin:input_type -> gta.internalipc.DeregisterPluginRequest
+	34, // 29: gta.internalipc.CaptureControl.SetSessionPlugin:input_type -> gta.internalipc.SetSessionPluginRequest
+	36, // 30: gta.internalipc.CaptureControl.WatchPlugins:input_type -> gta.internalipc.WatchPluginsRequest
+	2,  // 31: gta.internalipc.CaptureControl.TestPlugin:input_type -> gta.internalipc.TestPluginRequest
+	6,  // 32: gta.internalipc.CaptureControl.Verify:input_type -> gta.internalipc.VerifyRequest
+	10, // 33: gta.internalipc.CaptureControl.SampleBytes:input_type -> gta.internalipc.SampleBytesRequest
+	38, // 34: gta.internalipc.CaptureControl.GetRegistryAddr:input_type -> gta.internalipc.GetRegistryAddrRequest
+	40, // 35: gta.internalipc.CaptureControl.CreateProxyLease:input_type -> gta.internalipc.CreateProxyLeaseRequest
+	43, // 36: gta.internalipc.CaptureControl.ListProxyLeases:input_type -> gta.internalipc.ListProxyLeasesRequest
+	45, // 37: gta.internalipc.CaptureControl.GetProxyLease:input_type -> gta.internalipc.GetProxyLeaseRequest
+	47, // 38: gta.internalipc.CaptureControl.ReleaseProxyLease:input_type -> gta.internalipc.ReleaseProxyLeaseRequest
+	54, // 39: gta.internalipc.CaptureControl.ListProbes:input_type -> gta.internalipc.ListProbesRequest
+	56, // 40: gta.internalipc.CaptureControl.GetProbe:input_type -> gta.internalipc.GetProbeRequest
+	58, // 41: gta.internalipc.CaptureControl.ProbeStartCapture:input_type -> gta.internalipc.ProbeStartCaptureRequest
+	60, // 42: gta.internalipc.CaptureControl.ProbeStopCapture:input_type -> gta.internalipc.ProbeStopCaptureRequest
+	62, // 43: gta.internalipc.CaptureControl.ProbeUpdateFilter:input_type -> gta.internalipc.ProbeUpdateFilterRequest
+	64, // 44: gta.internalipc.CaptureControl.ProbeRetryCapture:input_type -> gta.internalipc.ProbeRetryCaptureRequest
+	66, // 45: gta.internalipc.CaptureControl.ProbeRename:input_type -> gta.internalipc.ProbeRenameRequest
+	68, // 46: gta.internalipc.CaptureControl.ProbeRevoke:input_type -> gta.internalipc.ProbeRevokeRequest
+	71, // 47: gta.internalipc.CaptureControl.ProbeListArchive:input_type -> gta.internalipc.ProbeListArchiveRequest
+	73, // 48: gta.internalipc.CaptureControl.ProbeImportArchive:input_type -> gta.internalipc.ProbeImportArchiveRequest
+	49, // 49: gta.internalipc.CaptureControl.StartLeaseCapture:input_type -> gta.internalipc.StartLeaseCaptureRequest
+	51, // 50: gta.internalipc.CaptureControl.StopLeaseCapture:input_type -> gta.internalipc.StopLeaseCaptureRequest
+	17, // 51: gta.internalipc.CaptureControl.StartCapture:output_type -> gta.internalipc.StartCaptureResponse
+	19, // 52: gta.internalipc.CaptureControl.StopCapture:output_type -> gta.internalipc.StopCaptureResponse
+	21, // 53: gta.internalipc.CaptureControl.GetCaptureStatus:output_type -> gta.internalipc.GetCaptureStatusResponse
+	25, // 54: gta.internalipc.CaptureControl.ListCaptureSessions:output_type -> gta.internalipc.ListCaptureSessionsResponse
+	23, // 55: gta.internalipc.CaptureControl.ListInterfaces:output_type -> gta.internalipc.ListInterfacesResponse
+	1,  // 56: gta.internalipc.CaptureControl.DecodeRawPackets:output_type -> gta.internalipc.DecodeRawPacketsResponse
+	29, // 57: gta.internalipc.CaptureControl.ListPlugins:output_type -> gta.internalipc.ListPluginsResponse
+	31, // 58: gta.internalipc.CaptureControl.GetPluginManifest:output_type -> gta.internalipc.GetPluginManifestResponse
+	33, // 59: gta.internalipc.CaptureControl.DeregisterPlugin:output_type -> gta.internalipc.DeregisterPluginResponse
+	35, // 60: gta.internalipc.CaptureControl.SetSessionPlugin:output_type -> gta.internalipc.SetSessionPluginResponse
+	37, // 61: gta.internalipc.CaptureControl.WatchPlugins:output_type -> gta.internalipc.PluginEvent
+	5,  // 62: gta.internalipc.CaptureControl.TestPlugin:output_type -> gta.internalipc.TestPluginResponse
+	9,  // 63: gta.internalipc.CaptureControl.Verify:output_type -> gta.internalipc.VerifyResponse
+	12, // 64: gta.internalipc.CaptureControl.SampleBytes:output_type -> gta.internalipc.SampleBytesResponse
+	39, // 65: gta.internalipc.CaptureControl.GetRegistryAddr:output_type -> gta.internalipc.GetRegistryAddrResponse
+	42, // 66: gta.internalipc.CaptureControl.CreateProxyLease:output_type -> gta.internalipc.CreateProxyLeaseResponse
+	44, // 67: gta.internalipc.CaptureControl.ListProxyLeases:output_type -> gta.internalipc.ListProxyLeasesResponse
+	46, // 68: gta.internalipc.CaptureControl.GetProxyLease:output_type -> gta.internalipc.GetProxyLeaseResponse
+	48, // 69: gta.internalipc.CaptureControl.ReleaseProxyLease:output_type -> gta.internalipc.ReleaseProxyLeaseResponse
+	55, // 70: gta.internalipc.CaptureControl.ListProbes:output_type -> gta.internalipc.ListProbesResponse
+	57, // 71: gta.internalipc.CaptureControl.GetProbe:output_type -> gta.internalipc.GetProbeResponse
+	59, // 72: gta.internalipc.CaptureControl.ProbeStartCapture:output_type -> gta.internalipc.ProbeStartCaptureResponse
+	61, // 73: gta.internalipc.CaptureControl.ProbeStopCapture:output_type -> gta.internalipc.ProbeStopCaptureResponse
+	63, // 74: gta.internalipc.CaptureControl.ProbeUpdateFilter:output_type -> gta.internalipc.ProbeUpdateFilterResponse
+	65, // 75: gta.internalipc.CaptureControl.ProbeRetryCapture:output_type -> gta.internalipc.ProbeRetryCaptureResponse
+	67, // 76: gta.internalipc.CaptureControl.ProbeRename:output_type -> gta.internalipc.ProbeRenameResponse
+	69, // 77: gta.internalipc.CaptureControl.ProbeRevoke:output_type -> gta.internalipc.ProbeRevokeResponse
+	72, // 78: gta.internalipc.CaptureControl.ProbeListArchive:output_type -> gta.internalipc.ProbeListArchiveResponse
+	74, // 79: gta.internalipc.CaptureControl.ProbeImportArchive:output_type -> gta.internalipc.ProbeImportArchiveResponse
+	50, // 80: gta.internalipc.CaptureControl.StartLeaseCapture:output_type -> gta.internalipc.StartLeaseCaptureResponse
+	52, // 81: gta.internalipc.CaptureControl.StopLeaseCapture:output_type -> gta.internalipc.StopLeaseCaptureResponse
+	51, // [51:82] is the sub-list for method output_type
+	20, // [20:51] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_pkg_internalipc_proto_internal_proto_init() }
@@ -4460,7 +6170,7 @@ func file_pkg_internalipc_proto_internal_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_internalipc_proto_internal_proto_rawDesc), len(file_pkg_internalipc_proto_internal_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   56,
+			NumMessages:   78,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

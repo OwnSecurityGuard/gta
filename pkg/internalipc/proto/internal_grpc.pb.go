@@ -38,6 +38,16 @@ const (
 	CaptureControl_ListProxyLeases_FullMethodName     = "/gta.internalipc.CaptureControl/ListProxyLeases"
 	CaptureControl_GetProxyLease_FullMethodName       = "/gta.internalipc.CaptureControl/GetProxyLease"
 	CaptureControl_ReleaseProxyLease_FullMethodName   = "/gta.internalipc.CaptureControl/ReleaseProxyLease"
+	CaptureControl_ListProbes_FullMethodName          = "/gta.internalipc.CaptureControl/ListProbes"
+	CaptureControl_GetProbe_FullMethodName            = "/gta.internalipc.CaptureControl/GetProbe"
+	CaptureControl_ProbeStartCapture_FullMethodName   = "/gta.internalipc.CaptureControl/ProbeStartCapture"
+	CaptureControl_ProbeStopCapture_FullMethodName    = "/gta.internalipc.CaptureControl/ProbeStopCapture"
+	CaptureControl_ProbeUpdateFilter_FullMethodName   = "/gta.internalipc.CaptureControl/ProbeUpdateFilter"
+	CaptureControl_ProbeRetryCapture_FullMethodName   = "/gta.internalipc.CaptureControl/ProbeRetryCapture"
+	CaptureControl_ProbeRename_FullMethodName         = "/gta.internalipc.CaptureControl/ProbeRename"
+	CaptureControl_ProbeRevoke_FullMethodName         = "/gta.internalipc.CaptureControl/ProbeRevoke"
+	CaptureControl_ProbeListArchive_FullMethodName    = "/gta.internalipc.CaptureControl/ProbeListArchive"
+	CaptureControl_ProbeImportArchive_FullMethodName  = "/gta.internalipc.CaptureControl/ProbeImportArchive"
 	CaptureControl_StartLeaseCapture_FullMethodName   = "/gta.internalipc.CaptureControl/StartLeaseCapture"
 	CaptureControl_StopLeaseCapture_FullMethodName    = "/gta.internalipc.CaptureControl/StopLeaseCapture"
 )
@@ -101,6 +111,23 @@ type CaptureControlClient interface {
 	ReleaseProxyLease(ctx context.Context, in *ReleaseProxyLeaseRequest, opts ...grpc.CallOption) (*ReleaseProxyLeaseResponse, error)
 	// StartLeaseCapture 在常驻租约上开一次新的抓包会话。
 	//
+	// ---- Probe 管理（探针注册/状态/控制全部在 pipeline 侧，gta-mcp 代理调用）----
+	// 探针是个人资源：owner 校验在 pipeline 侧做 creator 轴判定（本人或 admin）。
+	ListProbes(ctx context.Context, in *ListProbesRequest, opts ...grpc.CallOption) (*ListProbesResponse, error)
+	GetProbe(ctx context.Context, in *GetProbeRequest, opts ...grpc.CallOption) (*GetProbeResponse, error)
+	// ProbeStartCapture 选定探针建会话并下发 AssignCapture（建会话 + 指派一体）。
+	ProbeStartCapture(ctx context.Context, in *ProbeStartCaptureRequest, opts ...grpc.CallOption) (*ProbeStartCaptureResponse, error)
+	ProbeStopCapture(ctx context.Context, in *ProbeStopCaptureRequest, opts ...grpc.CallOption) (*ProbeStopCaptureResponse, error)
+	// ProbeUpdateFilter 热更新抓包过滤（BPF 重编译，不中断抓包）。
+	ProbeUpdateFilter(ctx context.Context, in *ProbeUpdateFilterRequest, opts ...grpc.CallOption) (*ProbeUpdateFilterResponse, error)
+	// ProbeRetryCapture 让 failed 状态的探针重试上一次 assign。
+	ProbeRetryCapture(ctx context.Context, in *ProbeRetryCaptureRequest, opts ...grpc.CallOption) (*ProbeRetryCaptureResponse, error)
+	ProbeRename(ctx context.Context, in *ProbeRenameRequest, opts ...grpc.CallOption) (*ProbeRenameResponse, error)
+	// ProbeRevoke 作废 probe_token（探针下次启动需重新接入）。
+	ProbeRevoke(ctx context.Context, in *ProbeRevokeRequest, opts ...grpc.CallOption) (*ProbeRevokeResponse, error)
+	ProbeListArchive(ctx context.Context, in *ProbeListArchiveRequest, opts ...grpc.CallOption) (*ProbeListArchiveResponse, error)
+	// ProbeImportArchive 把探针本地归档按时间窗回放导入为新会话（source=probe-archive）。
+	ProbeImportArchive(ctx context.Context, in *ProbeImportArchiveRequest, opts ...grpc.CallOption) (*ProbeImportArchiveResponse, error)
 	// 租约的代理出口（agent 进程 + 手机 CONNECT 端口）在整个租约生命周期内不变，
 	// 本 RPC 只切换「抓不抓、抓到哪个会话」。手机侧无需重配代理、VPN 不中断。
 	// 每次调用都是一个全新的会话（独立 session_id / 独立 SQLite / 独立 mobile
@@ -319,6 +346,106 @@ func (c *captureControlClient) ReleaseProxyLease(ctx context.Context, in *Releas
 	return out, nil
 }
 
+func (c *captureControlClient) ListProbes(ctx context.Context, in *ListProbesRequest, opts ...grpc.CallOption) (*ListProbesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProbesResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ListProbes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) GetProbe(ctx context.Context, in *GetProbeRequest, opts ...grpc.CallOption) (*GetProbeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProbeResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_GetProbe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) ProbeStartCapture(ctx context.Context, in *ProbeStartCaptureRequest, opts ...grpc.CallOption) (*ProbeStartCaptureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProbeStartCaptureResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ProbeStartCapture_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) ProbeStopCapture(ctx context.Context, in *ProbeStopCaptureRequest, opts ...grpc.CallOption) (*ProbeStopCaptureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProbeStopCaptureResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ProbeStopCapture_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) ProbeUpdateFilter(ctx context.Context, in *ProbeUpdateFilterRequest, opts ...grpc.CallOption) (*ProbeUpdateFilterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProbeUpdateFilterResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ProbeUpdateFilter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) ProbeRetryCapture(ctx context.Context, in *ProbeRetryCaptureRequest, opts ...grpc.CallOption) (*ProbeRetryCaptureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProbeRetryCaptureResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ProbeRetryCapture_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) ProbeRename(ctx context.Context, in *ProbeRenameRequest, opts ...grpc.CallOption) (*ProbeRenameResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProbeRenameResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ProbeRename_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) ProbeRevoke(ctx context.Context, in *ProbeRevokeRequest, opts ...grpc.CallOption) (*ProbeRevokeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProbeRevokeResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ProbeRevoke_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) ProbeListArchive(ctx context.Context, in *ProbeListArchiveRequest, opts ...grpc.CallOption) (*ProbeListArchiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProbeListArchiveResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ProbeListArchive_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *captureControlClient) ProbeImportArchive(ctx context.Context, in *ProbeImportArchiveRequest, opts ...grpc.CallOption) (*ProbeImportArchiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProbeImportArchiveResponse)
+	err := c.cc.Invoke(ctx, CaptureControl_ProbeImportArchive_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *captureControlClient) StartLeaseCapture(ctx context.Context, in *StartLeaseCaptureRequest, opts ...grpc.CallOption) (*StartLeaseCaptureResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StartLeaseCaptureResponse)
@@ -398,6 +525,23 @@ type CaptureControlServer interface {
 	ReleaseProxyLease(context.Context, *ReleaseProxyLeaseRequest) (*ReleaseProxyLeaseResponse, error)
 	// StartLeaseCapture 在常驻租约上开一次新的抓包会话。
 	//
+	// ---- Probe 管理（探针注册/状态/控制全部在 pipeline 侧，gta-mcp 代理调用）----
+	// 探针是个人资源：owner 校验在 pipeline 侧做 creator 轴判定（本人或 admin）。
+	ListProbes(context.Context, *ListProbesRequest) (*ListProbesResponse, error)
+	GetProbe(context.Context, *GetProbeRequest) (*GetProbeResponse, error)
+	// ProbeStartCapture 选定探针建会话并下发 AssignCapture（建会话 + 指派一体）。
+	ProbeStartCapture(context.Context, *ProbeStartCaptureRequest) (*ProbeStartCaptureResponse, error)
+	ProbeStopCapture(context.Context, *ProbeStopCaptureRequest) (*ProbeStopCaptureResponse, error)
+	// ProbeUpdateFilter 热更新抓包过滤（BPF 重编译，不中断抓包）。
+	ProbeUpdateFilter(context.Context, *ProbeUpdateFilterRequest) (*ProbeUpdateFilterResponse, error)
+	// ProbeRetryCapture 让 failed 状态的探针重试上一次 assign。
+	ProbeRetryCapture(context.Context, *ProbeRetryCaptureRequest) (*ProbeRetryCaptureResponse, error)
+	ProbeRename(context.Context, *ProbeRenameRequest) (*ProbeRenameResponse, error)
+	// ProbeRevoke 作废 probe_token（探针下次启动需重新接入）。
+	ProbeRevoke(context.Context, *ProbeRevokeRequest) (*ProbeRevokeResponse, error)
+	ProbeListArchive(context.Context, *ProbeListArchiveRequest) (*ProbeListArchiveResponse, error)
+	// ProbeImportArchive 把探针本地归档按时间窗回放导入为新会话（source=probe-archive）。
+	ProbeImportArchive(context.Context, *ProbeImportArchiveRequest) (*ProbeImportArchiveResponse, error)
 	// 租约的代理出口（agent 进程 + 手机 CONNECT 端口）在整个租约生命周期内不变，
 	// 本 RPC 只切换「抓不抓、抓到哪个会话」。手机侧无需重配代理、VPN 不中断。
 	// 每次调用都是一个全新的会话（独立 session_id / 独立 SQLite / 独立 mobile
@@ -473,6 +617,36 @@ func (UnimplementedCaptureControlServer) GetProxyLease(context.Context, *GetProx
 }
 func (UnimplementedCaptureControlServer) ReleaseProxyLease(context.Context, *ReleaseProxyLeaseRequest) (*ReleaseProxyLeaseResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReleaseProxyLease not implemented")
+}
+func (UnimplementedCaptureControlServer) ListProbes(context.Context, *ListProbesRequest) (*ListProbesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListProbes not implemented")
+}
+func (UnimplementedCaptureControlServer) GetProbe(context.Context, *GetProbeRequest) (*GetProbeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProbe not implemented")
+}
+func (UnimplementedCaptureControlServer) ProbeStartCapture(context.Context, *ProbeStartCaptureRequest) (*ProbeStartCaptureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProbeStartCapture not implemented")
+}
+func (UnimplementedCaptureControlServer) ProbeStopCapture(context.Context, *ProbeStopCaptureRequest) (*ProbeStopCaptureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProbeStopCapture not implemented")
+}
+func (UnimplementedCaptureControlServer) ProbeUpdateFilter(context.Context, *ProbeUpdateFilterRequest) (*ProbeUpdateFilterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProbeUpdateFilter not implemented")
+}
+func (UnimplementedCaptureControlServer) ProbeRetryCapture(context.Context, *ProbeRetryCaptureRequest) (*ProbeRetryCaptureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProbeRetryCapture not implemented")
+}
+func (UnimplementedCaptureControlServer) ProbeRename(context.Context, *ProbeRenameRequest) (*ProbeRenameResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProbeRename not implemented")
+}
+func (UnimplementedCaptureControlServer) ProbeRevoke(context.Context, *ProbeRevokeRequest) (*ProbeRevokeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProbeRevoke not implemented")
+}
+func (UnimplementedCaptureControlServer) ProbeListArchive(context.Context, *ProbeListArchiveRequest) (*ProbeListArchiveResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProbeListArchive not implemented")
+}
+func (UnimplementedCaptureControlServer) ProbeImportArchive(context.Context, *ProbeImportArchiveRequest) (*ProbeImportArchiveResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProbeImportArchive not implemented")
 }
 func (UnimplementedCaptureControlServer) StartLeaseCapture(context.Context, *StartLeaseCaptureRequest) (*StartLeaseCaptureResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartLeaseCapture not implemented")
@@ -836,6 +1010,186 @@ func _CaptureControl_ReleaseProxyLease_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CaptureControl_ListProbes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProbesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ListProbes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ListProbes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ListProbes(ctx, req.(*ListProbesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_GetProbe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProbeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).GetProbe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_GetProbe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).GetProbe(ctx, req.(*GetProbeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_ProbeStartCapture_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProbeStartCaptureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ProbeStartCapture(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ProbeStartCapture_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ProbeStartCapture(ctx, req.(*ProbeStartCaptureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_ProbeStopCapture_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProbeStopCaptureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ProbeStopCapture(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ProbeStopCapture_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ProbeStopCapture(ctx, req.(*ProbeStopCaptureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_ProbeUpdateFilter_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProbeUpdateFilterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ProbeUpdateFilter(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ProbeUpdateFilter_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ProbeUpdateFilter(ctx, req.(*ProbeUpdateFilterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_ProbeRetryCapture_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProbeRetryCaptureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ProbeRetryCapture(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ProbeRetryCapture_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ProbeRetryCapture(ctx, req.(*ProbeRetryCaptureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_ProbeRename_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProbeRenameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ProbeRename(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ProbeRename_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ProbeRename(ctx, req.(*ProbeRenameRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_ProbeRevoke_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProbeRevokeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ProbeRevoke(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ProbeRevoke_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ProbeRevoke(ctx, req.(*ProbeRevokeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_ProbeListArchive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProbeListArchiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ProbeListArchive(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ProbeListArchive_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ProbeListArchive(ctx, req.(*ProbeListArchiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CaptureControl_ProbeImportArchive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProbeImportArchiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CaptureControlServer).ProbeImportArchive(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CaptureControl_ProbeImportArchive_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CaptureControlServer).ProbeImportArchive(ctx, req.(*ProbeImportArchiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _CaptureControl_StartLeaseCapture_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StartLeaseCaptureRequest)
 	if err := dec(in); err != nil {
@@ -950,6 +1304,46 @@ var CaptureControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReleaseProxyLease",
 			Handler:    _CaptureControl_ReleaseProxyLease_Handler,
+		},
+		{
+			MethodName: "ListProbes",
+			Handler:    _CaptureControl_ListProbes_Handler,
+		},
+		{
+			MethodName: "GetProbe",
+			Handler:    _CaptureControl_GetProbe_Handler,
+		},
+		{
+			MethodName: "ProbeStartCapture",
+			Handler:    _CaptureControl_ProbeStartCapture_Handler,
+		},
+		{
+			MethodName: "ProbeStopCapture",
+			Handler:    _CaptureControl_ProbeStopCapture_Handler,
+		},
+		{
+			MethodName: "ProbeUpdateFilter",
+			Handler:    _CaptureControl_ProbeUpdateFilter_Handler,
+		},
+		{
+			MethodName: "ProbeRetryCapture",
+			Handler:    _CaptureControl_ProbeRetryCapture_Handler,
+		},
+		{
+			MethodName: "ProbeRename",
+			Handler:    _CaptureControl_ProbeRename_Handler,
+		},
+		{
+			MethodName: "ProbeRevoke",
+			Handler:    _CaptureControl_ProbeRevoke_Handler,
+		},
+		{
+			MethodName: "ProbeListArchive",
+			Handler:    _CaptureControl_ProbeListArchive_Handler,
+		},
+		{
+			MethodName: "ProbeImportArchive",
+			Handler:    _CaptureControl_ProbeImportArchive_Handler,
 		},
 		{
 			MethodName: "StartLeaseCapture",

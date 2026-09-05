@@ -25,28 +25,49 @@ type captureConfig struct {
 	Promisc bool
 }
 
+// liveCapture 是一次运行中的抓包会话：暴露 BPF 热更新（不中断抓包）。
+type liveCapture struct {
+	h   *pcap.Handle
+	ctx context.Context
+}
+
+// SetFilter 热更新 BPF（在现有 handle 上重编译，不断流）。
+// 失败返回错误但**不清除**旧过滤——保留旧规则比裸奔安全。
+func (lc *liveCapture) SetFilter(bpf string) error {
+	if bpf == "" {
+		bpf = ""
+	}
+	if err := lc.h.SetBPFFilter(bpf); err != nil {
+		return fmt.Errorf("set bpf: %w", err)
+	}
+	slog.Info("bpf filter updated", "bpf", bpf)
+	return nil
+}
+
 // runCapture 打开网卡、应用 BPF，把抓到的每个完整帧转成 RawPacket
 // 发往 out，直到 ctx 取消或网卡关闭。
 // 只支持单网卡（agent 一次只服务一个会话）；Iface 为空返回错误。
 // 抓包源意外关闭时向 ended 非阻塞发送错误（ctx 正常取消则不发送）。
-func runCapture(ctx context.Context, cfg captureConfig, out chan<- *proto.RawPacket, ended chan<- error) error {
+// 返回的 *liveCapture 供运行期热更新（SetFilter）；启动失败返回错误。
+func runCapture(ctx context.Context, cfg captureConfig, out chan<- *proto.RawPacket, ended chan<- error) (*liveCapture, error) {
 	if cfg.Iface == "" {
-		return fmt.Errorf("capture requires --iface")
+		return nil, fmt.Errorf("capture requires an interface")
 	}
 	if cfg.SnapLen <= 0 {
 		cfg.SnapLen = 1600
 	}
 	h, err := openLiveWithFallback(cfg.Iface, cfg.SnapLen, cfg.Promisc)
 	if err != nil {
-		return fmt.Errorf("open %q: %w", cfg.Iface, err)
+		return nil, fmt.Errorf("open %q: %w", cfg.Iface, err)
 	}
 	if cfg.BPF != "" {
 		if err := h.SetBPFFilter(cfg.BPF); err != nil {
 			h.Close()
-			return fmt.Errorf("set bpf: %w", err)
+			return nil, fmt.Errorf("set bpf: %w", err)
 		}
 	}
 	slog.Info("live capture opened", "iface", cfg.Iface, "bpf", cfg.BPF, "snaplen", cfg.SnapLen)
+	lc := &liveCapture{h: h, ctx: ctx}
 
 	go func() {
 		defer h.Close()
@@ -64,6 +85,7 @@ func runCapture(ctx context.Context, cfg captureConfig, out chan<- *proto.RawPac
 					notifyCaptureEnded(ended, errors.New("capture source closed for iface "+cfg.Iface))
 					return
 				}
+				_ = lc
 				data := pkt.Data()
 				if len(data) == 0 {
 					continue
@@ -80,7 +102,7 @@ func runCapture(ctx context.Context, cfg captureConfig, out chan<- *proto.RawPac
 			}
 		}
 	}()
-	return nil
+	return lc, nil
 }
 
 // notifyCaptureEnded 非阻塞地上报抓包意外结束（ended 容量为 1）。
@@ -213,4 +235,45 @@ func outboundLocalIP() string {
 		return a.IP.String()
 	}
 	return ""
+}
+
+// IfaceInfo 是本地控制面 /v1/interfaces 的网卡条目。
+type IfaceInfo struct {
+	Name        string   `json:"name"`        // pcap 设备名（可直接用于 start.iface）
+	Friendly    string   `json:"friendly"`    // 友好名（net.Interfaces 的 Name）
+	Description string   `json:"description"`
+	IPs         []string `json:"ips"`
+}
+
+// listInterfacesLocal 枚举 pcap 设备清单（跨平台设备名 + 友好名对照）。
+func listInterfacesLocal() []IfaceInfo {
+	devs, err := pcap.FindAllDevs()
+	if err != nil {
+		return nil
+	}
+	byIP := map[string]string{}
+	if nifs, err := net.Interfaces(); err == nil {
+		for _, nif := range nifs {
+			addrs, _ := nif.Addrs()
+			for _, a := range addrs {
+				if ipn, ok := a.(*net.IPNet); ok && ipn.IP != nil {
+					byIP[ipn.IP.String()] = nif.Name
+				}
+			}
+		}
+	}
+	out := make([]IfaceInfo, 0, len(devs))
+	for _, d := range devs {
+		info := IfaceInfo{Name: d.Name, Description: d.Description}
+		for _, a := range d.Addresses {
+			if a.IP != nil {
+				info.IPs = append(info.IPs, a.IP.String())
+				if f, ok := byIP[a.IP.String()]; ok && info.Friendly == "" {
+					info.Friendly = f
+				}
+			}
+		}
+		out = append(out, info)
+	}
+	return out
 }

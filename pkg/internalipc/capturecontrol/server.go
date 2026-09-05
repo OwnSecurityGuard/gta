@@ -235,6 +235,9 @@ type StartSessionRequest struct {
 	// PluginOwners 允许按名解析解码插件的额外 owner 集合（除会话 owner 外）。
 	// gta-mcp 依据调用者所属项目的插件归属计算；空集 = 仅会话 owner 自己的插件。
 	PluginOwners []string
+	// Metadata 是会话创建时的来源标记（落 SessionMeta.Extra，JSON 存 sessions.extra 列）。
+	// 探针链路用：source=probe-archive + probe_id/probe_name/时间窗（离线导入溯源）。
+	Metadata map[string]string
 }
 
 // LiveConfig 对应 proto PcapLiveConfig。
@@ -329,6 +332,9 @@ type Server struct {
 	pb.UnimplementedCaptureControlServer
 	mu     sync.Mutex
 	engine CaptureEngine
+	// probes 是探针管理面（pkg/probe.Manager；SetProbeAdmin 注入）。
+	// nil = 本 pipeline 未启用探针管理，探针 RPC 返回错误。
+	probes ProbeAdmin
 }
 
 // NewServer 创建 CaptureControl server。

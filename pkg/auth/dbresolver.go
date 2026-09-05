@@ -55,17 +55,20 @@ func (r *DBResolver) Resolve(token string) (*Principal, bool) {
 // 组合语义（与匿名模式兼容）：
 //   - primary（env bootstrap）配置了 token：env 命中优先；否则查 users 表；
 //   - primary 为匿名模式但 users 表非空：只查 users 表（env 为空也能跑邀请制部署）；
-//   - 两者皆空：纯匿名模式，Resolve 恒返回 local 身份（现状兼容底线）。
+//   - 仍未命中时按序查 extra（探针凭证等子系统的 resolver）；
+//   - 皆未命中：纯匿名模式，Resolve 恒返回 local 身份（现状兼容底线）。
 //
 // Required() 报告是否处于 token 模式，供 authMiddleware 决定是否挂载 401 校验。
 type FirstResolver struct {
 	primary *StaticResolver
 	db      *DBResolver
+	extra   []Resolver
 }
 
 // NewFirstResolver 组合 env bootstrap 与 users 表两个身份来源。
-func NewFirstResolver(primary *StaticResolver, db *DBResolver) *FirstResolver {
-	return &FirstResolver{primary: primary, db: db}
+// extra 是可选的后续来源（探针凭证 resolver 等），按顺序兜底尝试。
+func NewFirstResolver(primary *StaticResolver, db *DBResolver, extra ...Resolver) *FirstResolver {
+	return &FirstResolver{primary: primary, db: db, extra: extra}
 }
 
 // Required 报告是否进入 token 模式（任一来源有身份即算）。
@@ -73,7 +76,15 @@ func (r *FirstResolver) Required() bool {
 	if r == nil {
 		return false
 	}
-	return r.primary.Required() || r.db.HasUsers()
+	if r.primary.Required() || r.db.HasUsers() {
+		return true
+	}
+	for _, x := range r.extra {
+		if rr, ok := x.(interface{ Required() bool }); ok && rr.Required() {
+			return true
+		}
+	}
+	return false
 }
 
 // Resolve 见类型注释的组合语义。
@@ -85,6 +96,11 @@ func (r *FirstResolver) Resolve(token string) (*Principal, bool) {
 	}
 	if p, ok := r.db.Resolve(token); ok {
 		return p, true
+	}
+	for _, x := range r.extra {
+		if p, ok := x.Resolve(token); ok {
+			return p, true
+		}
 	}
 	if !r.Required() {
 		return &Principal{Owner: AnonymousOwner}, true

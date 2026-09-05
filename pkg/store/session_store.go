@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 	if err := cs.migrateSessionsAddTenantID(); err != nil {
 		return err
 	}
+	// probes / probe_archive_segments（探针注册表 + 归档摘要缓存，探针优化 v2）。
+	if err := cs.ensureProbesTable(); err != nil {
+		return err
+	}
 	// plugin_debug_access 审计表（设计 §6）：sample_bytes 等取证工具的访问留痕。
 	// 仅追加，无 UPDATE/DELETE 路径；写入方唯一为 Runtime Plane（pipeline /
 	// 内嵌的 Developer Plane），避免与 MCP 进程加剧 SQLite 锁竞争。

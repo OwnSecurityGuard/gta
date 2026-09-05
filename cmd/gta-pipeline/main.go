@@ -28,6 +28,7 @@ import (
 	pb "gta/pkg/internalipc/proto"
 	"gta/pkg/logging"
 	"gta/pkg/plugin"
+	"gta/pkg/probe"
 	protocolconfig "gta/pkg/protocol/config"
 	"gta/pkg/store"
 	"gta/pkg/version"
@@ -197,7 +198,7 @@ func main() {
 		}
 		defer usersDB.Close()
 	}
-	authResolver := auth.NewFirstResolver(envResolver, auth.NewDBResolver(usersDB))
+	authResolver := auth.NewFirstResolver(envResolver, auth.NewDBResolver(usersDB), probe.NewAuthResolver(controlStore))
 
 	// RegistryServer：被动接受插件注册，插件进程由外部编排（systemd/脚本）独立启动。
 	registry := plugin.NewRegistryServer(10)
@@ -251,6 +252,8 @@ func main() {
 	// 与本地单机创建的会话归属一致。会话归属校验用 ControlStore 查 sessions.owner，
 	// owner 不匹配的 batch 以 PermissionDenied 拒绝。
 	var agentIngestGrpc *grpc.Server
+	// probeAdmin 非 nil 时启用 CaptureControl 的探针管理 RPC（见下方注入）。
+	var probeAdmin capturecontrol.ProbeAdmin
 	if *agentIngestAddr != "" {
 		agentHub := agent.NewHub()
 		engine.SetAgentHub(agentHub)
@@ -258,6 +261,15 @@ func main() {
 		//「agent 已连上但目标端口没流量」与「agent 压根没连上」。
 		agentIngest := agent.NewIngestServer(agentHub, controlStoreSessionOwners{store: controlStore})
 		engine.SetAgentLiveness(agentIngest)
+
+		// 探针管理面（v2 探针优化）：注册 / 控制通道 / 三维度状态。
+		// Manager 复用 ControlStore（probes 表）与 AgentIngest 的会话归属校验。
+		probeMgr := probe.NewManager(controlStore, agentHub, controlStoreSessionOwners{store: controlStore},
+			logging.With("component", "probe_manager"))
+		engine.SetProbeManager(probeMgr)
+		agentIngest.SetProbeAssignChecker(probeMgr)
+		probeSrv := probe.NewServer(probeMgr, logging.With("component", "probe_server"))
+		probeAdmin = probeMgr
 
 		agentLis, err := internalipc.ListenAddr(*agentIngestAddr)
 		if err != nil {
@@ -268,8 +280,13 @@ func main() {
 		defer agentLis.Close()
 		agentIngestGrpc = grpc.NewServer(
 			grpc.ChainStreamInterceptor(auth.StreamInterceptor(authResolver)),
+			// RegisterProbe 是 unary（探针 claim 后换发长期凭证），同样走 Bearer 鉴权。
+			grpc.ChainUnaryInterceptor(auth.UnaryInterceptor(authResolver)),
 		)
 		proto.RegisterAgentIngestServer(agentIngestGrpc, agentIngest)
+		// AgentControl 与 AgentIngest 同端口：探针控制通道不需要额外入站端口，
+		// 凭证体系（probe_token）与数据面（Push）共用同一套 resolver 链。
+		proto.RegisterAgentControlServer(agentIngestGrpc, probeSrv)
 		go func() {
 			if err := agentIngestGrpc.Serve(agentLis); err != nil {
 				slog.Error("serve agent ingest", "error", err)
@@ -296,7 +313,11 @@ func main() {
 	defer listener.Close()
 
 	grpcSrv := grpc.NewServer()
-	pb.RegisterCaptureControlServer(grpcSrv, capturecontrol.NewServer(engine))
+	ccServer := capturecontrol.NewServer(engine)
+	if probeAdmin != nil {
+		ccServer.SetProbeAdmin(probeAdmin)
+	}
+	pb.RegisterCaptureControlServer(grpcSrv, ccServer)
 
 	// registry gRPC server 在独立 goroutine 中 serve。
 	go func() {

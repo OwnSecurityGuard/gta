@@ -42,3 +42,172 @@ message PushAck {
   uint64 dropped = 4;      // 因无订阅者或慢消费者丢弃的包数
   uint64 rejected = 5;     // 因会话归属校验拒绝的 batch 数
 }
+
+// ============================================================================
+// 探针注册与远端控制（v2 探针优化，docs/plans/2026-09-05-probe-control-archive-design.md）
+//
+// 成员机在 NAT 后，平台无法主动连它；远端控制必须走探针 outbound 建立的长流。
+// AgentControl 与 AgentIngest 共用同一个 gRPC 端口（默认 :9092），零新增入站端口：
+//   - RegisterProbe：claim 启动码后用用户 token 一次性换发探针长期凭证（probe_id + probe_token）；
+//   - Connect：控制双向流。指令下行（Command），心跳/结果/归档摘要上行（ControlEvent）；
+//   - UploadArchive：按需回放本机归档（离线导入，独立流避免挤占控制流）。
+// ============================================================================
+
+service AgentControl {
+  // RegisterProbe 注册探针并换发长期凭证。鉴权：用户 token（claim 所得）。
+  // 同一机器重复注册（token 丢失重接）携带 prev_probe_id 覆盖旧记录。
+  rpc RegisterProbe(RegisterProbeRequest) returns (RegisterProbeAck);
+  // Connect 控制双向流。鉴权：probe_token。开流首包必须是 ProbeHello。
+  rpc Connect(stream ControlEvent) returns (stream Command);
+  // UploadArchive 归档回放上传。鉴权：probe_token。
+  rpc UploadArchive(stream ArchiveChunk) returns (UploadArchiveAck);
+}
+
+message RegisterProbeRequest {
+  string hostname = 1;
+  string os = 2;
+  string arch = 3;
+  string version = 4;
+  repeated string capabilities = 5;  // pcap / mobile / plugin_host
+  string name = 6;                   // 可选业务名（如 game-server-01）；空则默认 hostname
+  string prev_probe_id = 7;          // re-register 时携带旧 probe_id 覆盖
+}
+
+message RegisterProbeAck {
+  string probe_id = 1;
+  string probe_token = 2;            // 明文仅此一次下发；服务端只存 SHA-256
+}
+
+message ProbeHello {
+  string probe_id = 1;
+  string version = 2;
+  repeated string capabilities = 3;
+}
+
+// ProbeCaptureStatus 是抓包状态机快照（三维度的第二维）。
+// state: idle | starting | running | stopped | failed（失败带 error，进程不退出）。
+message ProbeCaptureStatus {
+  string state = 1;
+  string session_id = 2;
+  string iface = 3;
+  repeated int32 ports = 4;
+  repeated string hosts = 5;
+  string error = 6;
+}
+
+// ProbeDataStatus 是数据面快照（第三维）。last_packet 与 last_upload 缺一不可：
+// 前者新后者旧 = 抓到了但推不上去（上行断）；两者皆旧 = 该机没流量或过滤太窄。
+message ProbeDataStatus {
+  int64 last_packet_unix_ms = 1;     // 0 = 从未抓到帧
+  int64 last_upload_unix_ms = 2;     // 0 = 从未成功推流（未被确认）
+  uint64 packets_captured = 3;
+  uint64 packets_acked = 4;
+  uint64 spool_depth = 5;
+  uint64 dropped = 6;
+}
+
+message ProbeArchiveStatus {
+  uint64 bytes = 1;
+  uint32 segments = 2;
+  int64 oldest_unix = 3;             // 0 = 空
+  int64 newest_unix = 4;
+}
+
+message ProbeHeartbeat {
+  ProbeCaptureStatus capture = 1;
+  ProbeDataStatus data = 2;
+  ProbeArchiveStatus archive = 3;
+}
+
+message CommandResult {
+  string id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+message ArchiveSegmentInfo {
+  string seg_id = 1;
+  int64 first_unix = 2;
+  int64 last_unix = 3;
+  uint64 packets = 4;
+  uint64 bytes = 5;
+  uint32 link_type = 6;
+}
+
+// ArchiveSegmentsReply 是 ArchiveQuery 指令的应答（经 ControlEvent 上行）。
+message ArchiveSegmentsReply {
+  repeated ArchiveSegmentInfo segments = 1;
+}
+
+message ControlEvent {
+  oneof payload {
+    ProbeHello hello = 1;
+    ProbeHeartbeat heartbeat = 2;
+    CommandResult result = 3;
+    ArchiveSegmentsReply archive_segments = 4;
+  }
+}
+
+// AssignCapture 指派抓包：iface 空 = 自动探测；ports/hosts/bpf 全空 = 不过滤。
+message AssignCapture {
+  string session_id = 1;
+  string iface = 2;
+  repeated int32 ports = 3;
+  repeated string hosts = 4;
+  string bpf = 5;                    // 显式 BPF；非空时覆盖 ports/hosts 派生
+  int32 snaplen = 6;                 // 0 = 默认 1600
+  bool promisc = 7;
+}
+
+message StopCaptureCmd {}
+
+// UpdateFilter 热更新过滤条件，不中断抓包（SetBPFFilter）。
+// bpf 为空串时按 ports/hosts 重新派生（全空 = 清除过滤）。
+message UpdateFilter {
+  repeated int32 ports = 1;
+  repeated string hosts = 2;
+  string bpf = 3;
+}
+
+// SetConfig 运行配置部分更新；键必须是探针侧白名单内的键，其余键报错。
+message SetConfig {
+  map<string, string> kvs = 1;
+}
+
+message ArchiveQuery {
+  int64 from_unix = 1;
+  int64 to_unix = 2;
+}
+
+message ArchiveUpload {
+  string target_session_id = 1;      // 回放数据喂给的新会话
+  int64 from_unix = 2;
+  int64 to_unix = 3;
+}
+
+message RetryCmd {}
+
+message Command {
+  string id = 1;                     // 幂等键；探针侧 LRU 去重
+  oneof payload {
+    AssignCapture assign = 2;
+    StopCaptureCmd stop = 3;
+    UpdateFilter filter = 4;
+    SetConfig config = 5;
+    ArchiveQuery archive_query = 6;
+    ArchiveUpload archive_upload = 7;
+    RetryCmd retry = 8;
+  }
+}
+
+message ArchiveChunk {
+  string target_session_id = 1;
+  uint64 seq = 2;
+  RawPacket packet = 3;              // 逐包；packet 为空且 final=true 表示流结束
+  bool final = 4;
+}
+
+message UploadArchiveAck {
+  uint64 packets = 1;
+  uint64 dropped = 2;
+}

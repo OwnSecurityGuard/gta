@@ -70,6 +70,10 @@ type Options struct {
 	MaxBytes int64
 	// SegmentBytes 是单个 segment 文件的滚动阈值；<=0 取 DefaultSegmentBytes。
 	SegmentBytes int64
+	// Retention 非 nil 时以归档模式打开（Ack 不删段，数据按留存策略长期保留）。
+	// 只读访问历史会话目录时也必须传非 nil（零值 Retention 即可）：
+	// 否则 recover 会把读游标之前的段当垃圾删掉。
+	Retention *Retention
 }
 
 // entry 是内存中的记录索引（未确认条目），值语义、体积小。
@@ -113,6 +117,26 @@ type Queue struct {
 	ackSinceCS int       // 自上次游标落盘起的 Ack 条数
 	dropped    uint64    // 因 ErrFull 或写盘失败被丢弃的包数
 	closed     bool
+
+	// 归档模式（v2 探针留存，docs/plans/2026-09-05 §8.2）：
+	// retention 非 nil 时 Ack 不再删除段（双游标：send-cursor 管上行，
+	// EnforceRetention 独立管留存），数据在本机按保留窗口长期留存。
+	retention *Retention
+	segMeta   map[uint64]*segInfo
+}
+
+// segInfo 是一个段的元数据（内存维护 + idx 文件落盘）。
+type segInfo struct {
+	FirstMs int64 `json:"first_ms"`
+	LastMs  int64 `json:"last_ms"`
+	Packets uint64 `json:"packets"`
+	Bytes   uint64 `json:"bytes"` // 含长度前缀
+}
+
+// Retention 是本地留存的保留策略；MaxBytes 限制全部留存数据的磁盘占用。
+type Retention struct {
+	MaxAge   time.Duration // 0 = 不按时间清理
+	MaxBytes int64         // 0 = 不按容量清理
 }
 
 // Open 打开（必要时创建）一个磁盘队列。dir 不存在时创建。
@@ -129,6 +153,7 @@ func Open(dir string, opts Options) (*Queue, error) {
 		maxBytes: opts.MaxBytes,
 		segBytes: opts.SegmentBytes,
 		files:    make(map[uint64]*os.File),
+		segMeta:  make(map[uint64]*segInfo),
 		lastSync: time.Now(),
 	}
 	if q.maxBytes <= 0 {
@@ -136,6 +161,9 @@ func Open(dir string, opts Options) (*Queue, error) {
 	}
 	if q.segBytes <= 0 {
 		q.segBytes = DefaultSegmentBytes
+	}
+	if opts.Retention != nil {
+		q.EnableRetention(opts.Retention)
 	}
 	if err := q.recover(); err != nil {
 		_ = q.Close()
@@ -175,10 +203,15 @@ func (q *Queue) recover() error {
 	} else if ok {
 		cur = c
 	}
+	// 载入段元数据（idx 文件；缺失时用文件 mtime 估算，崩溃丢 idx 的退路）。
+	q.loadSegMeta(segs)
 	// 删除读游标之前的 segment：它们已全部确认，留着只占磁盘。
-	for _, seg := range segs {
-		if seg < cur.Segment {
-			q.dropSegment(seg)
+	// 归档模式例外：这些段可能仍在留存窗口内，留给 EnforceRetention 清理。
+	if q.retention == nil {
+		for _, seg := range segs {
+			if seg < cur.Segment {
+				q.dropSegment(seg)
+			}
 		}
 	}
 	return q.scanFrom(cur)
@@ -281,6 +314,7 @@ func (q *Queue) Append(pkt *agentproto.RawPacket) error {
 		q.dropped++
 		return err
 	}
+	q.noteSegRecord(q.wrCur.Segment, pkt, total)
 	q.entries = append(q.entries, entry{seg: q.wrCur.Segment, off: q.wrCur.Offset, n: len(rec)})
 	q.wrCur.Offset += total
 	q.bytes += total
@@ -447,7 +481,11 @@ func (q *Queue) readCurLocked() cursor {
 }
 
 // cleanupLocked 删除已全部确认的 segment（读游标所在 segment 之前的所有文件）。
+// 归档模式不随 Ack 删段：删除统一由 EnforceRetention 按保留窗口执行。
 func (q *Queue) cleanupLocked() {
+	if q.retention != nil {
+		return
+	}
 	head := q.readCurLocked().Segment
 	for seg := range q.files {
 		if seg < head {
@@ -463,6 +501,8 @@ func (q *Queue) dropSegment(seg uint64) {
 		delete(q.files, seg)
 	}
 	_ = os.Remove(q.segPath(seg))
+	_ = os.Remove(q.segIdxPath(seg))
+	delete(q.segMeta, seg)
 }
 
 // Depth 返回未确认的条目数与字节数（观测用）。
@@ -493,6 +533,9 @@ func (q *Queue) Close() error {
 	}
 	if cerr := q.persistCursorLocked(); cerr != nil && err == nil {
 		err = cerr
+	}
+	if serr := q.saveAllSegMetaLocked(); serr != nil && err == nil {
+		err = serr
 	}
 	q.closed = true
 	for seg, f := range q.files {

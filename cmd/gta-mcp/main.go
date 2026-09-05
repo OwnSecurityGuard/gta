@@ -2422,6 +2422,7 @@ func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallTool
 			"interface":     iface,
 			"pcap_file":     sess.PCAPFile,
 			"source":        sess.Source,
+			"extra":         sess.Extra,
 			"listen_addr":   sess.ListenAddr,
 			"raw_packets":   rawPackets,
 			"events":        events,
@@ -2921,6 +2922,71 @@ func main() {
 		mcp.WithDescription("Stop the current capture session on a proxy lease and return the lease to idle. The phone's VPN/QR stays connected — start_lease_capture can begin a fresh session at any time. After stop, raw packets cease being captured/uploaded."),
 		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID whose current capture should stop")),
 	), capture.handleStopLeaseCapture)
+
+	// ---- 探针管理（v2 探针优化）：probe_start_capture 是 Sessions 一级页的
+	// "创建抓包"（选机器+端口+开始）；其余服务于 管理>探针 页 ----
+	s.AddTool(mcp.NewTool("list_probes",
+		mcp.WithDescription("List capture probes visible to the caller (creator-scoped; admin sees all). Each probe carries the 3-dimension status: connection_state (online/offline), capture_state (idle/starting/running/stopped/failed) and data stats (last_packet/last_upload). Use probe_start_capture to start a capture on one."),
+	), capture.handleListProbes)
+
+	s.AddTool(mcp.NewTool("get_probe",
+		mcp.WithDescription("Get one probe's full 3-dimension status snapshot (connection / capture state machine / data counters + local archive summary)."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID returned by list_probes")),
+	), capture.handleGetProbe)
+
+	s.AddTool(mcp.NewTool("probe_start_capture",
+		mcp.WithDescription("Start a capture session on a selected probe (the user-facing 'create capture' flow: pick machine + ports + start). Creates a new session owned by the caller and assigns it to the probe via desired-state; returns session_id — poll get_session_status for the capture state machine (starting → running). The probe must be online."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID to capture on (from list_probes)")),
+		mcp.WithArray("ports", mcp.Description("TCP ports to filter, e.g. [8080]. Empty = capture everything"), mcp.Items(map[string]any{"type": "number"})),
+		mcp.WithArray("hosts", mcp.Description("Optional host filter list"), mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithString("iface", mcp.Description("Optional interface name on the probe machine; empty = probe auto-detects the default interface")),
+		mcp.WithString("plugin", mcp.Description("Optional decoder plugin bound to the session")),
+		mcp.WithString("project_id", mcp.Description("Optional project the session belongs to")),
+	), capture.handleProbeStartCapture)
+
+	s.AddTool(mcp.NewTool("probe_stop_capture",
+		mcp.WithDescription("Stop the probe's current capture and close its session (probe stays resident). Returns the stopped session_id; empty if the probe was not capturing."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID to stop")),
+	), capture.handleProbeStopCapture)
+
+	s.AddTool(mcp.NewTool("probe_update_filter",
+		mcp.WithDescription("Hot-update the probe's capture filter (BPF recompile, capture continues uninterrupted). Empty ports/hosts clears the filter (capture all)."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+		mcp.WithArray("ports", mcp.Description("TCP ports filter"), mcp.Items(map[string]any{"type": "number"})),
+		mcp.WithArray("hosts", mcp.Description("Host filter list"), mcp.Items(map[string]any{"type": "string"})),
+	), capture.handleProbeUpdateFilter)
+
+	s.AddTool(mcp.NewTool("probe_retry_capture",
+		mcp.WithDescription("Retry the last failed capture assignment on a probe (capture_state=failed). Probe must be online."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+	), capture.handleProbeRetryCapture)
+
+	s.AddTool(mcp.NewTool("probe_rename",
+		mcp.WithDescription("Rename a probe (display name, defaults to hostname at registration)."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+		mcp.WithString("name", mcp.Required(), mcp.Description("New display name, e.g. game-server-01")),
+	), capture.handleProbeRename)
+
+	s.AddTool(mcp.NewTool("probe_revoke",
+		mcp.WithDescription("Revoke a probe's long-term credential: the probe's token stops working immediately and it must re-register (claim code / user token) next start. Use when a machine is decommissioned or its credentials leaked."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+	), capture.handleProbeRevoke)
+
+	s.AddTool(mcp.NewTool("probe_list_archive",
+		mcp.WithDescription("List the probe's locally persisted capture archive segments (retention-managed, survives probe restarts). refresh=true queries the live probe; offline probes fall back to the server-side cache (from_cache=true, may be stale). Use with probe_import_archive to load a time range into a new session."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+		mcp.WithNumber("from_unix", mcp.Description("Range start, unix seconds (0 = unbounded)")),
+		mcp.WithNumber("to_unix", mcp.Description("Range end, unix seconds (0 = unbounded)")),
+		mcp.WithBoolean("refresh", mcp.Description("Query the live probe and refresh the cache (default false = cache only)")),
+	), capture.handleProbeListArchive)
+
+	s.AddTool(mcp.NewTool("probe_import_archive",
+		mcp.WithDescription("Import the probe's locally archived capture data for a time range as a NEW session (source=agent, owned by the caller; prior sessions are never backfilled). The probe replays its local spool segments with original packet ids/timestamps. Probe must be online; returns the new session_id."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID whose archive to import")),
+		mcp.WithNumber("from_unix", mcp.Description("Range start, unix seconds (0 = unbounded)")),
+		mcp.WithNumber("to_unix", mcp.Description("Range end, unix seconds (0 = unbounded)")),
+		mcp.WithString("project_id", mcp.Description("Optional project the new session belongs to")),
+	), capture.handleProbeImportArchive)
 
 	s.AddTool(mcp.NewTool("get_registry_addr",
 		mcp.WithDescription("Return the registry address the pipeline is currently listening on (its -registry-addr, e.g. :9091). Plugins MUST connect here by setting GTA_REGISTRY_ADDR at startup; this tool removes the guesswork of reading pipeline startup logs. Use it to learn where a freshly launched plugin should register, or to confirm activate_plugin's resolved address."),

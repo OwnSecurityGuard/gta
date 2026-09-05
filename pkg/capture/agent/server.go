@@ -38,6 +38,15 @@ func (f SessionOwnerCheckerFunc) SessionOwner(sessionID string) (string, bool) {
 	return f(sessionID)
 }
 
+// ProbeAssignChecker 查询某会话当前指派给的探针。由宿主注入 pkg/probe.Manager。
+type ProbeAssignChecker interface {
+	// ProbeForSession 返回指派到该会话的探针 id；无指派返回 ("", false)。
+	ProbeForSession(sessionID string) (probeID string, ok bool)
+}
+
+// ProbeAssignSetter 是宿主注入 ProbeAssignChecker 的可选入口（IngestServer 实现）。
+type ProbeAssignSetter interface{ SetProbeAssignChecker(ProbeAssignChecker) }
+
 // IngestServer 实现 proto.AgentIngestServer：接收 gta-agent 的包推送并经 Hub 路由。
 //
 // 鉴权：由宿主在 grpc.Server 上挂 pkg/auth 的 StreamInterceptor，
@@ -49,6 +58,9 @@ type IngestServer struct {
 
 	hub      *Hub
 	sessions SessionOwnerChecker
+	// probeAssign 非 nil 时，探针凭证（principal 带 ProbeID）推流需要校验
+	// 该会话确实指派给了本探针（防止 A 探针往 B 的会话灌数据）。
+	probeAssign ProbeAssignChecker
 
 	mu        sync.Mutex
 	streamSeq uint64 // 流编号（日志用）
@@ -70,6 +82,9 @@ type sessionLiveness struct {
 func NewIngestServer(hub *Hub, sessions SessionOwnerChecker) *IngestServer {
 	return &IngestServer{hub: hub, sessions: sessions, live: make(map[string]*sessionLiveness)}
 }
+
+// SetProbeAssignChecker 注入探针指派校验源（宿主在启用探针管理面时调用）。
+func (s *IngestServer) SetProbeAssignChecker(c ProbeAssignChecker) { s.probeAssign = c }
 
 // SessionLiveness 返回某会话的 Agent 连接活性，供状态查询（GetCaptureStatus）上报。
 //
@@ -129,7 +144,9 @@ func (s *IngestServer) touch(sessionID string) {
 // 流中途断开（agent 重连）不影响 server 继续接受新流；重连期间
 // 未被投递的包直接丢弃（无订阅者/慢消费者分开计数），不做缓存补发。
 func (s *IngestServer) Push(stream proto.AgentIngest_PushServer) error {
-	owner := auth.OwnerFrom(stream.Context())
+	principal, _ := auth.PrincipalFrom(stream.Context())
+	owner := principal.Owner
+	probeID := principal.ProbeID
 	seq := s.nextStreamSeq()
 	var (
 		batches   uint64
@@ -166,7 +183,7 @@ func (s *IngestServer) Push(stream proto.AgentIngest_PushServer) error {
 		}
 		batches++
 		sessionID := batch.GetSessionId()
-		if !s.authorize(owner, sessionID) {
+		if !s.authorize(owner, sessionID, probeID) {
 			rejected++
 			if rejected == 1 {
 				// 每条流只告警一次，避免坏 agent 刷日志。
@@ -198,7 +215,9 @@ func (s *IngestServer) Push(stream proto.AgentIngest_PushServer) error {
 //   - 会话不存在：拒绝（agent 指向了错误/已结束的会话）；
 //   - 会话 owner 与调用者 owner 一致：放行。
 //     兼容约定：owner 为空的既有会话视为匿名（"local"）所有。
-func (s *IngestServer) authorize(owner, sessionID string) bool {
+//   - 探针凭证（probeID 非空）附加指派校验：平台侧该会话已指派给别的探针时拒绝
+//     （防 A 探针往 B 的会话灌数据）；无指派记录（老 agent / 会话刚结束的尾巴）不拦。
+func (s *IngestServer) authorize(owner, sessionID, probeID string) bool {
 	if sessionID == "" {
 		return false
 	}
@@ -212,7 +231,17 @@ func (s *IngestServer) authorize(owner, sessionID string) bool {
 	if sessionOwner == "" {
 		sessionOwner = auth.AnonymousOwner
 	}
-	return sessionOwner == owner
+	if sessionOwner != owner {
+		return false
+	}
+	if probeID != "" && s.probeAssign != nil {
+		if assigned, assignedOK := s.probeAssign.ProbeForSession(sessionID); assignedOK && assigned != probeID {
+			slog.Warn("agent ingest batch rejected: session assigned to another probe",
+				"session_id", sessionID, "caller_probe", probeID, "assigned_probe", assigned)
+			return false
+		}
+	}
+	return true
 }
 
 func (s *IngestServer) nextStreamSeq() uint64 {

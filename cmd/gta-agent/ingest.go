@@ -41,6 +41,10 @@ type ingestClient struct {
 	spool *spool.Queue
 	// dropped 是 spool 拒绝接收（配额用尽 / 写盘失败）而被丢弃的包数。
 	dropped uint64
+
+	// onPacket / onAck 是状态机的数据面统计回调（心跳读），可为 nil。
+	onPacket func()
+	onAck    func(n int)
 }
 
 func (c *ingestClient) run(ctx context.Context, packets <-chan *proto.RawPacket) {
@@ -174,6 +178,9 @@ func (c *ingestClient) pushOnce(ctx context.Context, packets <-chan *proto.RawPa
 			c.finishStream(stream, cancel)
 			return nil
 		case p := <-packets:
+			if c.onPacket != nil {
+				c.onPacket()
+			}
 			if err := c.spool.Append(p); err != nil {
 				// spool 触顶或写盘失败：这个包没有退路了，明确计数并限频告警。
 				c.dropped++
@@ -222,6 +229,9 @@ func (c *ingestClient) sendAndAck(stream proto.AgentIngest_PushClient, batch []*
 	}
 	if err := c.spool.AckN(len(batch)); err != nil {
 		slog.Error("ingest: ack spool failed (packets may be redelivered)", "error", err)
+	}
+	if c.onAck != nil {
+		c.onAck(len(batch))
 	}
 	return nil
 }

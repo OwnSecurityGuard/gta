@@ -1,10 +1,20 @@
-# docker-compose.yml（T15）——团队服务端：gta-pipeline + gta-mcp，共用同一镜像与 /data 卷。
+# docker-compose.yml（T15）——团队服务端：gta-pipeline + gta-mcp + postgres。
 #
-# 共享存储说明：两个服务挂同一 /data 卷，共享同一份 control.sqlite 与会话库。
-# 这是有意设计：pipeline 是事件/会话元数据的唯一写入方（Runtime Plane），mcp
-# 主要读 + 少量会话管理写。SQLite 以 WAL + busy_timeout=5000 打开（见
-# pkg/store/sqlite.go、pkg/store/session_store.go），跨进程读写安全并发。
-# 仍建议单实例部署 pipeline 与 mcp 各一个，不要横向扩容多副本。
+# 存储模式说明（postgres 模式，2026-09-05 起）：
+#   - control 元数据（sessions/probes 等）与事件数据统一存 PG（gta-pgdata 卷），
+#     pipeline 与 mcp 通过 GTA_DB_DRIVER=postgres + GTA_DB_DSN 访问同一库；
+#   - gta-data 共享卷仍保留，承载非数据库文件：plugins 目录、会话本地
+#     metadata.json、projects/access_codes 的 control-aux.sqlite（PG 模式下
+#     有意不进 PG，见 cmd/gta-mcp/main.go）；
+#   - SQLite 模式（原默认）回滚方式：删掉 GTA_DB_DRIVER/GTA_DB_DSN 两个环境
+#     变量与 postgres 服务即可，两套模式的配置入口是同一对 env（pkg/config）。
+# 镜像策略：直接用本地已有 gta-server:dev 镜像，不在 compose 里 build
+# （原 build: 段已移除；需要重建镜像时走 make / docker build 手动打 tag）。
+#
+# 端口策略：容器内端口拓扑不变（9888/9091/9092/8781）；宿主侧映射端口默认
+# 用 1xxxx 偏移值——本机 GTA 链路（pipeline 12924 / mcp 11056）已占用
+# 9888/9091/9092/8781，避免冲突。PG 不映射宿主端口（宿主机 5432 已被占用，
+# 且 PG 只需在 compose 网络内可访问）。
 #
 # 用法：
 #   cp .env.example .env   # 至少设置 GTA_AUTH_TOKENS
@@ -14,16 +24,27 @@
 # （与 pkg/config/app.go 对齐）；端口映射用 .env 里的 GTA_*_PORT 变量调整。
 
 services:
-  pipeline:
-    build:
-      context: .
-      args:
-        VERSION: ${GTA_VERSION:-dev}
-        GIT_COMMIT: ${GTA_GIT_COMMIT:-unknown}
-        # 前端「原始包」调试页开关（构建期注入 web/，默认关闭）
-        VITE_ENABLE_RAW_DEBUG: ${VITE_ENABLE_RAW_DEBUG:-0}
-    image: gta-server:${GTA_VERSION:-latest}
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${GTA_PG_USER:-gta}
+      POSTGRES_PASSWORD: ${GTA_PG_PASSWORD:-gta_dev_pass}
+      POSTGRES_DB: ${GTA_PG_DB:-gta}
+    volumes:
+      - gta-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  pipeline:
+    image: gta-server:${GTA_VERSION:-dev}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       GTA_HOME: /data
       # 鉴权 token 表（必填）：格式 owner=token，逗号分隔，
@@ -34,22 +55,28 @@ services:
       GTA_CONTROL_ADDR: ${GTA_CONTROL_ADDR:-:9888}
       GTA_REGISTRY_ADDR: ${GTA_REGISTRY_ADDR:-:9091}
       GTA_AGENT_INGEST_ADDR: ${GTA_AGENT_INGEST_ADDR:-:9092}
+      # 存储后端：postgres 模式（DSN 指向 compose 网络内的 postgres 服务）
+      GTA_DB_DRIVER: postgres
+      GTA_DB_DSN: postgres://${GTA_PG_USER:-gta}:${GTA_PG_PASSWORD:-gta_dev_pass}@postgres:5432/${GTA_PG_DB:-gta}?sslmode=disable
     ports:
       # CaptureControl gRPC：唯一合法客户端是 compose 网络内的 gta-mcp（owner 字段
       # 在该端口上可被直连者伪造，见 cmd/gta-pipeline/main.go 信任边界注释），
       # 因此默认只回环映射；确需从宿主机外访问再改。
-      - "127.0.0.1:${GTA_CONTROL_PORT:-9888}:9888"
-      - "${GTA_REGISTRY_PORT:-9091}:9091"   # PluginRegistry gRPC（插件注册）
-      - "${GTA_AGENT_INGEST_PORT:-9092}:9092" # AgentIngest gRPC（gta-agent 推流）
+      - "127.0.0.1:${GTA_CONTROL_PORT:-19888}:9888"
+      - "${GTA_REGISTRY_PORT:-19091}:9091"   # PluginRegistry gRPC（插件注册）
+      - "${GTA_AGENT_INGEST_PORT:-19092}:9092" # AgentIngest gRPC（gta-agent 推流）
     command: ["-agent-bin=/usr/local/bin/gta-singbox-agent"]
     volumes:
       - gta-data:/data
 
   mcp:
-    image: gta-server:${GTA_VERSION:-latest}
+    image: gta-server:${GTA_VERSION:-dev}
     restart: unless-stopped
     depends_on:
-      - pipeline
+      postgres:
+        condition: service_healthy
+      pipeline:
+        condition: service_started
     entrypoint: ["/usr/local/bin/gta-mcp"]
     # 必须显式清空 command：只覆盖 entrypoint 时，镜像 CMD（["-spawn-agent=false"]）
     # 会被原样追加给 gta-mcp，而 gta-mcp 没有该 flag，容器会以
@@ -66,8 +93,11 @@ services:
       GTA_MCP_ADDR: ${GTA_MCP_ADDR:-:8781}
       # CORS 允许的 Origin（逗号分隔）；留空不返回 CORS 头（同源用法不受影响）
       GTA_MCP_ALLOWED_ORIGINS: ${GTA_MCP_ALLOWED_ORIGINS:-}
+      # 存储后端：与 pipeline 保持一致（同一 PG 库）
+      GTA_DB_DRIVER: postgres
+      GTA_DB_DSN: postgres://${GTA_PG_USER:-gta}:${GTA_PG_PASSWORD:-gta_dev_pass}@postgres:5432/${GTA_PG_DB:-gta}?sslmode=disable
     ports:
-      - "${GTA_MCP_PORT:-8781}:8781" # MCP HTTP/SSE + Web UI（浏览器直接访问 http://<host>:8781）
+      - "${GTA_MCP_PORT:-18781}:8781" # MCP HTTP/SSE + Web UI（浏览器访问 http://<host>:18781）
     volumes:
       - gta-data:/data
       # 远程 agent 预置产物（只读）：docker build 前先 `make build-agents` 在本机预置，
@@ -77,3 +107,4 @@ services:
 
 volumes:
   gta-data:
+  gta-pgdata:

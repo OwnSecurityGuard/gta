@@ -184,7 +184,7 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
       const objUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = objUrl;
-      a.download = `gta-agent-${selectedPlatform.os}-${selectedPlatform.arch}.zip`;
+      a.download = `gt-agent-${selectedPlatform.os}-${selectedPlatform.arch}.zip`;
       a.rel = "noopener";
       document.body.appendChild(a);
       a.click();
@@ -216,7 +216,7 @@ export function AgentDownloadDialog({ open, onClose, onNavigateToSession }: Agen
     mode === "quick"
       ? "生成一次性启动码，在目标机执行复制到的命令即可免参数注册并回连抓包。"
       : phase === "awaiting"
-        ? "在目标电脑解压并双击运行探针，GTA 会自动回连并开始抓包。"
+        ? "在目标电脑解压并双击运行探针，GameTrace 会自动回连并开始抓包。"
         : "选择目标操作系统与抓包端口后下载，回连地址、token 与会话都已打入 zip，运行即可免参数抓包上报。";
 
   return (
@@ -456,7 +456,7 @@ function AwaitingAgentPanel({
     },
     {
       label: "解压并双击运行探针",
-      detail: "在目标电脑解压 zip，双击运行 gta-agent（.exe 视平台而定）",
+      detail: "在目标电脑解压 zip，双击运行 gt-agent（.exe 视平台而定）",
       done: true,
     },
     {

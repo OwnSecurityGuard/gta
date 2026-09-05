@@ -154,7 +154,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
             团队共享服务端开启令牌校验时，向管理员领取你的 token（形如
-            <code className="font-mono"> gta_…</code>）填入；留空则按匿名/单机模式访问。保存后立即生效。令牌仅保存在本机浏览器（localStorage），不会上传到其他设备。点右侧眼睛可查看已保存的令牌——清除前建议先复制备份，否则只能找管理员重置。
+            <code className="font-mono"> gt_…</code>）填入；留空则按匿名/单机模式访问。保存后立即生效。令牌仅保存在本机浏览器（localStorage），不会上传到其他设备。点右侧眼睛可查看已保存的令牌——清除前建议先复制备份，否则只能找管理员重置。
           </p>
         </div>
 

@@ -21,7 +21,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	agentproto "gta/pkg/capture/agent/proto"
+	agentproto "gametrace/pkg/capture/agent/proto"
 )
 
 // EnableRetention 打开归档模式：AckN 不再删除段，改由 EnforceRetention 按窗口清理。

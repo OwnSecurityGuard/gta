@@ -122,7 +122,7 @@ export function SessionOverviewPage({ sessionId, onNavigate }: SessionOverviewPa
   const recentEvents = eventsData?.events ?? [];
 
   return (
-    <div className="h-full overflow-auto gta-scroll">
+    <div className="h-full overflow-auto gt-scroll">
       <div className="mx-auto max-w-4xl space-y-5 p-6">
         {/* 头部：会话身份 + 状态 */}
         <header className="flex flex-wrap items-center justify-between gap-3">

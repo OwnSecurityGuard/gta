@@ -7,7 +7,7 @@ import (
 
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 
-	"gta/pkg/auth"
+	"gametrace/pkg/auth"
 )
 
 // ownerCtx 返回注入指定属主身份的上下文。

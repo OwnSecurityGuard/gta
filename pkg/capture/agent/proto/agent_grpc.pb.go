@@ -19,15 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentIngest_Push_FullMethodName = "/gta.agent.AgentIngest/Push"
+	AgentIngest_Push_FullMethodName = "/gametrace.agent.AgentIngest/Push"
 )
 
 // AgentIngestClient is the client API for AgentIngest service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// AgentIngest 由 gta-pipeline 的 agent capture source 侧提供（gRPC server，默认 :9092）。
-// 团队成员本机的 gta-agent 抓取本机流量后作为 client 连接并推送原始完整帧。
+// AgentIngest 由 gt-pipeline 的 agent capture source 侧提供（gRPC server，默认 :9092）。
+// 团队成员本机的 gt-agent 抓取本机流量后作为 client 连接并推送原始完整帧。
 //
 // 与 mobile source 不同：这里保留完整帧（raw）与链路层类型（link_type），
 // 插件在本地开发与在团队服务端跑的行为完全一致（不做 LinkTypeProxyPayload 退化）。
@@ -62,8 +62,8 @@ type AgentIngest_PushClient = grpc.ClientStreamingClient[PacketBatch, PushAck]
 // All implementations must embed UnimplementedAgentIngestServer
 // for forward compatibility.
 //
-// AgentIngest 由 gta-pipeline 的 agent capture source 侧提供（gRPC server，默认 :9092）。
-// 团队成员本机的 gta-agent 抓取本机流量后作为 client 连接并推送原始完整帧。
+// AgentIngest 由 gt-pipeline 的 agent capture source 侧提供（gRPC server，默认 :9092）。
+// 团队成员本机的 gt-agent 抓取本机流量后作为 client 连接并推送原始完整帧。
 //
 // 与 mobile source 不同：这里保留完整帧（raw）与链路层类型（link_type），
 // 插件在本地开发与在团队服务端跑的行为完全一致（不做 LinkTypeProxyPayload 退化）。
@@ -116,7 +116,7 @@ type AgentIngest_PushServer = grpc.ClientStreamingServer[PacketBatch, PushAck]
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AgentIngest_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "gta.agent.AgentIngest",
+	ServiceName: "gametrace.agent.AgentIngest",
 	HandlerType: (*AgentIngestServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
@@ -130,9 +130,9 @@ var AgentIngest_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	AgentControl_RegisterProbe_FullMethodName = "/gta.agent.AgentControl/RegisterProbe"
-	AgentControl_Connect_FullMethodName       = "/gta.agent.AgentControl/Connect"
-	AgentControl_UploadArchive_FullMethodName = "/gta.agent.AgentControl/UploadArchive"
+	AgentControl_RegisterProbe_FullMethodName = "/gametrace.agent.AgentControl/RegisterProbe"
+	AgentControl_Connect_FullMethodName       = "/gametrace.agent.AgentControl/Connect"
+	AgentControl_UploadArchive_FullMethodName = "/gametrace.agent.AgentControl/UploadArchive"
 )
 
 // AgentControlClient is the client API for AgentControl service.
@@ -279,7 +279,7 @@ type AgentControl_UploadArchiveServer = grpc.ClientStreamingServer[ArchiveChunk,
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AgentControl_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "gta.agent.AgentControl",
+	ServiceName: "gametrace.agent.AgentControl",
 	HandlerType: (*AgentControlServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

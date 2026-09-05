@@ -8,7 +8,7 @@ export type DeviceState = "waiting" | "connected" | "capturing" | "stopped";
 
 /** 由启动码（list_access_codes）与会话（list_all_sessions）派生的单台设备视图。 */
 export interface DeviceView {
-  /** 启动码（设备接入凭证，形如 GTA-XXXX-XXXX） */
+  /** 启动码（设备接入凭证，形如 GT-XXXX-XXXX） */
   code: string;
   /** 目标平台，如 windows/amd64 */
   platform?: string;

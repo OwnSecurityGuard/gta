@@ -3,7 +3,7 @@ package capturecontrol
 import (
 	"context"
 
-	pb "gta/pkg/internalipc/proto"
+	pb "gametrace/pkg/internalipc/proto"
 )
 
 // VerifyRequest 是 plugin.verify 的请求（契约+质量校验）。参数与 TestPlugin 同源。
@@ -27,7 +27,7 @@ type ViolationView struct {
 	Sample    string
 }
 
-// QualityView 是 gta 侧语料级统计（与 plugin.explain 共享判据）。
+// QualityView 是 gametrace 侧语料级统计（与 plugin.explain 共享判据）。
 type QualityView struct {
 	TotalInputs          int
 	UnknownInputs        int

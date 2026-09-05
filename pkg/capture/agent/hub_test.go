@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // testBackoff 是测试用的背压窗口：足够短以保持测试快速，

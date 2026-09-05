@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // MigrateLegacyEvents 将旧版 decoded_events 表的数据迁移到新版 events 表

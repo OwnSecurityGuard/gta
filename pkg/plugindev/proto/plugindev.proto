@@ -1,13 +1,13 @@
 syntax = "proto3";
 
-package gta.plugindev;
+package gametrace.plugindev;
 
-option go_package = "gta/pkg/plugindev/proto";
+option go_package = "gametrace/pkg/plugindev/proto";
 
 // PluginDev is the Developer Plane control surface. It owns the filesystem and
 // subprocesses for scaffolding, building, discovering, activating and
-// deactivating decoder plugins. gta-mcp is a pure forwarder to this service; in
-// production the service runs as the standalone gta-plugin-dev binary,
+// deactivating decoder plugins. gt-mcp is a pure forwarder to this service; in
+// production the service runs as the standalone gt-plugin-dev binary,
 // physically isolating all development capabilities from the runtime.
 service PluginDev {
   // Scaffold renders the create_plugin skeleton and writes it under the
@@ -188,7 +188,7 @@ message ExplainResponse {
 }
 
 // VerifyResult is the output of plugin.verify (P4): SDK contract violations,
-// gta-side quality statistics, and an overall verdict. plugin.explain (P3b)
+// gt-side quality statistics, and an overall verdict. plugin.explain (P3b)
 // consumes it to attribute decode-class failures (all-unknown / wrong framing /
 // suspected encryption / suspected missing reassembly).
 message VerifyResult {

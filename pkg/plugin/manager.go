@@ -13,8 +13,8 @@ import (
 
 	sdkcontract "github.com/OwnSecurityGuard/gta-plugin-sdk/contract"
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
-	"gta/pkg/auth"
-	"gta/pkg/schema"
+	"gametrace/pkg/auth"
+	"gametrace/pkg/schema"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -823,7 +823,7 @@ type Manager struct {
 }
 
 // NewManager 创建插件管理器。
-// workDir 是插件注册表 socket 的存放目录（默认 work/gta-registry.sock）。
+// workDir 是插件注册表 socket 的存放目录（默认 work/gt-registry.sock）。
 func NewManager(workDir string) *Manager {
 	registry := NewRegistryServer(10)
 	return &Manager{
@@ -836,7 +836,7 @@ func NewManager(workDir string) *Manager {
 // Start 启动注册表监听（调用方应在服务启动时调用）。
 // 返回 registry socket 地址，供插件进程通过环境变量知晓。
 func (m *Manager) Start(ctx context.Context) (string, error) {
-	sockPath := fmt.Sprintf("%s/gta-registry.sock", m.workDir)
+	sockPath := fmt.Sprintf("%s/gt-registry.sock", m.workDir)
 	_ = os.Remove(sockPath)
 	srv, lis, err := m.registry.StartListen(sockPath)
 	if err != nil {

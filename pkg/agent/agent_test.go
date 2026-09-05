@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/capture"
-	"gta/pkg/capture/mobile"
-	"gta/pkg/event"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/capture/mobile"
+	"gametrace/pkg/event"
 )
 
 // addrSource 兼容断言：mobileSource 实现 Addr() net.Addr。
@@ -32,7 +32,7 @@ type addrSource interface {
 func TestRelayEndToEnd(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
 
-	// 1. GTA mobile source（数据块直通：不做应用层分帧）
+	// 1. GameTrace mobile source（数据块直通：不做应用层分帧）
 	src, err := capture.Open(context.Background(), "mobile", mobile.MobileConfig{
 		ListenAddr: "127.0.0.1:0",
 	})
@@ -133,7 +133,7 @@ func (w testWriter) Write(p []byte) (int, error) {
 func TestRelayHTTPConnectProxy(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
 
-	// 1. GTA mobile source（数据块直通：不做应用层分帧）
+	// 1. GameTrace mobile source（数据块直通：不做应用层分帧）
 	src, err := capture.Open(context.Background(), "mobile", mobile.MobileConfig{
 		ListenAddr: "127.0.0.1:0",
 	})
@@ -258,11 +258,11 @@ func TestConnectionFilter(t *testing.T) {
 }
 
 // TestRelayHTTPConnectFilter 验证连接筛选：设置只抓取 echo 目标地址后，
-// 命中筛选的连接上报，不匹配的 CONNECT 连接照常中继但不上报给 GTA。
+// 命中筛选的连接上报，不匹配的 CONNECT 连接照常中继但不上报给 GameTrace。
 func TestRelayHTTPConnectFilter(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
 
-	// 1. GTA mobile source（数据块直通：不做应用层分帧）
+	// 1. GameTrace mobile source（数据块直通：不做应用层分帧）
 	src, err := capture.Open(context.Background(), "mobile", mobile.MobileConfig{
 		ListenAddr: "127.0.0.1:0",
 	})
@@ -343,7 +343,7 @@ func TestRelayHTTPConnectFilter(t *testing.T) {
 		return conn, nil
 	}
 
-	// 5. 不匹配连接：应拿到 200 且中继成功，但 GTA 侧无任何上报
+	// 5. 不匹配连接：应拿到 200 且中继成功，但 GameTrace 侧无任何上报
 	miss, err := tunnel(discardAddr)
 	if err != nil {
 		t.Fatalf("discard tunnel: %v", err)

@@ -19,15 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MobileCapture_Push_FullMethodName = "/gta.mobile.MobileCapture/Push"
+	MobileCapture_Push_FullMethodName = "/gametrace.mobile.MobileCapture/Push"
 )
 
 // MobileCaptureClient is the client API for MobileCapture service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// MobileCapture 由 gta-pipeline 的 mobile capture source 提供（gRPC server）。
-// gta-singbox-agent（sing-box 侧）作为 client 连接并推送连接级流量。
+// MobileCapture 由 gt-pipeline 的 mobile capture source 提供（gRPC server）。
+// gt-singbox-agent（sing-box 侧）作为 client 连接并推送连接级流量。
 // 全连接共用一条流，靠 conn_id 区分；服务端按 (conn_id, direction) 归组，
 // 但**不做**应用层分帧/重组——每个数据块原样透传为 packet，帧边界由解码插件判定。
 type MobileCaptureClient interface {
@@ -61,8 +61,8 @@ type MobileCapture_PushClient = grpc.ClientStreamingClient[AgentEvent, PushResul
 // All implementations must embed UnimplementedMobileCaptureServer
 // for forward compatibility.
 //
-// MobileCapture 由 gta-pipeline 的 mobile capture source 提供（gRPC server）。
-// gta-singbox-agent（sing-box 侧）作为 client 连接并推送连接级流量。
+// MobileCapture 由 gt-pipeline 的 mobile capture source 提供（gRPC server）。
+// gt-singbox-agent（sing-box 侧）作为 client 连接并推送连接级流量。
 // 全连接共用一条流，靠 conn_id 区分；服务端按 (conn_id, direction) 归组，
 // 但**不做**应用层分帧/重组——每个数据块原样透传为 packet，帧边界由解码插件判定。
 type MobileCaptureServer interface {
@@ -114,7 +114,7 @@ type MobileCapture_PushServer = grpc.ClientStreamingServer[AgentEvent, PushResul
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var MobileCapture_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "gta.mobile.MobileCapture",
+	ServiceName: "gametrace.mobile.MobileCapture",
 	HandlerType: (*MobileCaptureServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{

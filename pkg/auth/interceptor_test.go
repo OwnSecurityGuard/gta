@@ -31,7 +31,7 @@ func runUnary(t *testing.T, r Resolver, ctx context.Context) (called bool, owner
 	t.Helper()
 	called = false
 	owner = ""
-	_, err = UnaryInterceptor(r)(ctx, "req", &grpc.UnaryServerInfo{FullMethod: "/gta.v1.Registry/Register"},
+	_, err = UnaryInterceptor(r)(ctx, "req", &grpc.UnaryServerInfo{FullMethod: "/gametrace.v1.Registry/Register"},
 		func(ctx context.Context, req any) (any, error) {
 			called = true
 			owner = OwnerFrom(ctx)
@@ -59,8 +59,8 @@ func TestUnaryInterceptor_AnonymousPassesThrough(t *testing.T) {
 // TestUnaryInterceptor_ValidToken 验证 Bearer token 被解析成 owner 并注入 context。
 func TestUnaryInterceptor_ValidToken(t *testing.T) {
 	t.Parallel()
-	r := mustResolver(t, "alice=gta_aaa,bob=gta_bbb")
-	called, owner, err := runUnary(t, r, ctxWithAuth("authorization", "Bearer gta_aaa"))
+	r := mustResolver(t, "alice=gt_aaa,bob=gt_bbb")
+	called, owner, err := runUnary(t, r, ctxWithAuth("authorization", "Bearer gt_aaa"))
 	if err != nil {
 		t.Fatalf("正确 token 不应被拒: %v", err)
 	}
@@ -77,14 +77,14 @@ func TestUnaryInterceptor_ValidToken(t *testing.T) {
 func TestUnaryInterceptor_HeaderKeyAndSchemeAreCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ key, value string }{
-		{"authorization", "Bearer gta_aaa"},
-		{"Authorization", "Bearer gta_aaa"},
-		{"AUTHORIZATION", "bearer gta_aaa"},
-		{"authorization", "BEARER gta_aaa"},
-		{"authorization", "Bearer  gta_aaa"}, // 多余空格
+		{"authorization", "Bearer gt_aaa"},
+		{"Authorization", "Bearer gt_aaa"},
+		{"AUTHORIZATION", "bearer gt_aaa"},
+		{"authorization", "BEARER gt_aaa"},
+		{"authorization", "Bearer  gt_aaa"}, // 多余空格
 	}
 	for _, c := range cases {
-		r := mustResolver(t, "alice=gta_aaa")
+		r := mustResolver(t, "alice=gt_aaa")
 		called, owner, err := runUnary(t, r, ctxWithAuth(c.key, c.value))
 		if err != nil || !called {
 			t.Fatalf("%q: %q 应通过，err=%v called=%v", c.key, c.value, err, called)
@@ -104,17 +104,17 @@ func TestUnaryInterceptor_Rejects(t *testing.T) {
 	}{
 		{"完全没有 Authorization", context.Background()},
 		{"空 metadata", metadata.NewIncomingContext(context.Background(), metadata.MD{})},
-		{"错误的 token", ctxWithAuth("authorization", "Bearer gta_zzz")},
+		{"错误的 token", ctxWithAuth("authorization", "Bearer gt_zzz")},
 		{"空 Bearer", ctxWithAuth("authorization", "Bearer ")},
-		{"裸的错误 token", ctxWithAuth("authorization", "gta_zzz")},
-		{"header 名不对", ctxWithAuth("x-auth", "Bearer gta_aaa")},
-		{"已撤销的 token", ctxWithAuth("authorization", "Bearer gta_ccc")},
-		{"token 被截断", ctxWithAuth("authorization", "Bearer gta_aa")},
+		{"裸的错误 token", ctxWithAuth("authorization", "gt_zzz")},
+		{"header 名不对", ctxWithAuth("x-auth", "Bearer gt_aaa")},
+		{"已撤销的 token", ctxWithAuth("authorization", "Bearer gt_ccc")},
+		{"token 被截断", ctxWithAuth("authorization", "Bearer gt_aa")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			r := mustResolver(t, "alice=gta_aaa,bob=gta_bbb")
+			r := mustResolver(t, "alice=gt_aaa,bob=gt_bbb")
 			called, _, err := runUnary(t, r, c.ctx)
 			if err == nil {
 				t.Fatal("应被拒绝，实际放行")
@@ -146,7 +146,7 @@ func TestStreamInterceptor(t *testing.T) {
 
 	t.Run("正确 token 注入 owner", func(t *testing.T) {
 		t.Parallel()
-		called, owner, err := runStream(t, mustResolver(t, "alice=gta_aaa"), ctxWithAuth("authorization", "Bearer gta_aaa"))
+		called, owner, err := runStream(t, mustResolver(t, "alice=gt_aaa"), ctxWithAuth("authorization", "Bearer gt_aaa"))
 		if err != nil || !called {
 			t.Fatalf("正确 token 应放行: err=%v called=%v", err, called)
 		}
@@ -157,7 +157,7 @@ func TestStreamInterceptor(t *testing.T) {
 
 	t.Run("缺 token 被拒且不进 handler", func(t *testing.T) {
 		t.Parallel()
-		called, _, err := runStream(t, mustResolver(t, "alice=gta_aaa"), context.Background())
+		called, _, err := runStream(t, mustResolver(t, "alice=gt_aaa"), context.Background())
 		if err == nil {
 			t.Fatal("应被拒绝")
 		}
@@ -184,7 +184,7 @@ func runStream(t *testing.T, r Resolver, ctx context.Context) (called bool, owne
 	called = false
 	owner = ""
 	ss := &fakeServerStream{ctx: ctx}
-	err = StreamInterceptor(r)(nil, ss, &grpc.StreamServerInfo{FullMethod: "/gta.v1.Registry/Heartbeat"},
+	err = StreamInterceptor(r)(nil, ss, &grpc.StreamServerInfo{FullMethod: "/gametrace.v1.Registry/Heartbeat"},
 		func(srv any, stream grpc.ServerStream) error {
 			called = true
 			owner = OwnerFrom(stream.Context())

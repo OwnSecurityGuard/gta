@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"gta/pkg/capture"
+	"gametrace/pkg/capture"
 )
 
 // Lifecycle 管理 Source 的公共生命周期：状态机、单次启动/关闭、context 与 waitgroup。

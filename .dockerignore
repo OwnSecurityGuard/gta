@@ -6,7 +6,7 @@ go.work
 go.work.sum
 bin/
 # 远程 agent 预置产物不进构建上下文：镜像不烧入，由 docker-compose 把宿主
-# `./build/agents` 只读挂载到 GTA_AGENT_BIN_DIR（见 Dockerfile）。保持镜像构建
+# `./build/agents` 只读挂载到 GT_AGENT_BIN_DIR（见 Dockerfile）。保持镜像构建
 # 上下文不含宿主编译的多平台二进制（避免体积 + 陈旧产物进入 builder 层）。
 build/agents/
 *.exe
@@ -22,15 +22,15 @@ runs/
 plugins/
 docs/plans/
 # web/ 源码需要进构建上下文（Dockerfile webui 阶段 npm ci && npm run build），
-# 只排除依赖与本地产物（阶段内自建）；cmd/gta-mcp/webui/ 的本地构建产物同理
+# 只排除依赖与本地产物（阶段内自建）；cmd/gt-mcp/webui/ 的本地构建产物同理
 # 排除——镜像内前端由 webui 阶段产物唯一提供，避免残留陈旧 hash 产物
 # （.gitkeep 保留，保证 go:embed 目录非空）。
 web/node_modules/
 web/dist/
 web/.vite/
 web/*.tsbuildinfo
-cmd/gta-mcp/webui/assets/
-cmd/gta-mcp/webui/index.html
+cmd/gt-mcp/webui/assets/
+cmd/gt-mcp/webui/index.html
 tmp_*
 .current*
 control.sqlite*

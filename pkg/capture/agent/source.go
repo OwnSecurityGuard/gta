@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"gta/pkg/capture"
-	"gta/pkg/capture/agent/proto"
-	"gta/pkg/capture/internal/base"
-	"gta/pkg/event"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/capture/agent/proto"
+	"gametrace/pkg/capture/internal/base"
+	"gametrace/pkg/event"
 )
 
 // SourceName 是本 Source 在 capture registry 注册的名字。
@@ -25,7 +25,7 @@ func init() {
 }
 
 // Config 是 agent capture source 的配置。
-// Hub 由宿主（gta-pipeline main）创建并与 AgentIngest server 共享；
+// Hub 由宿主（gt-pipeline main）创建并与 AgentIngest server 共享；
 // SessionID 决定本 Source 只消费哪个会话的推送。
 type Config struct {
 	// Hub 是包路由中枢，必填。

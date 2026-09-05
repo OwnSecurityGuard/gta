@@ -881,7 +881,7 @@ export function useStopLeaseCapture() {
   });
 }
 
-// ===== 启动码接入（GTA-XXXX，成员目标机免参数回连抓包）=====
+// ===== 启动码接入（GT-XXXX，成员目标机免参数回连抓包）=====
 
 /** list_access_codes：列出当前用户可见的启动码。 */
 export function useAccessCodes() {

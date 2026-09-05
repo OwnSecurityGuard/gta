@@ -1,4 +1,4 @@
-// Package logging 提供 gta 项目统一的日志初始化与辅助工具。
+// Package logging 提供 gametrace 项目统一的日志初始化与辅助工具。
 //
 // 功能：
 //   - 文件落盘 + 按大小轮转（不依赖外部库）
@@ -133,11 +133,11 @@ func Init(cfg Config) (*slog.Logger, error) {
 // 环境变量开关名（T17）：容器部署时无需改代码/加 flag 即可关闭文件或 stderr 侧输出。
 // 取值按 strconv.ParseBool 解析（"1"/"true"/...），未设置或解析失败均视为 false。
 const (
-	EnvFileDisabled   = "GTA_LOG_FILE_DISABLED"   // =true 时忽略 FilePath，仅 stderr
-	EnvStderrDisabled = "GTA_LOG_STDERR_DISABLED" // =true 时仅写文件，不再双写 stderr
+	EnvFileDisabled   = "GT_LOG_FILE_DISABLED"   // =true 时忽略 FilePath，仅 stderr
+	EnvStderrDisabled = "GT_LOG_STDERR_DISABLED" // =true 时仅写文件，不再双写 stderr
 )
 
-// FromEnv 用 GTA_LOG_FILE_DISABLED / GTA_LOG_STDERR_DISABLED 环境变量
+// FromEnv 用 GT_LOG_FILE_DISABLED / GT_LOG_STDERR_DISABLED 环境变量
 // 覆盖 cfg 的 DisableFile / DisableStderr，返回调整后的副本。
 // 其余字段不受影响；未设置相关环境变量时返回值与 cfg 等价（默认行为不变）。
 func FromEnv(cfg Config) Config {

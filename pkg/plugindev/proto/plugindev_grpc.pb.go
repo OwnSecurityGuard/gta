@@ -19,13 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PluginDev_Scaffold_FullMethodName    = "/gta.plugindev.PluginDev/Scaffold"
-	PluginDev_ListPlugins_FullMethodName = "/gta.plugindev.PluginDev/ListPlugins"
-	PluginDev_Build_FullMethodName       = "/gta.plugindev.PluginDev/Build"
-	PluginDev_Activate_FullMethodName    = "/gta.plugindev.PluginDev/Activate"
-	PluginDev_Deactivate_FullMethodName  = "/gta.plugindev.PluginDev/Deactivate"
-	PluginDev_Status_FullMethodName      = "/gta.plugindev.PluginDev/Status"
-	PluginDev_Explain_FullMethodName     = "/gta.plugindev.PluginDev/Explain"
+	PluginDev_Scaffold_FullMethodName    = "/gametrace.plugindev.PluginDev/Scaffold"
+	PluginDev_ListPlugins_FullMethodName = "/gametrace.plugindev.PluginDev/ListPlugins"
+	PluginDev_Build_FullMethodName       = "/gametrace.plugindev.PluginDev/Build"
+	PluginDev_Activate_FullMethodName    = "/gametrace.plugindev.PluginDev/Activate"
+	PluginDev_Deactivate_FullMethodName  = "/gametrace.plugindev.PluginDev/Deactivate"
+	PluginDev_Status_FullMethodName      = "/gametrace.plugindev.PluginDev/Status"
+	PluginDev_Explain_FullMethodName     = "/gametrace.plugindev.PluginDev/Explain"
 )
 
 // PluginDevClient is the client API for PluginDev service.
@@ -34,8 +34,8 @@ const (
 //
 // PluginDev is the Developer Plane control surface. It owns the filesystem and
 // subprocesses for scaffolding, building, discovering, activating and
-// deactivating decoder plugins. gta-mcp is a pure forwarder to this service; in
-// production the service runs as the standalone gta-plugin-dev binary,
+// deactivating decoder plugins. gt-mcp is a pure forwarder to this service; in
+// production the service runs as the standalone gt-plugin-dev binary,
 // physically isolating all development capabilities from the runtime.
 type PluginDevClient interface {
 	// Scaffold renders the create_plugin skeleton and writes it under the
@@ -145,8 +145,8 @@ func (c *pluginDevClient) Explain(ctx context.Context, in *ExplainRequest, opts 
 //
 // PluginDev is the Developer Plane control surface. It owns the filesystem and
 // subprocesses for scaffolding, building, discovering, activating and
-// deactivating decoder plugins. gta-mcp is a pure forwarder to this service; in
-// production the service runs as the standalone gta-plugin-dev binary,
+// deactivating decoder plugins. gt-mcp is a pure forwarder to this service; in
+// production the service runs as the standalone gt-plugin-dev binary,
 // physically isolating all development capabilities from the runtime.
 type PluginDevServer interface {
 	// Scaffold renders the create_plugin skeleton and writes it under the
@@ -352,7 +352,7 @@ func _PluginDev_Explain_Handler(srv interface{}, ctx context.Context, dec func(i
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var PluginDev_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "gta.plugindev.PluginDev",
+	ServiceName: "gametrace.plugindev.PluginDev",
 	HandlerType: (*PluginDevServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

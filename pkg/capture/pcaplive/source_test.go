@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"gta/pkg/capture"
+	"gametrace/pkg/capture"
 )
 
 func TestOpenNonexistentDevice(t *testing.T) {

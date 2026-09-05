@@ -1,8 +1,8 @@
-// Package agent 实现 gta-singbox-agent：移动端流量入口（sing-box 侧）到 GTA 的桥接。
+// Package agent 实现 gt-singbox-agent：移动端流量入口（sing-box 侧）到 GameTrace 的桥接。
 //
 // 职责边界：
 //   - 不修改 sing-box、不 fork：sing-box 提供 TUN/混合代理，本包只做"流量中继 + 连接元数据推送"；
-//   - 连接级数据通过 gRPC 客户端流推送给 GTA mobile capture source，GTA 侧按数据块原样透传
+//   - 连接级数据通过 gRPC 客户端流推送给 GameTrace mobile capture source，GameTrace 侧按数据块原样透传
 //     （应用层分帧/重组是协议语义，由绑定到会话的解码插件按连接自行完成）；
 //   - 本包不关心解码、不关心存储，保持 Source 边界。
 //
@@ -10,7 +10,7 @@
 //
 //	Game ──▶ Relay(本包 TCP 中继) ──▶ 上游 server
 //	              │
-//	              └── gRPC Push ──▶ GTA mobile source ──▶ event.Packet（数据块直通）
+//	              └── gRPC Push ──▶ GameTrace mobile source ──▶ event.Packet（数据块直通）
 package agent
 
 import (
@@ -32,13 +32,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"gta/pkg/capture/mobile/proto"
+	"gametrace/pkg/capture/mobile/proto"
 )
 
-// PushClient 管理到 GTA mobile source 的 gRPC 客户端流。
+// PushClient 管理到 GameTrace mobile source 的 gRPC 客户端流。
 // 所有连接共用一个 Push 流（靠 conn_id 区分）；Send 线程安全。
-// 连接是惰性且尽力而为的：GTA 未启动 / 未运行代理抓包会话时不阻塞、不退出，
-// 后台 keepalive 会在 GTA 上线后自动重连并恢复推送，使本 Agent 可常驻等待代理连接。
+// 连接是惰性且尽力而为的：GameTrace 未启动 / 未运行代理抓包会话时不阻塞、不退出，
+// 后台 keepalive 会在 GameTrace 上线后自动重连并恢复推送，使本 Agent 可常驻等待代理连接。
 type PushClient struct {
 	addr   string
 	logger *slog.Logger
@@ -53,7 +53,7 @@ type PushClient struct {
 }
 
 // NewPushClient 创建 PushClient 并启动后台连接维护。
-// GTA 暂不可达时不视为错误：返回的客户端可用，推送会在 GTA 上线后自动恢复。
+// GameTrace 暂不可达时不视为错误：返回的客户端可用，推送会在 GameTrace 上线后自动恢复。
 func NewPushClient(addr string, logger *slog.Logger) (*PushClient, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -66,7 +66,7 @@ func NewPushClient(addr string, logger *slog.Logger) (*PushClient, error) {
 	return p, nil
 }
 
-// keepalive 周期性确保连接存在：GTA 启动/重启后自动重连，无需依赖流量触发。
+// keepalive 周期性确保连接存在：GameTrace 启动/重启后自动重连，无需依赖流量触发。
 func (p *PushClient) keepalive() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -80,7 +80,7 @@ func (p *PushClient) keepalive() {
 				if err := p.dialLocked(); err != nil {
 					p.logger.Debug("push client reconnect failed (will retry)", "error", err)
 				} else {
-					p.logger.Info("push client connected to GTA mobile source", "addr", p.addr)
+					p.logger.Info("push client connected to GameTrace mobile source", "addr", p.addr)
 				}
 			}
 			p.mu.Unlock()
@@ -96,7 +96,7 @@ func (p *PushClient) dialLocked() error {
 	}
 	conn, err := grpc.NewClient(p.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("dial gta %s: %w", p.addr, err)
+		return fmt.Errorf("dial gametrace %s: %w", p.addr, err)
 	}
 	stream, err := proto.NewMobileCaptureClient(conn).Push(context.Background())
 	if err != nil {
@@ -213,7 +213,7 @@ type Relay struct {
 
 	seq atomic.Uint64 // conn_id 序列
 	// agentID 是本 Relay 实例的短标识，作为所有 conn_id 的前缀。
-	// conn_id 原本是纯自增序号，从 1 重新开始——同一 GTA 上跑多个 agent 进程时
+	// conn_id 原本是纯自增序号，从 1 重新开始——同一 GameTrace 上跑多个 agent 进程时
 	// （多设备租约、agent 重启）序号必然重复，日志与落库的 conn 无法区分来源。
 	agentID string
 
@@ -238,7 +238,7 @@ func NewRelay(cfg RelayConfig, gate *CaptureGate, logger *slog.Logger) *Relay {
 func (r *Relay) Gate() *CaptureGate { return r.gate }
 
 // newAgentID 生成一个进程级短随机标识（4 字节 hex）。
-// 生成失败不影响功能（退化为空前缀，仍由 GTA 侧的流隔离兜底）。
+// 生成失败不影响功能（退化为空前缀，仍由 GameTrace 侧的流隔离兜底）。
 func newAgentID() string {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -326,7 +326,7 @@ const proxyProbeTimeout = 5 * time.Second
 
 // handleConn 处理一条代理/中继连接：推送 open，双向转发，推送 close。
 // 上游目标由 resolveTarget 决定：固定 TargetAddr（透明中继）或按 HTTP CONNECT 动态解析（纯代理模式）。
-// 不匹配筛选条件的连接照常中继，但不上报 open/data/close 给 GTA。
+// 不匹配筛选条件的连接照常中继，但不上报 open/data/close 给 GameTrace。
 func (r *Relay) handleConn(ctx context.Context, clientConn net.Conn) {
 	defer clientConn.Close()
 	seq := r.seq.Add(1)
@@ -454,7 +454,7 @@ func parseConnectTarget(line string) (string, bool) {
 //
 // 不抓包时不做 payload 复制（直接把读缓冲写出去），这是「零上报成本」的
 // 关键：idle 状态下除一次 socket 写外没有任何额外分配。
-// 推送失败不中断中继：GTA 未运行时抓包暂时丢失，代理连接仍在转发。
+// 推送失败不中断中继：GameTrace 未运行时抓包暂时丢失，代理连接仍在转发。
 func (r *Relay) forward(src io.Reader, dst net.Conn, conn *relayConn, direction string) {
 	buf := make([]byte, 32*1024)
 	for {

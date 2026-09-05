@@ -23,7 +23,7 @@ func TestProbes_CRUD(t *testing.T) {
 	cs := newProbeTestStore(t)
 	ctx := context.Background()
 
-	token := "gta_prb_test1234567890"
+	token := "gt_prb_test1234567890"
 	sum := sha256.Sum256([]byte(token))
 	tokenHash := hex.EncodeToString(sum[:])
 

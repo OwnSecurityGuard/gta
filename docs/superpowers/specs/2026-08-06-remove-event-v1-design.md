@@ -53,7 +53,7 @@
 - `pkg/analyze/rule.go`
   - `ruleEnv["event"]` 改为 `(*event.EventV2)(nil)`。
   - 规则可访问 `event.Identity`, `event.Relation`, `event.Context`, `event.Payload`。
-- `cmd/gta-mcp/trace_handler.go`
+- `cmd/gt-mcp/trace_handler.go`
   - `flowID` 参数类型改为 `string`。
   - 消息结构体改为基于 `*event.EventV2`。
   - `queryFlowMessages` 返回 `[]*event.EventV2`。

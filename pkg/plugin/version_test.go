@@ -78,7 +78,7 @@ func TestCheckManifestVersion(t *testing.T) {
 		},
 		{
 			name:    "invalid format wrong service",
-			apiVer:  "gta.other/v1",
+			apiVer:  "gametrace.other/v1",
 			wantErr: true,
 			errSub:  "api_version",
 		},

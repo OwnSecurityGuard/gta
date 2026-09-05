@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package gta.agent;
+package gametrace.agent;
 
-option go_package = "gta/pkg/capture/agent/proto";
+option go_package = "gametrace/pkg/capture/agent/proto";
 
-// AgentIngest 由 gta-pipeline 的 agent capture source 侧提供（gRPC server，默认 :9092）。
-// 团队成员本机的 gta-agent 抓取本机流量后作为 client 连接并推送原始完整帧。
+// AgentIngest 由 gt-pipeline 的 agent capture source 侧提供（gRPC server，默认 :9092）。
+// 团队成员本机的 gt-agent 抓取本机流量后作为 client 连接并推送原始完整帧。
 //
 // 与 mobile source 不同：这里保留完整帧（raw）与链路层类型（link_type），
 // 插件在本地开发与在团队服务端跑的行为完全一致（不做 LinkTypeProxyPayload 退化）。

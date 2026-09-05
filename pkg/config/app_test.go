@@ -28,9 +28,9 @@ func TestLoadExplicitMissingPathErrors(t *testing.T) {
 
 func TestLoadYAMLAndEnvFallback(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "gta.yaml")
+	path := filepath.Join(dir, "gametrace.yaml")
 	yaml := `
-workdir: /data/gta
+workdir: /data/gametrace
 mcp:
   addr: ":8782"
 pipeline:
@@ -44,13 +44,13 @@ pipeline:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.WorkDir != "/data/gta" || cfg.MCP.Addr != ":8782" ||
+	if cfg.WorkDir != "/data/gametrace" || cfg.MCP.Addr != ":8782" ||
 		cfg.Pipeline.ControlAddr != ":9889" || cfg.Pipeline.RegistryAddr != ":9093" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 	// 未在文件中配置的字段由环境变量兜底。
-	t.Setenv("GTA_AGENT_INGEST_ADDR", ":9094")
-	t.Setenv("GTA_MCP_ALLOWED_ORIGINS", "http://a.example.com")
+	t.Setenv("GT_AGENT_INGEST_ADDR", ":9094")
+	t.Setenv("GT_MCP_ALLOWED_ORIGINS", "http://a.example.com")
 	cfg, err = Load(path, true)
 	if err != nil {
 		t.Fatalf("Load with env: %v", err)
@@ -62,11 +62,11 @@ pipeline:
 
 func TestEnvOverridesFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "gta.yaml")
+	path := filepath.Join(dir, "gametrace.yaml")
 	if err := os.WriteFile(path, []byte("pipeline:\n  registry_addr: \":9093\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GTA_REGISTRY_ADDR", ":9199")
+	t.Setenv("GT_REGISTRY_ADDR", ":9199")
 	cfg, err := Load(path, true)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -77,7 +77,7 @@ func TestEnvOverridesFile(t *testing.T) {
 }
 
 func TestLoadInvalidYAML(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "gta.yaml")
+	path := filepath.Join(t.TempDir(), "gametrace.yaml")
 	if err := os.WriteFile(path, []byte("mcp: [broken"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func chdir(t *testing.T, dir string) {
 
 func TestResolveWorkDirPrecedence(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("GTA_HOME", home)
+	t.Setenv("GT_HOME", home)
 	cwdData := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(cwdData, "sessions"), 0o755); err != nil {
 		t.Fatal(err)
@@ -116,16 +116,16 @@ func TestResolveWorkDirPrecedence(t *testing.T) {
 	if filepath.Base(got) != "explicit" {
 		t.Fatalf("flag should win, got %q", got)
 	}
-	// 2. GTA_HOME 次之（覆盖配置文件与 CWD 数据探测）。
+	// 2. GT_HOME 次之（覆盖配置文件与 CWD 数据探测）。
 	got, err = ResolveWorkDir(".", false, "/fromcfg")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != home {
-		t.Fatalf("GTA_HOME should win, got %q want %q", got, home)
+		t.Fatalf("GT_HOME should win, got %q want %q", got, home)
 	}
-	// 3. GTA_HOME 未设置（置空等价）时配置文件次之。
-	t.Setenv("GTA_HOME", "")
+	// 3. GT_HOME 未设置（置空等价）时配置文件次之。
+	t.Setenv("GT_HOME", "")
 	got, err = ResolveWorkDir(".", false, "/fromcfg")
 	if err != nil {
 		t.Fatal(err)
@@ -147,14 +147,14 @@ func TestResolveWorkDirFallsBackToHomeDotGta(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("USERPROFILE", tmpHome)
 	t.Setenv("HOME", tmpHome)
-	t.Setenv("GTA_HOME", "")
+	t.Setenv("GT_HOME", "")
 	empty := t.TempDir()
 	chdir(t, empty)
 	got, err := ResolveWorkDir(".", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(tmpHome, ".gta")
+	want := filepath.Join(tmpHome, ".gametrace")
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}

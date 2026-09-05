@@ -1,11 +1,11 @@
 // app.go — 统一配置（T10/T11）。
 //
-// gta.yaml 是可选的统一配置文件：不存在时所有字段取默认值。
-// 每个字段支持 GTA_* 环境变量兜底，整体优先级：
+// gametrace.yaml 是可选的统一配置文件：不存在时所有字段取默认值。
+// 每个字段支持 GT_* 环境变量兜底，整体优先级：
 //
-//	flag（命令行显式传入） > 环境变量 GTA_* > gta.yaml > 默认值
+//	flag（命令行显式传入） > 环境变量 GT_* > gametrace.yaml > 默认值
 //
-// 鉴权 token 不进配置文件：GTA_AUTH_TOKENS 保持仅环境变量（避免密钥落盘）。
+// 鉴权 token 不进配置文件：GT_AUTH_TOKENS 保持仅环境变量（避免密钥落盘）。
 package config
 
 import (
@@ -22,21 +22,21 @@ import (
 
 // 各监听地址的默认值（与各 main.go 既有 flag 默认值一致，保证无配置时行为不变）。
 const (
-	DefaultMCPAddr         = ":8781" // gta-mcp HTTP/SSE 监听地址
+	DefaultMCPAddr         = ":8781" // gt-mcp HTTP/SSE 监听地址
 	DefaultControlAddr     = ":9888" // CaptureControl gRPC 监听地址
 	DefaultRegistryAddr    = ":9091" // PluginRegistry gRPC 监听地址
 	DefaultAgentIngestAddr = ":9092" // AgentIngest gRPC 监听地址
 )
 
-// MCPServerConfig 是 gta-mcp 相关配置。
+// MCPServerConfig 是 gt-mcp 相关配置。
 type MCPServerConfig struct {
 	// Addr 是 HTTP/SSE 监听地址，支持 ":0" 动态分配（实际地址回写 <workdir>/addr.mcp.json）。
 	Addr string `yaml:"addr"`
-	// AllowedOrigins 是 CORS 允许的 Origin 列表（逗号分隔），等价 GTA_MCP_ALLOWED_ORIGINS。
+	// AllowedOrigins 是 CORS 允许的 Origin 列表（逗号分隔），等价 GT_MCP_ALLOWED_ORIGINS。
 	AllowedOrigins string `yaml:"allowed_origins"`
 }
 
-// PipelineServerConfig 是 gta-pipeline 的 gRPC 监听配置。
+// PipelineServerConfig 是 gt-pipeline 的 gRPC 监听配置。
 // 各地址支持 ":0" 动态分配（实际地址回写 <workdir>/addr.<name>.json）。
 type PipelineServerConfig struct {
 	ControlAddr     string `yaml:"control_addr"`
@@ -44,27 +44,27 @@ type PipelineServerConfig struct {
 	AgentIngestAddr string `yaml:"agent_ingest_addr"`
 }
 
-// SessionConfig 是会话数据保留策略（存储优化），由 gta-mcp 周期执行清理。
+// SessionConfig 是会话数据保留策略（存储优化），由 gt-mcp 周期执行清理。
 type SessionConfig struct {
 	// RetentionDays 是会话保留天数：无写入活动超过该天数的会话被自动清理
 	//（含状态仍为 running 但长期无数据写入的残留会话）；0 表示不启用 TTL 清理。
-	// 对应环境变量 GTA_SESSION_RETENTION_DAYS。
+	// 对应环境变量 GT_SESSION_RETENTION_DAYS。
 	RetentionDays int `yaml:"retention_days"`
 	// MaxSessions 是保留的最大会话数量：超出时从最旧的非 running 会话开始清理。
-	// 0 表示不限制数量。对应环境变量 GTA_MAX_SESSIONS。
+	// 0 表示不限制数量。对应环境变量 GT_MAX_SESSIONS。
 	MaxSessions int `yaml:"max_sessions"`
 }
 
-// Config 是 gta.yaml 的顶层结构（统一配置）。
+// Config 是 gametrace.yaml 的顶层结构（统一配置）。
 type Config struct {
-	// WorkDir 是工作目录。为空时按 ResolveWorkDir 的规则解析（GTA_HOME / 既有数据探测 / ~/.gta）。
+	// WorkDir 是工作目录。为空时按 ResolveWorkDir 的规则解析（GT_HOME / 既有数据探测 / ~/.gametrace）。
 	WorkDir  string               `yaml:"workdir"`
 	MCP      MCPServerConfig      `yaml:"mcp"`
 	Pipeline PipelineServerConfig `yaml:"pipeline"`
 	Sessions SessionConfig        `yaml:"sessions"`
 }
 
-// Load 读取统一配置文件（gta.yaml，可选）。path 为空或（未显式指定时）文件不存在，
+// Load 读取统一配置文件（gametrace.yaml，可选）。path 为空或（未显式指定时）文件不存在，
 // 返回仅含环境变量兜底值（其余为零值，由调用方按默认值补齐）的 Config。
 //
 // explicit 表示 path 是否来自用户显式指定（如 -config flag）：显式指定的路径
@@ -89,18 +89,18 @@ func Load(path string, explicit bool) (Config, error) {
 	return cfg, nil
 }
 
-// applyEnvFallback 用 GTA_* 环境变量覆盖配置文件值（优先级：环境变量 > 配置文件）。
+// applyEnvFallback 用 GT_* 环境变量覆盖配置文件值（优先级：环境变量 > 配置文件）。
 // 环境变量未设置时保留文件值（可能为零值，由调用方补默认值），这样能区分
 // "未配置"与"显式配置"，保证 flag 显式值始终最高优先。
 func (c *Config) applyEnvFallback() {
-	c.WorkDir = firstNonEmpty(os.Getenv("GTA_WORKDIR"), c.WorkDir)
-	c.MCP.Addr = firstNonEmpty(os.Getenv("GTA_MCP_ADDR"), c.MCP.Addr)
-	c.MCP.AllowedOrigins = firstNonEmpty(os.Getenv("GTA_MCP_ALLOWED_ORIGINS"), c.MCP.AllowedOrigins)
-	c.Pipeline.ControlAddr = firstNonEmpty(os.Getenv("GTA_CONTROL_ADDR"), c.Pipeline.ControlAddr)
-	c.Pipeline.RegistryAddr = firstNonEmpty(os.Getenv("GTA_REGISTRY_ADDR"), c.Pipeline.RegistryAddr)
-	c.Pipeline.AgentIngestAddr = firstNonEmpty(os.Getenv("GTA_AGENT_INGEST_ADDR"), c.Pipeline.AgentIngestAddr)
-	c.Sessions.RetentionDays = envIntOr("GTA_SESSION_RETENTION_DAYS", c.Sessions.RetentionDays)
-	c.Sessions.MaxSessions = envIntOr("GTA_MAX_SESSIONS", c.Sessions.MaxSessions)
+	c.WorkDir = firstNonEmpty(os.Getenv("GT_WORKDIR"), c.WorkDir)
+	c.MCP.Addr = firstNonEmpty(os.Getenv("GT_MCP_ADDR"), c.MCP.Addr)
+	c.MCP.AllowedOrigins = firstNonEmpty(os.Getenv("GT_MCP_ALLOWED_ORIGINS"), c.MCP.AllowedOrigins)
+	c.Pipeline.ControlAddr = firstNonEmpty(os.Getenv("GT_CONTROL_ADDR"), c.Pipeline.ControlAddr)
+	c.Pipeline.RegistryAddr = firstNonEmpty(os.Getenv("GT_REGISTRY_ADDR"), c.Pipeline.RegistryAddr)
+	c.Pipeline.AgentIngestAddr = firstNonEmpty(os.Getenv("GT_AGENT_INGEST_ADDR"), c.Pipeline.AgentIngestAddr)
+	c.Sessions.RetentionDays = envIntOr("GT_SESSION_RETENTION_DAYS", c.Sessions.RetentionDays)
+	c.Sessions.MaxSessions = envIntOr("GT_MAX_SESSIONS", c.Sessions.MaxSessions)
 }
 
 // envIntOr 读取整数环境变量：未设置或解析失败时返回 def。
@@ -126,17 +126,17 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// ResolveWorkDir 解析工作目录（优先级：显式 flag > GTA_HOME > 配置文件 workdir >
-// 既有数据探测 > ~/.gta）。
+// ResolveWorkDir 解析工作目录（优先级：显式 flag > GT_HOME > 配置文件 workdir >
+// 既有数据探测 > ~/.gametrace）。
 //
-// 兼容性说明（T10）：默认工作目录从 CWD 改为 ~/.gta（B6），但为了不破坏老用户的
-// 数据发现——若 GTA_HOME 未设置、flag 未显式传入、配置文件也未指定，且 CWD 中已存在
-// gta 数据（control.sqlite / sessions / runs），则继续使用 CWD 并打印提示。
+// 兼容性说明（T10）：默认工作目录从 CWD 改为 ~/.gametrace（B6），但为了不破坏老用户的
+// 数据发现——若 GT_HOME 未设置、flag 未显式传入、配置文件也未指定，且 CWD 中已存在
+// gametrace 数据（control.sqlite / sessions / runs），则继续使用 CWD 并打印提示。
 func ResolveWorkDir(flagValue string, flagExplicit bool, cfgWorkDir string) (string, error) {
 	if flagExplicit && strings.TrimSpace(flagValue) != "" {
 		return filepath.Abs(flagValue)
 	}
-	if home := strings.TrimSpace(os.Getenv("GTA_HOME")); home != "" {
+	if home := strings.TrimSpace(os.Getenv("GT_HOME")); home != "" {
 		return filepath.Abs(home)
 	}
 	if strings.TrimSpace(cfgWorkDir) != "" {
@@ -146,8 +146,8 @@ func ResolveWorkDir(flagValue string, flagExplicit bool, cfgWorkDir string) (str
 	if err != nil {
 		return "", fmt.Errorf("get working directory: %w", err)
 	}
-	if HasExistingGTAData(cwd) {
-		slog.Info("found existing gta data in current directory, using it as workdir (set GTA_HOME to override)", "dir", cwd)
+	if HasExistingGTData(cwd) {
+		slog.Info("found existing gametrace data in current directory, using it as workdir (set GT_HOME to override)", "dir", cwd)
 		return cwd, nil
 	}
 	home, err := os.UserHomeDir()
@@ -156,11 +156,11 @@ func ResolveWorkDir(flagValue string, flagExplicit bool, cfgWorkDir string) (str
 		slog.Warn("cannot resolve home directory, falling back to CWD as workdir", "error", err)
 		return cwd, nil
 	}
-	return filepath.Join(home, ".gta"), nil
+	return filepath.Join(home, ".gametrace"), nil
 }
 
-// HasExistingGTAData 判断目录中是否已有 gta 运行数据。
-func HasExistingGTAData(dir string) bool {
+// HasExistingGTData 判断目录中是否已有 gametrace 运行数据。
+func HasExistingGTData(dir string) bool {
 	for _, name := range []string{"control.sqlite", "sessions", "runs"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
 			return true

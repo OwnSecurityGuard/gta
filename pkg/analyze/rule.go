@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"time"
 
-	"gta/pkg/event"
-	"gta/pkg/schema"
+	"gametrace/pkg/event"
+	"gametrace/pkg/schema"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"

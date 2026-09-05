@@ -1,4 +1,4 @@
-# GTA 团队协作改造 · 实施计划
+# GameTrace 团队协作改造 · 实施计划
 
 日期：2026-08-29
 设计来源：`docs/plans/2026-08-29-team-collaboration-design.md`（已批准）
@@ -9,7 +9,7 @@
 
 - **TDD 强制**：每个任务先写失败测试 → 看它红 → 实现 → 看它绿 → 提交。
 - 每任务一个 commit，信息格式 `feat(team): <简述>`。
-- 两个仓库：`E:\gta`（宿主）、`E:\ai_workspace\gta-plugin-sdk`（SDK）。
+- 两个仓库：`E:/gta`（宿主）、`E:\ai_workspace\gta-plugin-sdk`（SDK）。
   SDK 改动必须先落地并被宿主 `replace` 到，宿主才能联调。
 - **proto 只准在 SDK 侧生成一份**（`make proto` in SDK）。两侧各生成会在 protobuf
   全局注册表撞同一文件路径并 panic。
@@ -24,7 +24,7 @@ A1(去replace/修CI) ──┬── B1(SDK proto) ── B2(宿主 TunnelHub) �
 A2(pkg/auth) ────────┼── B4
                      ├── D1(SessionMeta.Owner)
                      └── E1..E4 (P1)
-C1(AgentIngest proto) ── C2(capture/agent source) ── C3(cmd/gta-agent)
+C1(AgentIngest proto) ── C2(capture/agent source) ── C3(cmd/gt-agent)
 B1 ──────────────────────────────────────────────────────────────────── C3
 F1..F5 (P2) 依赖上述全部
 ```
@@ -55,9 +55,9 @@ F1..F5 (P2) 依赖上述全部
 - **设计**：
   - `type Principal struct { Owner string; IsAdmin bool }`
   - `type Resolver interface { Resolve(token string) (*Principal, bool) }`
-  - `StaticResolver(map[string]Principal)` — 从 `GTA_AUTH_TOKENS="alice=gta_aaa,bob=gta_bbb"`
+  - `StaticResolver(map[string]Principal)` — 从 `GT_AUTH_TOKENS="alice=gt_aaa,bob=gt_bbb"`
     或配置文件的 `auth.tokens` 段加载。
-  - `GTA_AUTH_TOKENS` 为空 ⇒ **匿名模式**：`Principal{Owner: "local"}`，且
+  - `GT_AUTH_TOKENS` 为空 ⇒ **匿名模式**：`Principal{Owner: "local"}`，且
     `Required=false`（放行），保证回归底线。
   - gRPC：`UnaryInterceptor` / `StreamInterceptor` 从 metadata
     `authorization: Bearer <token>` 提取；`ctx` 注入 `Principal`。
@@ -142,7 +142,7 @@ F1..F5 (P2) 依赖上述全部
 
 - **文件（SDK）**：`registry.go`、`tunnel.go`（新增）、`tunnel_test.go`（新增）
 - **设计**：
-  - 新增 `GTA_REGISTRY_TUNNEL=1`（或 `RunTunnelRegisterLoop` 独立入口）启用。
+  - 新增 `GT_REGISTRY_TUNNEL=1`（或 `RunTunnelRegisterLoop` 独立入口）启用。
   - 隧道模式下**不起** Decode gRPC server，注册时 `socket_path` 置空、`tunnel=true`。
   - 注册成功后在同一条 `*grpc.ClientConn` 上调用 `Connect`，开双向流。
   - 收到 `request` 帧 → 反序列化 `DecodeRequest` → 交给 `tunnelStreamServer`
@@ -214,23 +214,23 @@ F1..F5 (P2) 依赖上述全部
   3. 绿。
 - **commit**：`feat(team): add agent capture source preserving full frames`
 
-### C3 · `cmd/gta-agent`
+### C3 · `cmd/gt-agent`
 
-- **文件**：`cmd/gta-agent/main.go`（新增）、`cmd/gta-agent/plugin_host.go`（新增）
+- **文件**：`cmd/gt-agent/main.go`（新增）、`cmd/gt-agent/plugin_host.go`（新增）
 - **职责**：成员本机单二进制。
   1. 读配置：`--server`、`--token`、`--iface`、`--port`（BPF 过滤）、`--plugin-dir`。
   2. **抓包推流**：复用 `pkg/capture/pcaplive` 抓本机网卡 → 攒批 → `AgentIngest.Push`。
   3. **托管插件**：扫描 `--plugin-dir` 下的插件可执行文件，逐个 spawn，
-     为每个插件注入 `GTA_REGISTRY_ADDR=<server:9091>`、`GTA_REGISTRY_TUNNEL=1`、
-     `GTA_AUTH_TOKEN=<token>`；插件退出按退避重启。
+     为每个插件注入 `GT_REGISTRY_ADDR=<server:9091>`、`GT_REGISTRY_TUNNEL=1`、
+     `GT_AUTH_TOKEN=<token>`；插件退出按退避重启。
   4. 断线指数退避重连（首次 1s，上限 30s）。
 - **TDD**：
   1. 红：`plugin_host_test.go` 断言「扫描目录得到插件清单」
      「spawn 的环境变量包含隧道与 token」；`main_test.go` 断言「配置解析的默认值与 flag 覆盖」。
   2. 实现。
   3. 绿。
-- **验收**：`go build -tags pcap ./cmd/gta-agent` 成功；冒烟：连不上服务端时不崩溃、持续重试。
-- **commit**：`feat(team): add gta-agent for local capture push and plugin hosting`
+- **验收**：`go build -tags pcap ./cmd/gt-agent` 成功；冒烟：连不上服务端时不崩溃、持续重试。
+- **commit**：`feat(team): add gt-agent for local capture push and plugin hosting`
 
 ---
 
@@ -239,7 +239,7 @@ F1..F5 (P2) 依赖上述全部
 ### D1 · `SessionMeta.Owner` + 按 owner 过滤 + `current.<owner>.json`
 
 - **文件**：`pkg/store/eventstore.go`、`pkg/store/session_store.go`、
-  `cmd/gta-pipeline/pipeline_service.go`、`cmd/gta-mcp/main.go`
+  `cmd/gt-pipeline/pipeline_service.go`、`cmd/gt-mcp/main.go`
 - **改动**：
   1. `SessionMeta` 加 `Owner string`（`json:"owner"`），`sessions` 表加 `owner` 列（含迁移）。
   2. `StartSession` 从 ctx 取 owner 写入；`ListSessions` 支持按 owner 过滤（空 = 全部）。
@@ -256,43 +256,43 @@ F1..F5 (P2) 依赖上述全部
 
 ## Phase E — P1 体验与正确性
 
-### E1 · 统一配置：`pkg/config.Config` + `gta.yaml` + `GTA_*` + `GTA_HOME`
+### E1 · 统一配置：`pkg/config.Config` + `gametrace.yaml` + `GT_*` + `GT_HOME`
 
 - **文件**：`pkg/config/config.go`（新增）、`pkg/config/config_test.go`（新增）、
-  `cmd/gta-mcp/main.go`、`cmd/gta-pipeline/main.go`、`cmd/gta-agent/main.go`
+  `cmd/gt-mcp/main.go`、`cmd/gt-pipeline/main.go`、`cmd/gt-agent/main.go`
 - **设计**：
   - `Config` 字段：`Server{ControlAddr, RegistryAddr, MCPAddr, AgentAddr}`、
     `WorkDir`、`Auth{Tokens}`、`Log{Level, Format, File}`。
-  - `Load(path)` 读 yaml；每字段可被 `GTA_<SECTION>_<FIELD>` 环境变量覆盖；
+  - `Load(path)` 读 yaml；每字段可被 `GT_<SECTION>_<FIELD>` 环境变量覆盖；
     优先级 **flag > 环境变量 > 配置文件 > 默认值**。
-  - `WorkDir` 默认：环境变量 `GTA_HOME` → `os.UserHomeDir()/.gta` → `.`（保持现状兜底）。
+  - `WorkDir` 默认：环境变量 `GT_HOME` → `os.UserHomeDir()/.gametrace` → `.`（保持现状兜底）。
   - 端口支持 `:0`；实际监听后把地址写入 `<workdir>/run/addr.json`。
 - **TDD**：
   1. 红：测试「配置文件值被环境变量覆盖」「环境变量被 flag 覆盖」
-     「未设任何值时 WorkDir 回落到 ~/.gta」「坏 yaml 返回明确错误而非 panic」。
+     「未设任何值时 WorkDir 回落到 ~/.gametrace」「坏 yaml 返回明确错误而非 panic」。
   2. 实现并接线到三个 main。
   3. 绿。
-- **commit**：`feat(team): unify configuration with gta.yaml, GTA_* env and GTA_HOME`
+- **commit**：`feat(team): unify configuration with gametrace.yaml, GT_* env and GT_HOME`
 
 ### E2 · `pkg/config/proxy.go` 的 `ServerAddr` 可配置
 
 - **文件**：`pkg/config/proxy.go:50-51`
 - **改动**：`ListenAddr` / `ServerAddr` 默认值改为从 `Config` 取；
-  `ServerAddr` 缺省仍为 `127.0.0.1:9090`（保持现状），但可被 `GTA_PROXY_SERVER_ADDR` 覆盖。
+  `ServerAddr` 缺省仍为 `127.0.0.1:9090`（保持现状），但可被 `GT_PROXY_SERVER_ADDR` 覆盖。
 - **TDD**：环境变量覆盖生效；不设时行为不变。
 - **commit**：`fix(team): make proxy server address configurable`
 
 ### E3 · 收紧 CORS
 
-- **文件**：`cmd/gta-mcp/main.go:2703`
-- **改动**：`Access-Control-Allow-Origin: *` → 由 `GTA_MCP_CORS_ORIGINS` 配置，
+- **文件**：`cmd/gt-mcp/main.go:2703`
+- **改动**：`Access-Control-Allow-Origin: *` → 由 `GT_MCP_CORS_ORIGINS` 配置，
   默认**同源**（不输出该 header）；`Allow-Headers` 显式包含 `Authorization`。
 - **TDD**：测试「未配置时不输出 ACAO」「配置了白名单时命中才输出」。
 - **commit**：`fix(team): restrict CORS to configured origins`
 
 ### E4 · MCP 按 owner 过滤 + `start_capture` 支持 `source=agent`
 
-- **文件**：`cmd/gta-mcp/main.go`
+- **文件**：`cmd/gt-mcp/main.go`
 - **改动**：
   1. HTTP server 套上 A2 的 middleware；owner 注入请求 `ctx`。
   2. `list_registered_plugins`（`:657`）、`list_plugins`（`:617`）、
@@ -317,7 +317,7 @@ F1..F5 (P2) 依赖上述全部
 - **改动**：新增 `PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64`；
   `make dist` 输出到 `dist/<os>-<arch>/`（Windows 加 `.exe`）；
   version 通过 `-ldflags "-X main.version=$(VERSION)"` 注入；
-  **新增 `build-agent` 产出 `gta-agent`**（成员要拿它去本机跑）。
+  **新增 `build-agent` 产出 `gt-agent`**（成员要拿它去本机跑）。
 - **验收**：`make dist` 在 Windows 上产出 5 个平台的二进制。
 - **commit**：`build: add cross-platform dist matrix and version ldflags`
 
@@ -327,9 +327,9 @@ F1..F5 (P2) 依赖上述全部
   `.env.example`（新增）、`.dockerignore`（新增）
 - **设计**：
   - Dockerfile：golang 构建（含 `-tags pcap`，Linux 用 libpcap-dev）→ distroless/alpine 运行。
-  - compose 两个 service：`gta-pipeline`（9888/9091/9092）、`gta-mcp`（8781），
+  - compose 两个 service：`gt-pipeline`（9888/9091/9092）、`gt-mcp`（8781），
     共享 volume 存放 `sessions/`、`runs/`、`control.sqlite`；环境变量全部从 `.env` 注入。
-  - `.env.example` 含 `GTA_AUTH_TOKENS=alice=gta_xxx,bob=gta_yyy` 示例。
+  - `.env.example` 含 `GT_AUTH_TOKENS=alice=gt_xxx,bob=gt_yyy` 示例。
 - **验收**：`docker compose up -d` 后 `:8781` 与 `:9091` 可连通（本地无 Docker 时至少通过配置静态检查）。
 - **commit**：`build: add Dockerfile, compose stack and .env.example`
 
@@ -341,10 +341,10 @@ F1..F5 (P2) 依赖上述全部
 
 ### F4 · 日志治理
 
-- **文件**：`pkg/logging/logging.go`、`cmd/gta-plugin-dev/main.go`
-- **改动**：文件+stderr 双写改为可配置（`GTA_LOG_STDERR`，容器默认关）；
+- **文件**：`pkg/logging/logging.go`、`cmd/gt-plugin-dev/main.go`
+- **改动**：文件+stderr 双写改为可配置（`GT_LOG_STDERR`，容器默认关）；
   `MaxBackups <= 0` 才补默认（修 `:70-72` 的 `< 0` 判断 bug）；
-  `gta-plugin-dev` 接入 `pkg/logging`。
+  `gt-plugin-dev` 接入 `pkg/logging`。
 - **commit**：`fix: make log dual-write configurable and wire plugin-dev logging`
 
 ### F5 · 文档
@@ -364,13 +364,13 @@ F1..F5 (P2) 依赖上述全部
 | B | 同上 + SDK `go test ./...` | 隧道两端 9 组用例全绿；**现有 manager_test 全绿** |
 | C | 同上 | agent 能连上服务端并推包；插件被托管后出现在注册表 |
 | D | 同上 | owner 隔离用例全绿 |
-| E | 同上 + 手工冒烟 | MCP 按 owner 隔离；`gta.yaml` 生效 |
+| E | 同上 + 手工冒烟 | MCP 按 owner 隔离；`gametrace.yaml` 生效 |
 | F | `make dist` | 5 平台产物；compose 起得来 |
 
 ## 最终验收（对应设计文档 §7）
 
 1. 全新 Linux 机器 `docker compose up -d` 就绪，无需 Go 环境。
-2. 成员 A 跑 `gta-agent --token <A> --server <host>`：抓本机流量、本地插件自动注册、
+2. 成员 A 跑 `gt-agent --token <A> --server <host>`：抓本机流量、本地插件自动注册、
    服务端可见 `alice/<plugin>`。
 3. 成员 B 同时接入且插件同名：**并存不互相顶替**。
 4. 无 token / 错 token 被拒（gRPC 与 MCP 两侧）。

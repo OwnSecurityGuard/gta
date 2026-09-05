@@ -6,11 +6,11 @@
 
 ## 目标
 
-实现 `plugins/http`，让 `gta-pipeline` 在 `start_capture` 指定 `plugin=http` 时，能把 TCP payload 解析为 HTTP 请求/响应事件，写入 `events` 与 `entity_snapshots`。
+实现 `plugins/http`，让 `gt-pipeline` 在 `start_capture` 指定 `plugin=http` 时，能把 TCP payload 解析为 HTTP 请求/响应事件，写入 `events` 与 `entity_snapshots`。
 
 ## 设计决策
 
-- **协议版本**：V1 JSON（`Decode` RPC），复用 `pkg/plugin/sdk` 的 `RunRegisterLoop` 与 `Decoder` 封装。`gta-pipeline` 的 Dispatcher 会优先探测 V2，失败后回退到 V1 并自动转成 `EventV2`。
+- **协议版本**：V1 JSON（`Decode` RPC），复用 `pkg/plugin/sdk` 的 `RunRegisterLoop` 与 `Decoder` 封装。`gt-pipeline` 的 Dispatcher 会优先探测 V2，失败后回退到 V1 并自动转成 `EventV2`。
 - **解析策略**：逐包解析，不处理 TCP 流重组。先尝试 `http.ReadRequest`，失败再尝试 `http.ReadResponse`。
 - **Body 处理**：读取完整 body 文本，上限 64KB，超限截断并标记 `body_truncated`。
 - **输出字段**：
@@ -32,12 +32,12 @@
 
 ## 依赖
 
-- `gta/pkg/plugin/sdk`
-- `gta/pkg/plugin/proto`
+- `gametrace/pkg/plugin/sdk`
+- `gametrace/pkg/plugin/proto`
 - 标准库 `net/http`、`bufio`、`bytes`、`io`、`strings`、`log/slog`
 
 ## 测试计划
 
 1. `go build ./plugins/http` 通过
 2. 启动 `examples/http/server` 与 `examples/http/client` 产生流量
-3. 用 `gta-pipeline` + `gta-mcp` 抓包并验证 `events` 表出现 `data.type == "request"/"response"` 的记录
+3. 用 `gt-pipeline` + `gt-mcp` 抓包并验证 `events` 表出现 `data.type == "request"/"response"` 的记录

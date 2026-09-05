@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
-	"gta/pkg/auth"
+	"gametrace/pkg/auth"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -80,13 +80,13 @@ func TestRegistryWiring_TokenModeOwnerScoping(t *testing.T) {
 	sock, stopSock := startFakeDecoder(t)
 	defer stopSock()
 
-	c, registry, stop := startWiredRegistry(t, true, "alice=gta_a,bob=gta_b")
+	c, registry, stop := startWiredRegistry(t, true, "alice=gt_a,bob=gt_b")
 	defer stop()
 
-	if err := regWithToken(t, c, sock, "my-plugin", "gta_a"); err != nil {
+	if err := regWithToken(t, c, sock, "my-plugin", "gt_a"); err != nil {
 		t.Fatalf("alice register: %v", err)
 	}
-	if err := regWithToken(t, c, sock, "my-plugin", "gta_b"); err != nil {
+	if err := regWithToken(t, c, sock, "my-plugin", "gt_b"); err != nil {
 		t.Fatalf("bob register: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestRegistryWiring_TokenModeOwnerScoping(t *testing.T) {
 	}
 
 	// 错误 token 被拒。
-	if err := regWithToken(t, c, sock, "my-plugin", "gta_wrong"); err == nil {
+	if err := regWithToken(t, c, sock, "my-plugin", "gt_wrong"); err == nil {
 		t.Fatal("错误 token 的 Register 应被拒绝")
 	}
 	// 无 token 也被拒。

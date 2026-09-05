@@ -34,22 +34,22 @@ afterEach(() => {
 
 describe("token 存取", () => {
   it("setToken/getToken 往返并持久化到 localStorage", () => {
-    setToken("gta_aaa");
-    expect(getToken()).toBe("gta_aaa");
-    expect(store.get("gta_auth_token")).toBe("gta_aaa");
+    setToken("gt_aaa");
+    expect(getToken()).toBe("gt_aaa");
+    expect(store.get("gt_auth_token")).toBe("gt_aaa");
   });
 
   it("空串视为清除", () => {
-    setToken("gta_aaa");
+    setToken("gt_aaa");
     setToken("   ");
     expect(getToken()).toBeNull();
-    expect(store.has("gta_auth_token")).toBe(false);
+    expect(store.has("gt_auth_token")).toBe(false);
   });
 
   it("authHeaders：有 token 带 Bearer，无 token 不带头", () => {
     expect(authHeaders()).toEqual({});
-    setToken("gta_aaa");
-    expect(authHeaders()).toEqual({ Authorization: "Bearer gta_aaa" });
+    setToken("gt_aaa");
+    expect(authHeaders()).toEqual({ Authorization: "Bearer gt_aaa" });
   });
 });
 
@@ -59,12 +59,12 @@ describe("withTokenParam", () => {
   });
 
   it("有 token 时拼查询参数并编码", () => {
-    setToken("gta aaa/1");
+    setToken("gametrace aaa/1");
     expect(withTokenParam("/events/plugins")).toBe(
-      "/events/plugins?token=gta%20aaa%2F1",
+      "/events/plugins?token=gametrace%20aaa%2F1",
     );
     expect(withTokenParam("/events/plugins?a=1")).toBe(
-      "/events/plugins?a=1&token=gta%20aaa%2F1",
+      "/events/plugins?a=1&token=gametrace%20aaa%2F1",
     );
   });
 });
@@ -83,7 +83,7 @@ describe("authError", () => {
     expect(getAuthError()).toBe(false);
     notifyAuthError();
     expect(getAuthError()).toBe(true);
-    setToken("gta_new");
+    setToken("gt_new");
     expect(getAuthError()).toBe(false);
   });
 });
@@ -118,11 +118,11 @@ describe("订阅与联动", () => {
   it("token：setToken 变化时通知；退订后不再通知；重复退订安全", () => {
     const listener = vi.fn();
     const unsub = subscribeToken(listener);
-    setToken("gta_aaa");
+    setToken("gt_aaa");
     expect(listener).toHaveBeenCalledTimes(1);
     unsub();
     unsub(); // 重复退订不应抛错
-    setToken("gta_bbb");
+    setToken("gt_bbb");
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
@@ -141,10 +141,10 @@ describe("订阅与联动", () => {
   });
 
   it("换 token 联动清除 identity，等下一次响应头重新回显", () => {
-    setToken("gta_old");
+    setToken("gt_old");
     setIdentity({ owner: "alice", isAdmin: false });
     expect(getIdentity()).toEqual({ owner: "alice", isAdmin: false });
-    setToken("gta_new");
+    setToken("gt_new");
     expect(getIdentity()).toBeNull();
   });
 

@@ -392,16 +392,15 @@ var File_pkg_capture_mobile_proto_mobile_proto protoreflect.FileDescriptor
 
 const file_pkg_capture_mobile_proto_mobile_proto_rawDesc = "" +
 	"\n" +
-	"%pkg/capture/mobile/proto/mobile.proto\x12\n" +
-	"gta.mobile\"\xdc\x01\n" +
+	"%pkg/capture/mobile/proto/mobile.proto\x12\x10gametrace.mobile\"\xee\x01\n" +
 	"\n" +
 	"AgentEvent\x12\x17\n" +
 	"\aconn_id\x18\x01 \x01(\tR\x06connId\x12%\n" +
-	"\x0etimestamp_unix\x18\x02 \x01(\x03R\rtimestampUnix\x12*\n" +
+	"\x0etimestamp_unix\x18\x02 \x01(\x03R\rtimestampUnix\x120\n" +
 	"\x04open\x18\n" +
-	" \x01(\v2\x14.gta.mobile.ConnOpenH\x00R\x04open\x12*\n" +
-	"\x04data\x18\v \x01(\v2\x14.gta.mobile.ConnDataH\x00R\x04data\x12-\n" +
-	"\x05close\x18\f \x01(\v2\x15.gta.mobile.ConnCloseH\x00R\x05closeB\a\n" +
+	" \x01(\v2\x1a.gametrace.mobile.ConnOpenH\x00R\x04open\x120\n" +
+	"\x04data\x18\v \x01(\v2\x1a.gametrace.mobile.ConnDataH\x00R\x04data\x123\n" +
+	"\x05close\x18\f \x01(\v2\x1b.gametrace.mobile.ConnCloseH\x00R\x05closeB\a\n" +
 	"\x05event\"\xb3\x01\n" +
 	"\bConnOpen\x12\x1f\n" +
 	"\vclient_addr\x18\x01 \x01(\tR\n" +
@@ -422,9 +421,9 @@ const file_pkg_capture_mobile_proto_mobile_proto_rawDesc = "" +
 	"\vconnections\x18\x01 \x01(\x04R\vconnections\x12\x18\n" +
 	"\apackets\x18\x02 \x01(\x04R\apackets\x12\x14\n" +
 	"\x05bytes\x18\x03 \x01(\x04R\x05bytes\x12\x16\n" +
-	"\x06errors\x18\x04 \x01(\x04R\x06errors2I\n" +
-	"\rMobileCapture\x128\n" +
-	"\x04Push\x12\x16.gta.mobile.AgentEvent\x1a\x16.gta.mobile.PushResult(\x01B\x1eZ\x1cgta/pkg/capture/mobile/protob\x06proto3"
+	"\x06errors\x18\x04 \x01(\x04R\x06errors2U\n" +
+	"\rMobileCapture\x12D\n" +
+	"\x04Push\x12\x1c.gametrace.mobile.AgentEvent\x1a\x1c.gametrace.mobile.PushResult(\x01B$Z\"gametrace/pkg/capture/mobile/protob\x06proto3"
 
 var (
 	file_pkg_capture_mobile_proto_mobile_proto_rawDescOnce sync.Once
@@ -440,18 +439,18 @@ func file_pkg_capture_mobile_proto_mobile_proto_rawDescGZIP() []byte {
 
 var file_pkg_capture_mobile_proto_mobile_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_pkg_capture_mobile_proto_mobile_proto_goTypes = []any{
-	(*AgentEvent)(nil), // 0: gta.mobile.AgentEvent
-	(*ConnOpen)(nil),   // 1: gta.mobile.ConnOpen
-	(*ConnData)(nil),   // 2: gta.mobile.ConnData
-	(*ConnClose)(nil),  // 3: gta.mobile.ConnClose
-	(*PushResult)(nil), // 4: gta.mobile.PushResult
+	(*AgentEvent)(nil), // 0: gametrace.mobile.AgentEvent
+	(*ConnOpen)(nil),   // 1: gametrace.mobile.ConnOpen
+	(*ConnData)(nil),   // 2: gametrace.mobile.ConnData
+	(*ConnClose)(nil),  // 3: gametrace.mobile.ConnClose
+	(*PushResult)(nil), // 4: gametrace.mobile.PushResult
 }
 var file_pkg_capture_mobile_proto_mobile_proto_depIdxs = []int32{
-	1, // 0: gta.mobile.AgentEvent.open:type_name -> gta.mobile.ConnOpen
-	2, // 1: gta.mobile.AgentEvent.data:type_name -> gta.mobile.ConnData
-	3, // 2: gta.mobile.AgentEvent.close:type_name -> gta.mobile.ConnClose
-	0, // 3: gta.mobile.MobileCapture.Push:input_type -> gta.mobile.AgentEvent
-	4, // 4: gta.mobile.MobileCapture.Push:output_type -> gta.mobile.PushResult
+	1, // 0: gametrace.mobile.AgentEvent.open:type_name -> gametrace.mobile.ConnOpen
+	2, // 1: gametrace.mobile.AgentEvent.data:type_name -> gametrace.mobile.ConnData
+	3, // 2: gametrace.mobile.AgentEvent.close:type_name -> gametrace.mobile.ConnClose
+	0, // 3: gametrace.mobile.MobileCapture.Push:input_type -> gametrace.mobile.AgentEvent
+	4, // 4: gametrace.mobile.MobileCapture.Push:output_type -> gametrace.mobile.PushResult
 	4, // [4:5] is the sub-list for method output_type
 	3, // [3:4] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name

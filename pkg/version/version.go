@@ -2,10 +2,10 @@
 //
 // 三个变量均为包级 var（非 const），供构建时通过 -ldflags "-X" 注入：
 //
-//	go build -ldflags "-X gta/pkg/version.Version=v0.5.0 -X gta/pkg/version.Commit=abc1234" ./cmd/gta-pipeline
+//	go build -ldflags "-X gametrace/pkg/version.Version=v0.5.0 -X gametrace/pkg/version.Commit=abc1234" ./cmd/gt-pipeline
 //
 // 未注入时保留 dev 值：本地 go build / go run 出的二进制不带版本信息，
-// 报告 "dev (unknown)"。各入口（gta-pipeline / gta-mcp / gta-agent）提供
+// 报告 "dev (unknown)"。各入口（gt-pipeline / gt-mcp / gt-agent）提供
 // -version flag 打印后退出。
 package version
 

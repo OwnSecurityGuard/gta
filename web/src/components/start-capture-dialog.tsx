@@ -58,7 +58,7 @@ function ProbeStateChip({ p }: { p: ProbeInfo }) {
     case "running":
       return (
         <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">
-          <span className="gta-live-dot" />
+          <span className="gt-live-dot" />
           抓包中
         </span>
       );
@@ -356,10 +356,10 @@ export function StartCaptureDialog({
               {probes.length === 0 ? (
                 <div className="mt-1.5 rounded-lg border border-dashed border-border bg-muted/40 px-3 py-4 text-center text-xs text-muted-foreground">
                   还没有可用的探针机器。通过顶部「接入设备」生成启动码，
-                  在目标机器上运行 gta-agent 完成接入。
+                  在目标机器上运行 gt-agent 完成接入。
                 </div>
               ) : (
-                <div className="mt-1.5 grid max-h-52 grid-cols-1 gap-1.5 overflow-auto gta-scroll">
+                <div className="mt-1.5 grid max-h-52 grid-cols-1 gap-1.5 overflow-auto gt-scroll">
                   {probes.map((p) => {
                     const selectable = probeSelectable(p);
                     const active = probeId === p.probe_id;

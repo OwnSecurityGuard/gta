@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把「选解析器」从工程师式的下拉改成普通用户的友善卡片（按协议归组：Godot/Unity/HTTP/自定义），并把开发者工具（create_plugin/build_plugin/verify_plugin）收进「更多/高级」开关；同时用「启动码 GTA-XXXX」替代繁琐下载表单，让成员在目标机输入一个码即可自动注册设备/取配置/回连抓包。
+**Goal:** 把「选解析器」从工程师式的下拉改成普通用户的友善卡片（按协议归组：Godot/Unity/HTTP/自定义），并把开发者工具（create_plugin/build_plugin/verify_plugin）收进「更多/高级」开关；同时用「启动码 GT-XXXX」替代繁琐下载表单，让成员在目标机输入一个码即可自动注册设备/取配置/回连抓包。
 
-**Architecture:** 解析器入口 = 纯前端改造（`web/src/components`），按已注册插件的 `protocol`/`name` 归组渲染为卡片，保留「自定义」显示原始插件下拉，开发者工具收进 App「更多」下拉（加开关）。启动码流程 = 后端新增 `access_codes` 表（存 `control.sqlite`）+ MCP 工具 `create_access_code` + 未鉴权端点 `GET /access/claim?code=...`（复用手动 download 开会话/组 sidecar 配置的逻辑，改 JSON 返回取代 zip 打包）；`gta-agent` 新增 `--code` 首发入，无配置时交互输入码并调用 claim 拿配置后照常运行；Web 新增「我的接入」命令面板生成 `curl | bash` / 下载 / 启动码。
+**Architecture:** 解析器入口 = 纯前端改造（`web/src/components`），按已注册插件的 `protocol`/`name` 归组渲染为卡片，保留「自定义」显示原始插件下拉，开发者工具收进 App「更多」下拉（加开关）。启动码流程 = 后端新增 `access_codes` 表（存 `control.sqlite`）+ MCP 工具 `create_access_code` + 未鉴权端点 `GET /access/claim?code=...`（复用手动 download 开会话/组 sidecar 配置的逻辑，改 JSON 返回取代 zip 打包）；`gt-agent` 新增 `--code` 首发入，无配置时交互输入码并调用 claim 拿配置后照常运行；Web 新增「我的接入」命令面板生成 `curl | bash` / 下载 / 启动码。
 
-**Tech Stack:** Go (SQLite via modernc.org/sqlite, net/http, flag)、gta-agent (现有 flag + deriveAddrs 复用)、React 19 + TypeScript + Vite + TanStack Query。
+**Tech Stack:** Go (SQLite via modernc.org/sqlite, net/http, flag)、gt-agent (现有 flag + deriveAddrs 复用)、React 19 + TypeScript + Vite + TanStack Query。
 
 ---
 > 已确认的范围决策（AskUserQuestion 结果）：① 启动码为主，收纳现 zip 下载流程；② 解析器按协议/标识归类渲染[Godot][Unity][HTTP][自定义]；③ 开发者工具收进「更多」下拉 + 高级开关。
@@ -15,15 +15,15 @@
 
 ## 文件结构（本轮新增/修改）
 
-**后端（gta-mcp）**
-- New `cmd/gta-mcp/access_code.go` — `access_codes` 表定义/DBCreate/CRUD、`create_access_code` 工具、`handleAccessClaim` HTTP 端点、`handleGetAccessCode`。
-- Modify `cmd/gta-mcp/main.go` — 装配 access store（复用 `controlStore.DB()`）、注册 MCP 工具与 HTTP 端点。
-- New test `cmd/gta-mcp/access_code_test.go`。
+**后端（gt-mcp）**
+- New `cmd/gt-mcp/access_code.go` — `access_codes` 表定义/DBCreate/CRUD、`create_access_code` 工具、`handleAccessClaim` HTTP 端点、`handleGetAccessCode`。
+- Modify `cmd/gt-mcp/main.go` — 装配 access store（复用 `controlStore.DB()`）、注册 MCP 工具与 HTTP 端点。
+- New test `cmd/gt-mcp/access_code_test.go`。
 
-**agent（cmd/gta-agent）**
-- Modify `cmd/gta-agent/main.go` — 新增 `--code` flag；无 server/token/config 时提示输入启动码。
-- New `cmd/gta-agent/claim.go` — 调用 `/access/claim` 解析启动码，组装 `embeddedAgentConfig` 作为默认配置（优先级最高默认）。
-- New test `cmd/gta-agent/claim_test.go`。
+**agent（cmd/gt-agent）**
+- Modify `cmd/gt-agent/main.go` — 新增 `--code` flag；无 server/token/config 时提示输入启动码。
+- New `cmd/gt-agent/claim.go` — 调用 `/access/claim` 解析启动码，组装 `embeddedAgentConfig` 作为默认配置（优先级最高默认）。
+- New test `cmd/gt-agent/claim_test.go`。
 
 **前端（web/）**
 - Modify `web/src/types/agent.ts` — 新增 `AccessClaimResult`/`AccessCode` 类型。
@@ -201,15 +201,15 @@ git commit -m "feat(web): friendly parser cards in start-capture dialog"
 ## Task B1: 后端 `access_code.go`（表 + 归属 + claim 逻辑）
 
 **Files:**
-- Create: `cmd/gta-mcp/access_code.go`
-- New: `cmd/gta-mcp/access_code_test.go`
+- Create: `cmd/gt-mcp/access_code.go`
+- New: `cmd/gt-mcp/access_code_test.go`
 
 - [ ] **Step 1: 表结构 + store**
 
-`cmd/gta-mcp/access_code.go`：
+`cmd/gt-mcp/access_code.go`：
 
 ```go
-// access_code.go — 启动码 GTA-XXXX 机制：生成一个绑定 owner/会话的短码，成员在
+// access_code.go — 启动码 GT-XXXX 机制：生成一个绑定 owner/会话的短码，成员在
 // 目标机输入后由 agent 用 <code> 调 /access/claim 拿回完整配置（复用手动下载的
 // 开会话/组 sidecar 逻辑，改 JSON 返回取代 zip 打包）。
 package main
@@ -227,8 +227,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"gta/pkg/auth"
-	pb "gta/pkg/internalipc/proto"
+	"gametrace/pkg/auth"
+	pb "gametrace/pkg/internalipc/proto"
 )
 
 const accessCodeSchema = `
@@ -337,12 +337,12 @@ func boolInt(b bool) int {
 	return 0
 }
 
-// newAccessCode 生成形如 GTA-3F9A-2B7C 的短码（仅大写字面 + 数字）。
+// newAccessCode 生成形如 GT-3F9A-2B7C 的短码（仅大写字面 + 数字）。
 func newAccessCode() string {
 	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "GTA-DEAD-BEEF"
+		return "GT-DEAD-BEEF"
 	}
 	var parts []string
 	for i := 0; i < 2; i++ {
@@ -352,13 +352,13 @@ func newAccessCode() string {
 		}
 		parts = append(parts, s)
 	}
-	return "GTA-" + parts[0] + "-" + parts[1]
+	return "GT-" + parts[0] + "-" + parts[1]
 }
 ```
 
 - [ ] **Step 2: 写失败测试**
 
-`cmd/gta-mcp/access_code_test.go`：
+`cmd/gt-mcp/access_code_test.go`：
 
 ```go
 package main
@@ -381,7 +381,7 @@ func TestAccessCodeRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &accessCode{
-		Code: "GTA-A1B2-C3D4", Owner: "alice", Port: 8080,
+		Code: "GT-A1B2-C3D4", Owner: "alice", Port: 8080,
 		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
 	}
 	if err := store.Create(context.Background(), c); err != nil {
@@ -405,11 +405,11 @@ func TestAccessCodeRoundTrip(t *testing.T) {
 
 func TestNewAccessCodeFormat(t *testing.T) {
 	c := newAccessCode()
-	if len(c) != 11 { // "GTA-XXXX-XXXX"
-		t.Fatalf("expected GTA-XXXX-XXXX, got %q", c)
+	if len(c) != 11 { // "GT-XXXX-XXXX"
+		t.Fatalf("expected GT-XXXX-XXXX, got %q", c)
 	}
-	if !strings.HasPrefix(c, "GTA-") {
-		t.Fatalf("expected GTA- prefix, got %q", c)
+	if !strings.HasPrefix(c, "GT-") {
+		t.Fatalf("expected GT- prefix, got %q", c)
 	}
 }
 ```
@@ -418,18 +418,18 @@ func TestNewAccessCodeFormat(t *testing.T) {
 
 - [ ] **Step 3: 运行使其失败**
 
-Run: `go test ./cmd/gta-mcp -run TestAccessCodeRoundTrip -v`
+Run: `go test ./cmd/gt-mcp -run TestAccessCodeRoundTrip -v`
 Expected: 编译失败（`newAccessCode`/`accessCodeStore` 未定义）或 FAIL。
 
 - [ ] **Step 4: 编译通过**
 
-修正 import（`strings`、`crypto/rand`、`database/sql`）。Run: `go build ./cmd/gta-mcp`
+修正 import（`strings`、`crypto/rand`、`database/sql`）。Run: `go build ./cmd/gt-mcp`
 Expected: 通过。
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add cmd/gta-mcp/access_code.go cmd/gta-mcp/access_code_test.go
+git add cmd/gt-mcp/access_code.go cmd/gt-mcp/access_code_test.go
 git commit -m "feat(mcp): access_code table + store + generator"
 ```
 
@@ -438,8 +438,8 @@ git commit -m "feat(mcp): access_code table + store + generator"
 ## Task B2: `create_access_code` MCP 工具 + 装配
 
 **Files:**
-- Modify: `cmd/gta-mcp/access_code.go`
-- Modify: `cmd/gta-mcp/main.go`
+- Modify: `cmd/gt-mcp/access_code.go`
+- Modify: `cmd/gt-mcp/main.go`
 
 - [ ] **Step 1: 工具处理函数**
 
@@ -499,7 +499,7 @@ func (m *mcpCapture) handleListAccessCodes(ctx context.Context, req mcp.CallTool
 
 ```go
 s.AddTool(mcp.NewTool("create_access_code",
-	mcp.WithDescription("Generate an access code (GTA-XXXX-XXXX) bound to the current user. A member enters this code when starting gta-agent to auto-register and connect. Optional: project_id, plugin, port, platform, server."),
+	mcp.WithDescription("Generate an access code (GT-XXXX-XXXX) bound to the current user. A member enters this code when starting gt-agent to auto-register and connect. Optional: project_id, plugin, port, platform, server."),
 	mcp.WithString("project_id"), mcp.WithString("plugin"), mcp.WithNumber("port"),
 	mcp.WithString("platform"), mcp.WithString("server"),
 ), capture.handleCreateAccessCode)
@@ -510,13 +510,13 @@ s.AddTool(mcp.NewTool("list_access_codes",
 
 - [ ] **Step 3: 编译 + 测试**
 
-Run: `go build ./cmd/gta-mcp && go test ./cmd/gta-mcp -run TestAccessCodeRoundTrip -v`
+Run: `go build ./cmd/gt-mcp && go test ./cmd/gt-mcp -run TestAccessCodeRoundTrip -v`
 Expected: PASS。
 
 - [ ] **Step 4: 提交**
 
 ```bash
-git add cmd/gta-mcp/access_code.go cmd/gta-mcp/main.go
+git add cmd/gt-mcp/access_code.go cmd/gt-mcp/main.go
 git commit -m "feat(mcp): create/list access code tools"
 ```
 
@@ -525,9 +525,9 @@ git commit -m "feat(mcp): create/list access code tools"
 ## Task B3: `GET /access/claim` 端点（复用开会话逻辑）
 
 **Files:**
-- Modify: `cmd/gta-mcp/access_code.go`
-- Modify: `cmd/gta-mcp/main.go`（挂路由）
-- New test: `cmd/gta-mcp/access_claim_test.go`
+- Modify: `cmd/gt-mcp/access_code.go`
+- Modify: `cmd/gt-mcp/main.go`（挂路由）
+- New test: `cmd/gt-mcp/access_claim_test.go`
 
 - [ ] **Step 1: claim 处理器**
 
@@ -650,10 +650,10 @@ if tr, err := auth.ParseTokens(os.Getenv(auth.EnvTokens)); err == nil {
 	tokensByOwner = ...
 }
 ```
-> 说明：`auth.ParseTokens` 不暴露 owner→token 反转映射。为避免改 auth 包，计划在 `cmd/gta-mcp` 内写一个 `loadTokensByOwner()` 复刻解析（读 `GTA_AUTH_TOKENS`，解析成 map[owner]token，忽略 admin 后缀）；这是最小侵入。**若你不想复刻解析**，可在 claim 返回里省略 token，改由 agent 以匿名（owner=local）回连——对「公开领取但非团队鉴权」场景够用，但团队部署需要真实 token。按需求保留烧 token 方案，用 `loadTokensByOwner`。
+> 说明：`auth.ParseTokens` 不暴露 owner→token 反转映射。为避免改 auth 包，计划在 `cmd/gt-mcp` 内写一个 `loadTokensByOwner()` 复刻解析（读 `GT_AUTH_TOKENS`，解析成 map[owner]token，忽略 admin 后缀）；这是最小侵入。**若你不想复刻解析**，可在 claim 返回里省略 token，改由 agent 以匿名（owner=local）回连——对「公开领取但非团队鉴权」场景够用，但团队部署需要真实 token。按需求保留烧 token 方案，用 `loadTokensByOwner`。
 
 ```go
-// loadTokensByOwner 从 GTA_AUTH_TOKENS 解析 owner->token（"alice=gta_xxx:admin" 取 "gta_xxx"）。
+// loadTokensByOwner 从 GT_AUTH_TOKENS 解析 owner->token（"alice=gt_xxx:admin" 取 "gt_xxx"）。
 func loadTokensByOwner() map[string]string {
 	m := map[string]string{}
 	for _, seg := range strings.Split(os.Getenv(auth.EnvTokens), ",") {
@@ -692,13 +692,13 @@ func TestAccessClaimReturnsConfig(t *testing.T) {
 
 - [ ] **Step 5: 编译 + 测试**
 
-Run: `go build ./cmd/gta-mcp && go test ./cmd/gta-mcp -run TestAccess`  
+Run: `go build ./cmd/gt-mcp && go test ./cmd/gt-mcp -run TestAccess`  
 Expected: PASS。
 
 - [ ] **Step 6: 提交**
 
 ```bash
-git add cmd/gta-mcp/access_code.go cmd/gta-mcp/main.go cmd/gta-mcp/access_claim_test.go
+git add cmd/gt-mcp/access_code.go cmd/gt-mcp/main.go cmd/gt-mcp/access_claim_test.go
 git commit -m "feat(mcp): /access/claim returns agent config from startup code"
 ```
 
@@ -707,13 +707,13 @@ git commit -m "feat(mcp): /access/claim returns agent config from startup code"
 ## Task B4: agent 支持 `--code` 启动码
 
 **Files:**
-- Modify: `cmd/gta-agent/main.go`
-- New: `cmd/gta-agent/claim.go`
-- New test: `cmd/gta-agent/claim_test.go`
+- Modify: `cmd/gt-agent/main.go`
+- New: `cmd/gt-agent/claim.go`
+- New test: `cmd/gt-agent/claim_test.go`
 
 - [ ] **Step 1: claim 客户端**
 
-`cmd/gta-agent/claim.go`：
+`cmd/gt-agent/claim.go`：
 
 ```go
 package main
@@ -728,7 +728,7 @@ import (
 )
 
 // claimAccessCode 带启动码调服务端 /access/claim，返回可直接用作默认配置的映射。
-// hostPort 是 mcp HTTP 地址（默认 127.0.0.1:8781）；code 形如 GTA-XXXX-XXXX。
+// hostPort 是 mcp HTTP 地址（默认 127.0.0.1:8781）；code 形如 GT-XXXX-XXXX。
 func claimAccessCode(ctx context.Context, hostPort, code string) (embeddedAgentConfig, error) {
 	var cfg embeddedAgentConfig
 	if hostPort == "" {
@@ -800,7 +800,7 @@ func claimAccessCode(ctx context.Context, hostPort, code string) (embeddedAgentC
 
 - [ ] **Step 3: main.go 接入 `--code`**
 
-在 flag 区新增 `accessCode string`：`fs.StringVar(&accessCode, "code", "", "启动码 GTA-XXXX：无 server/token 时用它自动领取配置")`。
+在 flag 区新增 `accessCode string`：`fs.StringVar(&accessCode, "code", "", "启动码 GT-XXXX：无 server/token 时用它自动领取配置")`。
 
 在 `embedded/sidecar 加载之后、deriveAddrs 之前`（main.go 第 134 行前）插入：
 
@@ -809,16 +809,16 @@ func claimAccessCode(ctx context.Context, hostPort, code string) (embeddedAgentC
 if (accessCode != "" || (server == "" && token == "" && !hasEmbedded)) && purposeAccessCodeNeedsConfig {
 	if accessCode == "" {
 		// 交互式：stdin 读一行（首启引导）。非 TTY 下读 os.Stdin。
-		fmt.Print("请输入启动码 GTA-XXXX-XXXX: ")
+		fmt.Print("请输入启动码 GT-XXXX-XXXX: ")
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 		accessCode = strings.ToUpper(strings.TrimSpace(line))
 	}
 	if accessCode == "" {
-		slog.Error("启动码不能为空；用 --code GTA-XXXX-XXXX 或输入启动码")
+		slog.Error("启动码不能为空；用 --code GT-XXXX-XXXX 或输入启动码")
 		os.Exit(1)
 	}
-	if !strings.HasPrefix(accessCode, "GTA-") {
-		slog.Error("启动码格式应为 GTA-XXXX-XXXX", "code", accessCode)
+	if !strings.HasPrefix(accessCode, "GT-") {
+		slog.Error("启动码格式应为 GT-XXXX-XXXX", "code", accessCode)
 		os.Exit(1)
 	}
 	claimed, err := claimAccessCode(ctx, accessHost, accessCode)
@@ -859,14 +859,14 @@ if (accessCode != "" || (server == "" && token == "" && !hasEmbedded)) && purpos
 
 - [ ] **Step 5: 编译 + 测试**
 
-Run: `go build ./cmd/gta-agent && go test ./cmd/gta-agent -run TestClaim`
+Run: `go build ./cmd/gt-agent && go test ./cmd/gt-agent -run TestClaim`
 Expected: PASS。
 
 - [ ] **Step 6: 提交**
 
 ```bash
-git add cmd/gta-agent/main.go cmd/gta-agent/claim.go cmd/gta-agent/claim_test.go
-git commit -m "feat(agent): support GTA access code for first-run auto configuration"
+git add cmd/gt-agent/main.go cmd/gt-agent/claim.go cmd/gt-agent/claim_test.go
+git commit -m "feat(agent): support GameTrace access code for first-run auto configuration"
 ```
 
 ---
@@ -924,13 +924,13 @@ export function useCreateAccessCode() {
 - 「选择目标平台」grAID（复用 `AgentPlatform`/`useAgentDownloadOptions` 的 platforms）。
 - 「生成接入命令」按钮 → `useCreateAccessCode({ port, platform })` 拿 code。
 - 展示三块命令：
-  - **Windows**：`<a href="/download/agent?code=<code>&platform=windows/amd64" download>` 一键下载 zip（手填 code 也可）。展示「解压后双击 gta-agent，第一次运行输入启动码」。
+  - **Windows**：`<a href="/download/agent?code=<code>&platform=windows/amd64" download>` 一键下载 zip（手填 code 也可）。展示「解压后双击 gt-agent，第一次运行输入启动码」。
   - **Linux/macOS**：可复制命令
     ```
     curl -fsSL 'http://<host>:8781/access/claim?code=<code>' \
       && curl -fsSL 'http://<host>:8781/setup.sh?code=<code>' | bash
     ```
-  - **启动码**：大号等宽 `<code>GTA-XXXX-XXXX</code>` + 复制按钮。
+  - **启动码**：大号等宽 `<code>GT-XXXX-XXXX</code>` + 复制按钮。
 - 提示语：不要用户碰 port/token/registry。
 
 > `curl | bash` 需要一个 `setup.sh`（见 Task B6）返回一段下载+运行脚本；若本轮不实现 setup.sh，则退化为「复制启动码 → 手动下载 agent → 首启输入启动码」的引导。**Plan 按实现 setup.sh 全链路来**，若时间紧张可在 B6 里把 setup.sh 做成可选项（返回 501 也让 curl 失败，需兜底为用户手动下载提示）。为使 `curl | bash` 真正可用，B6 必做。
@@ -960,14 +960,14 @@ git commit -m "feat(web): access-code onboarding panel + curated commands"
 ## Task B6: `setup.sh`（`curl | bash` 一键安装脚本）
 
 **Files:**
-- Modify: `cmd/gta-mcp/access_code.go`
-- Modify: `cmd/gta-mcp/main.go`（挂路由）
+- Modify: `cmd/gt-mcp/access_code.go`
+- Modify: `cmd/gt-mcp/main.go`（挂路由）
 
 - [ ] **Step 1: 处理函数**
 
 ```go
 // handleSetupScript 返回 `curl ... | bash` 的一键脚本：下载本平台预置 agent zip、
-// 解压、把启动码写入 config.embedded.json，启动 gta-agent。code 由调用方拼在 URL。
+// 解压、把启动码写入 config.embedded.json，启动 gt-agent。code 由调用方拼在 URL。
 func (m *mcpCapture) handleSetupScript(w http.ResponseWriter, r *http.Request) {
 	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
 	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
@@ -981,19 +981,19 @@ func (m *mcpCapture) handleSetupScript(w http.ResponseWriter, r *http.Request) {
 	script := fmt.Sprintf(`#!/usr/bin/env bash
 set -euo pipefail
 CODE="%s"
-# 下载本平台 agent zip（含通用二进制），解压到 ~/.gta-agent
-BIN_DIR="$HOME/.gta-agent"
+# 下载本平台 agent zip（含通用二进制），解压到 ~/.gt-agent
+BIN_DIR="$HOME/.gt-agent"
 mkdir -p "$BIN_DIR"
 URL="%s/download/agent?code=%s&platform=%s"
 # 用 code 换 token：先 claim 拿到 sidecar 配置（含 token），供下文写入
 CONFIG_URL="%s/access/claim?code=%s"
 echo "下载 Agent 并配置启动码..."
-curl -fsSL "$URL" -o /tmp/gta-agent.zip || { echo "下载失败，请确认可访问服务端"; exit 1; }
-unzip -o -q /tmp/gta-agent.zip -d "$BIN_DIR"
+curl -fsSL "$URL" -o /tmp/gt-agent.zip || { echo "下载失败，请确认可访问服务端"; exit 1; }
+unzip -o -q /tmp/gt-agent.zip -d "$BIN_DIR"
 # 用 claim 拿到 server/token/session 写入 config.embedded.json，实现免输入直接跑
 curl -fsSL "$CONFIG_URL" -o "$BIN_DIR/config.embedded.json" || true
-chmod +x "$BIN_DIR/gta-agent"
-echo "已在 %s 完成安装。执行 gta-agent 开始抓包上报。"
+chmod +x "$BIN_DIR/gt-agent"
+echo "已在 %s 完成安装。执行 gt-agent 开始抓包上报。"
 `, code, m.baseURL(r), code, platform, m.baseURL(r), code, "$BIN_DIR")
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -1024,13 +1024,13 @@ func linuxAmd64Platform() string { return "linux/amd64" }
 
 - [ ] **Step 4: 编译 + 测试**
 
-Run: `go build ./cmd/gta-mcp`  
+Run: `go build ./cmd/gt-mcp`  
 Expected: 通过。测试：`TestSetupScriptSnippet` 断言返回含 `CODE=` 与 `/access/claim?code=`。
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add cmd/gta-mcp/access_code.go cmd/gta-mcp/main.go cmd/gta-mcp/access_claim_test.go
+git add cmd/gt-mcp/access_code.go cmd/gt-mcp/main.go cmd/gt-mcp/access_claim_test.go
 git commit -m "feat(mcp): /setup.sh one-liner install script for curl|bash"
 ```
 
@@ -1043,7 +1043,7 @@ git commit -m "feat(mcp): /setup.sh one-liner install script for curl|bash"
 
 - [x] **Step 1: 更新上手指南**
 
-改写为「启动码优先」：查看网页『我的接入』→ 复制 Linux `curl|bash` 命令或下载 Windows zip → 输入启动码 GTA-XXXX-XXXX → agent 自动注册/取配置/回连。保留高级（自定义下载/开发者工具）简介。
+改写为「启动码优先」：查看网页『我的接入』→ 复制 Linux `curl|bash` 命令或下载 Windows zip → 输入启动码 GT-XXXX-XXXX → agent 自动注册/取配置/回连。保留高级（自定义下载/开发者工具）简介。
 
 - [ ] **Step 2: 提交**
 

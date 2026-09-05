@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/plugindev"
+	"gametrace/pkg/plugindev"
 )
 
 func writeFile(t *testing.T, path, content string, mod time.Time) {

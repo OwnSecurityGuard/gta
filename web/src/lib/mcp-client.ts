@@ -16,12 +16,12 @@ export class AuthError extends Error {
 function syncIdentityFromHeaders(headers: {
   get(k: string): string | null;
 }): void {
-  const owner = headers.get("X-GTA-Owner");
+  const owner = headers.get("X-GT-Owner");
   if (!owner) {
     setIdentity(null);
     return;
   }
-  setIdentity({ owner, isAdmin: headers.get("X-GTA-Admin") === "true" });
+  setIdentity({ owner, isAdmin: headers.get("X-GT-Admin") === "true" });
 }
 
 /**
@@ -46,7 +46,7 @@ export class McpClient {
   /**
    * 自助注册：完全的新用户免邀请获取独立身份（POST /access/register）。
    * 返回的 token 与邀请凭证同待遇 —— 仅此一次展示，由调用方立即保存。
-   * 服务端关闭注册（GTA_AUTH_REGISTER=off / 匿名模式）时返回 403。
+   * 服务端关闭注册（GT_AUTH_REGISTER=off / 匿名模式）时返回 403。
    */
   async register(name: string): Promise<{ owner: string; token: string }> {
     // baseUrl 形如 "/mcp"（走同源代理）或 "http://host:8781/mcp"（直连）：

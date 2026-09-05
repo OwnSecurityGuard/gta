@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // eventScanner 抽象 *sql.Rows 与 *sql.Row，避免 Event scan 逻辑重复。

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"gta/pkg/capture"
-	"gta/pkg/capture/internal/base"
-	"gta/pkg/event"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/capture/internal/base"
+	"gametrace/pkg/event"
 )
 
 func init() {
@@ -85,7 +85,7 @@ func (s *fakeSource) Close() error { return s.Lifecycle.Close() }
 func (s *fakeSource) Stats() capture.Stats { return s.StatTracker.Stats() }
 
 // MustRegister 在测试中使用，确保 fake source 已注册。
-// 正常程序入口应通过 import _ "gta/pkg/capture/fake" 触发 init。
+// 正常程序入口应通过 import _ "gametrace/pkg/capture/fake" 触发 init。
 func MustRegister() {
 	// init 已经注册，这里仅做占位，方便测试代码显式表达依赖。
 }

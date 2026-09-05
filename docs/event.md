@@ -1,8 +1,8 @@
-# GTA Event Model Design Specification
+# GameTrace Event Model Design Specification
 
 **Version:** v1.0 Draft
 **Status:** Proposed
-**Purpose:** Define the core event model used by GTA data pipeline, event storage, MCP query, replay, and analysis systems.
+**Purpose:** Define the core event model used by GameTrace data pipeline, event storage, MCP query, replay, and analysis systems.
 
 > ⚠️ 本文是设计稿，部分 DDL 已落后于实现（如缺 `context` 列、`origin_id` 索引）。
 > 线上真实 schema 以 `pkg/store` 建表代码为唯一事实来源。
@@ -11,7 +11,7 @@
 
 # 1. Overview
 
-GTA uses an event-centric architecture.
+GameTrace uses an event-centric architecture.
 
 The core principle:
 
@@ -896,7 +896,7 @@ These should be extensions and must not violate the immutable Event core model.
 
 # Conclusion
 
-GTA Event Model is based on:
+GameTrace Event Model is based on:
 
 * Event Sourcing principles
 * Immutable facts

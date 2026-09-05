@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"gta/pkg/event"
-	"gta/pkg/schema"
-	"gta/pkg/capture"
+	"gametrace/pkg/event"
+	"gametrace/pkg/schema"
+	"gametrace/pkg/capture"
 
 	"github.com/google/uuid"
 )
@@ -543,9 +543,9 @@ func (s *PGStore) WriteMetrics(ctx context.Context, metrics []event.Metric) erro
 	}
 	defer tx.Rollback()
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO aggregated_metrics(session_id, name, window, group_json, value)
+		INSERT INTO aggregated_metrics(session_id, name, "window", group_json, value)
 		VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT(session_id, name, window, group_json) DO UPDATE SET value = EXCLUDED.value`)
+		ON CONFLICT(session_id, name, "window", group_json) DO UPDATE SET value = EXCLUDED.value`)
 	if err != nil {
 		return fmt.Errorf("prepare stmt: %w", err)
 	}
@@ -639,11 +639,11 @@ func (s *PGStore) WriteEnrichedStateChanges(ctx context.Context, sessionID strin
 
 func (s *PGStore) QueryMetrics(ctx context.Context, q MetricQuery) ([]MetricRow, error) {
 	var a pgArgs
-	query := `SELECT name, window, group_json, value FROM aggregated_metrics WHERE session_id = ` + a.next(s.sessionID)
+	query := `SELECT name, "window", group_json, value FROM aggregated_metrics WHERE session_id = ` + a.next(s.sessionID)
 	if q.Name != "" {
 		query += ` AND name = ` + a.next(q.Name)
 	}
-	query += ` ORDER BY window ASC` + a.limitOffset(q.Limit, q.Offset)
+	query += ` ORDER BY "window" ASC` + a.limitOffset(q.Limit, q.Offset)
 	rows, err := s.db.QueryContext(ctx, query, a.slice()...)
 	if err != nil {
 		return nil, fmt.Errorf("query metrics: %w", err)

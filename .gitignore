@@ -42,7 +42,7 @@ vendor/
 dist/
 build/
 
-# docker compose 的本地环境文件（含 GTA_AUTH_TOKENS 真实密钥，绝不能入库）；
+# docker compose 的本地环境文件（含 GT_AUTH_TOKENS 真实密钥，绝不能入库）；
 # 只提交模板 .env.example。
 .env
 .env.*.local

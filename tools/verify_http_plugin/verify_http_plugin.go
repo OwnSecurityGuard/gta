@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	_ "modernc.org/sqlite"
 
-	pb "gta/pkg/internalipc/proto"
+	pb "gametrace/pkg/internalipc/proto"
 )
 
 // verify_plugin is a dev harness that captures live traffic for a given plugin

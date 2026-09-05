@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"gta/pkg/event"
-	"gta/pkg/schema"
+	"gametrace/pkg/event"
+	"gametrace/pkg/schema"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"

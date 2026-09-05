@@ -1,4 +1,4 @@
-// Command http-decoder is a GTA decoder plugin for the examples/http traffic.
+// Command http-decoder is a GameTrace decoder plugin for the examples/http traffic.
 //
 // Pipeline: capture frame -> framing.ExtractL7 -> framing.Reassembler ->
 // HTTP message -> envelope semantics -> event. It decodes HTTP/1.1 requests

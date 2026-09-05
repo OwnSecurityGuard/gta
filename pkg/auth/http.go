@@ -5,10 +5,10 @@ import (
 )
 
 // 身份回显响应头。跨域直连时默认不对页面 JS 暴露，需在 CORS
-// Access-Control-Expose-Headers 中放行（见 cmd/gta-mcp/http_server.go）。
+// Access-Control-Expose-Headers 中放行（见 cmd/gt-mcp/http_server.go）。
 const (
-	HeaderOwner = "X-GTA-Owner"
-	HeaderAdmin = "X-GTA-Admin"
+	HeaderOwner = "X-GT-Owner"
+	HeaderAdmin = "X-GT-Admin"
 )
 
 // Middleware 是 MCP HTTP 侧的鉴权中间件，校验 Authorization: Bearer <token>。
@@ -25,7 +25,7 @@ func Middleware(r Resolver, next http.Handler) http.Handler {
 		p, ok := r.Resolve(token)
 		if !ok {
 			// 带上 WWW-Authenticate，否则客户端不知道该用什么方式认证。
-			w.Header().Set("WWW-Authenticate", `Bearer realm="gta"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="gametrace"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

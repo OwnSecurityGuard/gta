@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Create `plugins/http` — a V1 JSON decoder plugin that parses HTTP request/response payloads from TCP packets and emits structured events for the GTA pipeline.
+**Goal:** Create `plugins/http` — a V1 JSON decoder plugin that parses HTTP request/response payloads from TCP packets and emits structured events for the GameTrace pipeline.
 
 **Architecture:** A standalone Go binary using `pkg/plugin/sdk`. It listens on a gRPC Decoder endpoint, registers with the pipeline registry, and decodes each packet payload via `http.ReadRequest` / `http.ReadResponse`. Output follows the V1 JSON contract (`data` + `_fields`).
 
@@ -23,7 +23,7 @@ name: http
 protocol: http
 type: decoder
 meta:
-  author: gta
+  author: gametrace
   description: Simple HTTP request/response decoder with body capture.
 event:
   fields:
@@ -76,8 +76,8 @@ import (
 	"os"
 	"strings"
 
-	"gta/pkg/plugin/proto"
-	"gta/pkg/plugin/sdk"
+	"gametrace/pkg/plugin/proto"
+	"gametrace/pkg/plugin/sdk"
 )
 
 const maxBodyBytes = 64 * 1024
@@ -239,11 +239,11 @@ module http
 go 1.25.5
 
 require (
-	gta v0.0.0
+	gametrace v0.0.0
 	gta-plugin-sdk v0.0.0
 )
 
-replace gta => ../..
+replace gametrace => ../..
 replace gta-plugin-sdk => ../../pkg/plugin/sdk
 ```
 

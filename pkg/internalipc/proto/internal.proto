@@ -1,9 +1,9 @@
 syntax = "proto3";
 
-package gta.internalipc;
-option go_package = "gta/pkg/internalipc/proto";
+package gametrace.internalipc;
+option go_package = "gametrace/pkg/internalipc/proto";
 
-// CaptureControl 由 gta-pipeline 进程提供，gta-mcp 作为 client 调用。
+// CaptureControl 由 gt-pipeline 进程提供，gt-mcp 作为 client 调用。
 // 仅控制面 unary RPC，无 streaming。数据面走 SQLite。
 service CaptureControl {
   // StartCapture 启动一次抓包会话。
@@ -36,18 +36,18 @@ service CaptureControl {
   // 该能力不暴露原始包，因此无需 --enable-raw-debug 门控。
   rpc TestPlugin(TestPluginRequest) returns (TestPluginResponse);
   // Verify 用指定插件对离线会话的 raw_packets 解码并做契约+质量校验，
-  // 产出 violations（引 SDK checker，带 rule_id）+ quality（gta 统计）+ verdict。
+  // 产出 violations（引 SDK checker，带 rule_id）+ quality（gametrace 统计）+ verdict。
   // 仅统计不落库；validated 证明写入 Developer Plane 的 Tracker（跨平面）。
   rpc Verify(VerifyRequest) returns (VerifyResponse);
   // SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
   // 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
   rpc SampleBytes(SampleBytesRequest) returns (SampleBytesResponse);
   // GetRegistryAddr 返回插件应连接注册中心地址（即 -registry-addr 的值，如 :9091）。
-  // gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
+  // gt-mcp 与插件启动时需要此地址填入 GT_REGISTRY_ADDR；此前只能由人工从
   // 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
   rpc GetRegistryAddr(GetRegistryAddrRequest) returns (GetRegistryAddrResponse);
   // CreateProxyLease 为调用方创建一个代理抓包租约：独立 mobile 抓包会话 +
-  // 独立 gta-singbox-agent 进程（各自独立端口与筛选配置），手机连 agent 的
+  // 独立 gt-singbox-agent 进程（各自独立端口与筛选配置），手机连 agent 的
   // listen 端口。会话停止时租约自动回收（杀 agent、释放端口）。
   rpc CreateProxyLease(CreateProxyLeaseRequest) returns (CreateProxyLeaseResponse);
   // ListProxyLeases 列出调用方可见的租约（admin 全可见，同 ListPlugins 语义）。
@@ -58,7 +58,7 @@ service CaptureControl {
   rpc ReleaseProxyLease(ReleaseProxyLeaseRequest) returns (ReleaseProxyLeaseResponse);
   // StartLeaseCapture 在常驻租约上开一次新的抓包会话。
   //
-  // ---- Probe 管理（探针注册/状态/控制全部在 pipeline 侧，gta-mcp 代理调用）----
+  // ---- Probe 管理（探针注册/状态/控制全部在 pipeline 侧，gt-mcp 代理调用）----
   // 探针是个人资源：owner 校验在 pipeline 侧做 creator 轴判定（本人或 admin）。
   rpc ListProbes(ListProbesRequest) returns (ListProbesResponse);
   rpc GetProbe(GetProbeRequest) returns (GetProbeResponse);
@@ -168,7 +168,7 @@ message VerifyViolation {
   string sample = 7;
 }
 
-// VerifyQuality gta 侧语料级统计（与 plugin.explain 共享判据）。
+// VerifyQuality gametrace 侧语料级统计（与 plugin.explain 共享判据）。
 message VerifyQuality {
   int64 total_inputs = 1;
   int64 unknown_inputs = 2;
@@ -235,8 +235,8 @@ message PcapFileConfig {
   string path = 1;
 }
 
-// MobileSourceConfig 启动移动代理抓包（gta-singbox-agent 推送）。
-// 监听地址形如 "127.0.0.1:9090"（tcp）或 "unix:///tmp/gta-mobile.sock"（unix）。
+// MobileSourceConfig 启动移动代理抓包（gt-singbox-agent 推送）。
+// 监听地址形如 "127.0.0.1:9090"（tcp）或 "unix:///tmp/gt-mobile.sock"（unix）。
 message MobileSourceConfig {
   string listen_addr = 1;   // gRPC 服务监听地址，agent 连这里
 }
@@ -250,18 +250,18 @@ message StartCaptureRequest {
     PcapFileConfig file = 5;
     MobileSourceConfig mobile = 6;
   }
-  // agent 为 true 时本会话订阅 agent capture source（gta-agent 经 AgentIngest
+  // agent 为 true 时本会话订阅 agent capture source（gt-agent 经 AgentIngest
   // 按 session_id 推送原始帧）。可与 oneof source 组合（同时抓网卡等）；
   // 单独为 true 且无 oneof source 时表示纯 agent 会话。
   bool agent = 7;
-  // 调用方身份（gta-mcp 从 HTTP auth ctx 提取后透传，见 ListPluginsRequest）。
+  // 调用方身份（gt-mcp 从 HTTP auth ctx 提取后透传，见 ListPluginsRequest）。
   // pipeline 用它记录会话归属（ControlStore SessionMeta.Owner / captureTask.owner）。
   string owner = 8;
   bool all_owners = 9;
-  // 会话归属的项目（projects.id），可选。gta-mcp 从 HTTP 入参透传。
+  // 会话归属的项目（projects.id），可选。gt-mcp 从 HTTP 入参透传。
   string project_id = 10;
   // plugin_owners 是允许按名解析解码插件的额外 owner 集合（除会话 owner 外）。
-  // gta-mcp 依据"调用者所属项目的插件条目归属"计算；用于项目成员共用项目插件。
+  // gt-mcp 依据"调用者所属项目的插件条目归属"计算；用于项目成员共用项目插件。
   repeated string plugin_owners = 11;
 }
 
@@ -338,7 +338,7 @@ message CaptureSessionSummary {
 // ---- Plugin Management ----
 
 // ListPluginsRequest 列出已注册插件。owner/all_owners 来自调用方身份
-// （gta-mcp 从 HTTP auth ctx 提取后透传）：非 admin 只见自己的 + 匿名注册的
+// （gt-mcp 从 HTTP auth ctx 提取后透传）：非 admin 只见自己的 + 匿名注册的
 // 插件；all_owners=true（admin）见全部；两者均空 = 匿名/本地语境（只见匿名插件）。
 message ListPluginsRequest {
   string owner = 1;
@@ -420,8 +420,8 @@ message PluginEvent {
 message GetRegistryAddrRequest {}
 
 // GetRegistryAddrResponse 返回插件应连接的注册中心地址。
-// registry_addr 即 gta-pipeline 的 -registry-addr（如 :9091），插件启动时必须
-// 将其填入 GTA_REGISTRY_ADDR 才能向运行时注册。空字符串表示 pipeline 未配置注册中心。
+// registry_addr 即 gt-pipeline 的 -registry-addr（如 :9091），插件启动时必须
+// 将其填入 GT_REGISTRY_ADDR 才能向运行时注册。空字符串表示 pipeline 未配置注册中心。
 message GetRegistryAddrResponse {
   string registry_addr = 1;
 }
@@ -429,7 +429,7 @@ message GetRegistryAddrResponse {
 // ---- Proxy Lease（按用户/设备的常驻代理出口 + 可切换抓包会话）----
 //
 // 租约（出口）与抓包会话的生命周期解耦：
-//   - 租约 = 常驻 gta-singbox-agent 进程 + 固定的手机 CONNECT 端口，
+//   - 租约 = 常驻 gt-singbox-agent 进程 + 固定的手机 CONNECT 端口，
 //     创建后端口不再变化（同一二维码长期有效，VPN 无需重连）；
 //   - 抓包会话 = 一次 StartLeaseCapture/StopLeaseCapture，各自独立 session_id、
 //     独立 SQLite、独立 mobile source，互不串数据。
@@ -437,15 +437,15 @@ message GetRegistryAddrResponse {
 
 // CreateProxyLeaseRequest 创建代理出口。plugin/include_hosts/include_ports
 // 为该租约私有（不影响其他租约）；device 是设备标签；owner/all_owners 由
-// gta-mcp 从 auth ctx 透传（同 StartCaptureRequest），pipeline 记录归属。
+// gt-mcp 从 auth ctx 透传（同 StartCaptureRequest），pipeline 记录归属。
 message CreateProxyLeaseRequest {
   string plugin = 1;                 // 租约会话绑定的解码插件（空=仅原始包）
   repeated string include_hosts = 2; // 连接筛选：目标主机（空=不筛选）
   repeated int32 include_ports = 3;  // 连接筛选：目标端口（空=不筛选）
   string device = 4;                 // 设备标签，如 "alice-phone"（可选）
   string project_id = 5;             // 归属项目（可选）
-  string owner = 6;                  // gta-mcp 透传的调用方属主
-  bool all_owners = 7;               // gta-mcp 透传（admin）
+  string owner = 6;                  // gt-mcp 透传的调用方属主
+  bool all_owners = 7;               // gt-mcp 透传（admin）
   // no_auto_start 为 true 时只创建常驻出口、不立即开始抓包（等
   // StartLeaseCapture）。默认 false = 创建后立刻开始抓包（保持既有行为）。
   // 取反命名是 proto3 默认值所限：bool 只能是 false，无法表达"默认 true"。
@@ -535,8 +535,8 @@ message StartLeaseCaptureRequest {
   string plugin = 2;                 // 可选覆盖：本次抓包绑定的解码插件
   repeated string include_hosts = 3; // 可选覆盖：连接筛选（目标主机）
   repeated int32 include_ports = 4;  // 可选覆盖：连接筛选（目标端口）
-  string owner = 5;                  // gta-mcp 透传的调用方属主
-  bool all_owners = 6;               // gta-mcp 透传（admin）
+  string owner = 5;                  // gt-mcp 透传的调用方属主
+  bool all_owners = 6;               // gt-mcp 透传（admin）
   repeated string plugin_owners = 7; // 允许的额外插件 owner 集合（语义同 StartCaptureRequest）
 }
 
@@ -564,8 +564,8 @@ message StopLeaseCaptureResponse {
 }
 
 // ============================================================================
-// Probe 管理（gta-mcp 代理调用；探针身份、控制通道与状态全部在 pipeline 侧）。
-// owner/all_owners 语义同 ListPlugins：gta-mcp 从 HTTP auth ctx 透传，
+// Probe 管理（gt-mcp 代理调用；探针身份、控制通道与状态全部在 pipeline 侧）。
+// owner/all_owners 语义同 ListPlugins：gt-mcp 从 HTTP auth ctx 透传，
 // pipeline 据此做 creator 轴过滤（探针是个人资源，仅注册者本人可见可用）。
 // ============================================================================
 
@@ -606,7 +606,7 @@ message ProbeInfo {
 }
 
 message ListProbesRequest {
-  string owner = 1;                  // gta-mcp 透传
+  string owner = 1;                  // gt-mcp 透传
   bool all_owners = 2;               // admin 全量
 }
 message ListProbesResponse { repeated ProbeInfo probes = 1; }
@@ -631,7 +631,7 @@ message ProbeStartCaptureRequest {
 }
 message ProbeStartCaptureResponse {
   string session_id = 1;
-  // db_path 是新会话 capture.sqlite 的绝对路径（gta-mcp 写本地 metadata.json 用）。
+  // db_path 是新会话 capture.sqlite 的绝对路径（gt-mcp 写本地 metadata.json 用）。
   string db_path = 2;
 }
 

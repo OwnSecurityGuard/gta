@@ -1,7 +1,7 @@
 package plugindev
 
 // VerifyResult is the output of plugin.verify (P4). It carries the SDK contract
-// violations (each tagged with a contract.yaml rule_id), the gta-side quality
+// violations (each tagged with a contract.yaml rule_id), the gt-side quality
 // statistics computed over the real decode corpus, and an overall verdict.
 //
 // plugin.explain (P3b) consumes a VerifyResult to attribute decode-class
@@ -13,7 +13,7 @@ type VerifyResult struct {
 	// Violations are SDK checker results (single-message protocol
 	// self-consistency), each referencing a contract.yaml rule_id.
 	Violations []*Violation
-	// Quality is the gta-side statistical view over the whole corpus (good-vs-bad
+	// Quality is the gt-side statistical view over the whole corpus (good-vs-bad
 	// judgement, which needs real traffic and therefore cannot run offline in
 	// the plugin module — design §5).
 	Quality *QualityStats

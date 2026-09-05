@@ -6,7 +6,7 @@ import (
 )
 
 // DBResolver 从持久化用户表（users）解析身份：邀请制身份发放的运行时侧。
-// 与 StaticResolver（GTA_AUTH_TOKENS bootstrap）组合使用，见 FirstResolver。
+// 与 StaticResolver（GT_AUTH_TOKENS bootstrap）组合使用，见 FirstResolver。
 //
 // 故意每次请求都查库：控制面 QPS 极低（人手操作 + agent 回连），换来的是
 // 邀请发放 / 撤销即时生效，无需重启。token 是 256bit 随机值，走主键等值查询。

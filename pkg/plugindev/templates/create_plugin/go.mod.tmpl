@@ -6,7 +6,7 @@ require (
 	github.com/OwnSecurityGuard/gta-plugin-sdk {{.SDKVersion}}
 )
 
-// 该插件只依赖已发布的 github.com/OwnSecurityGuard/gta-plugin-sdk，不依赖 gta 源码树。
+// 该插件只依赖已发布的 github.com/OwnSecurityGuard/gta-plugin-sdk，不依赖 gametrace 源码树。
 // 版本 {{.SDKVersion}} 由脚手架单一事实来源固定（与开发指南/SDK 同版本发布）。
 // 发布/获取 SDK：go get github.com/OwnSecurityGuard/gta-plugin-sdk@{{.SDKVersion}}（或你们的模块代理）。
 // 本地开发时临时加 replace 调试：go mod edit -replace github.com/OwnSecurityGuard/gta-plugin-sdk=<sdk路径>

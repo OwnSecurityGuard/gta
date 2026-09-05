@@ -12,11 +12,11 @@
 
 | 对象 | 位置 | 备注 |
 |---|---|---|
-| `projects` 表 | `control.sqlite`（SQLite） | `cmd/gta-mcp/project_store.go:66`，**MCP 进程独占** |
+| `projects` 表 | `control.sqlite`（SQLite） | `cmd/gt-mcp/project_store.go:66`，**MCP 进程独占** |
 | `sessions` 表 | `control.sqlite` + PG（`pg_schema.go:123`） | 双后端，均有 `project_id TEXT NOT NULL DEFAULT ''` |
-| 会话元数据副本 | `sessions/<id>/metadata.json` | `cmd/gta-mcp/main.go:286` listSessions 走文件系统 |
+| 会话元数据副本 | `sessions/<id>/metadata.json` | `cmd/gt-mcp/main.go:286` listSessions 走文件系统 |
 
-关键事实：**PG 后端没有 `projects` 表**。`projectStore` 活在 `cmd/gta-mcp`（package main），不在 `pkg/store`。
+关键事实：**PG 后端没有 `projects` 表**。`projectStore` 活在 `cmd/gt-mcp`（package main），不在 `pkg/store`。
 
 ### 0.2 实测数据量（2026-09-05）
 
@@ -171,7 +171,7 @@ type Authorizer interface {
 ```
 
 **修正 2：规则与数据分离，避免包循环。**
-`authz` 包放**纯策略**（不 import store、不查 DB）；`cmd/gta-mcp` 里的实现负责解析 role。这样规则 100% 可单测，且 `authz` 不依赖任何存储。
+`authz` 包放**纯策略**（不 import store、不查 DB）；`cmd/gt-mcp` 里的实现负责解析 role。这样规则 100% 可单测，且 `authz` 不依赖任何存储。
 
 ```go
 // pkg/authz/policy.go —— 纯函数，无 IO
@@ -188,7 +188,7 @@ func Decide(p Principal, a Action, r Resource, role Role) error
 ```
 
 ```go
-// cmd/gta-mcp/authz.go —— 组合 projectStore，只做 role 解析
+// cmd/gt-mcp/authz.go —— 组合 projectStore，只做 role 解析
 type projectAuthorizer struct{ projects *projectStore }
 
 func (a *projectAuthorizer) Can(ctx context.Context, act authz.Action, res authz.Resource) error {
@@ -234,7 +234,7 @@ Actor 层级：`Global Admin → Project Owner → Project Admin → Project Mem
 
 ### 3.3 防"新 handler 忘记鉴权"的真正机制
 
-AuthZ 层本身防不住遗忘。加一个 AST 静态护栏测试（`cmd/gta-mcp/authz_guard_test.go`，约 60 行）：
+AuthZ 层本身防不住遗忘。加一个 AST 静态护栏测试（`cmd/gt-mcp/authz_guard_test.go`，约 60 行）：
 
 1. `go/parser` 扫描本包所有 `func (m *mcpCapture) handleXxx`；
 2. 命中敏感工具名集合（`*session*`、`*project*`、`*lease*`、`*plugin*`、`*access_code*`）的函数，函数体内必须出现 `authz.Can` / `.Can(` 调用；
@@ -277,7 +277,7 @@ ALTER TABLE projects ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
 
 ### 4.4 Tenant：分两步，本次只落字段
 
-同意你的判断 —— `owner` 是"人"不是"组织"，同一个 Alice 无法分属 Company A / B。但现在**没有任何 tenant 来源**：`GTA_AUTH_TOKENS` 格式是 `owner=token[:admin]`，token 里不带组织信息。`pkg/auth.Principal` 只有 `Owner` + `IsAdmin`。
+同意你的判断 —— `owner` 是"人"不是"组织"，同一个 Alice 无法分属 Company A / B。但现在**没有任何 tenant 来源**：`GT_AUTH_TOKENS` 格式是 `owner=token[:admin]`，token 里不带组织信息。`pkg/auth.Principal` 只有 `Owner` + `IsAdmin`。
 
 建议：
 
@@ -345,7 +345,7 @@ func (m *mcpCapture) moveSessionToProject(ctx, sessionID, targetProjectID string
 | D2 | `sessions.project_id` | **保持 `NOT NULL DEFAULT ''`，`''` ≡ NULL** | 改 nullable（需重建表） |
 | D3 | Owner 存储 | **`projects.owner` 字段，members 表只存 admin/member** | members 表存 `role='owner'` |
 | D4 | Tenant | **本次只落字段 + 比较逻辑，不做实体** | 一并做 organization 表 |
-| D5 | `projectStore` 位置 | **不动，留在 `cmd/gta-mcp`**（PG 无 projects 表，抽象不成立） | 挪到 `pkg/store` 并补 PG |
+| D5 | `projectStore` 位置 | **不动，留在 `cmd/gt-mcp`**（PG 无 projects 表，抽象不成立） | 挪到 `pkg/store` 并补 PG |
 | D6 | plugins / rules | **暂不表化** | 一并拆表 |
 | D7 | access_code Action | **加 `ActionAccessCodeCreate/Claim`**（`/access/claim` 会吐长期 token，属高敏感） | 维持现状 |
 | D8 | Owner 转移留痕 | **先 slog，不建审计表**（目前无消费方，落表即死数据） | 建 `project_audit` 表 |

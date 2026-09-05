@@ -1,4 +1,4 @@
-# GTA 分析规则编写指南（rules.yaml）
+# GameTrace 分析规则编写指南（rules.yaml）
 
 **目的**：让 AI（或人工）能够为 `analyze` 流式分析引擎扩展规则，而不必阅读 `pkg/analyze/rule.go` 源码。
 **来源（SSOT）**：`pkg/analyze/rule.go`（`RawRule` / `CompileRule`）与 `pkg/analyze/engine.go`（`Process` 的 expr 运行环境）。本文件是对它们的可读转述，若与代码冲突以代码为准。
@@ -8,8 +8,8 @@
 ## 1. 规则存在哪里、如何生效
 
 - 规则写在仓库根目录的 `rules.yaml`，结构为 `rules:` 列表。
-- 由 `gta-pipeline` 在**启动时加载并编译**（`CompileRule`）。编译失败会在启动日志报错，对应规则不生效。
-- 修改 `rules.yaml` 后**需要重启 `gta-pipeline`** 才能生效。
+- 由 `gt-pipeline` 在**启动时加载并编译**（`CompileRule`）。编译失败会在启动日志报错，对应规则不生效。
+- 修改 `rules.yaml` 后**需要重启 `gt-pipeline`** 才能生效。
 - 验证：重启后用 MCP 工具 `aggregate_query` 查询对应 `output` 指标，确认有数据返回。
 
 当前仓库内的真实示例（`rules.yaml`）：
@@ -86,7 +86,7 @@ rules:
 4. 写 `group_by`（如 `[data.method]`）或留空。
 5. `sum` 时写 `value`（如 `data.size`）。
 6. 取一个唯一的 `output` 名。
-7. 加进 `rules.yaml`，**重启 `gta-pipeline`**。
+7. 加进 `rules.yaml`，**重启 `gt-pipeline`**。
 8. 用 `aggregate_query(expression=<output>)` 断言返回 `{name, window, value, group}`，确认规则生效。
 
 常见错误：

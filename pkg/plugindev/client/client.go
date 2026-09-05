@@ -1,6 +1,6 @@
-// Package client is the gta-mcp side of the Developer Plane: a thin gRPC
+// Package client is the gt-mcp side of the Developer Plane: a thin gRPC
 // adapter that lets the MCP layer call pkg/plugindev without knowing anything
-// about the transport or the filesystem. This is what keeps gta-mcp free of
+// about the transport or the filesystem. This is what keeps gt-mcp free of
 // exec.Command and os.WriteFile — every implementation routes through the
 // PluginDev gRPC service.
 package client
@@ -9,10 +9,10 @@ import (
 	"context"
 
 	"google.golang.org/grpc"
-	pb "gta/pkg/plugindev/proto"
+	pb "gametrace/pkg/plugindev/proto"
 )
 
-// PluginDev is the subset of the Developer Plane gta-mcp forwards to. Keeping
+// PluginDev is the subset of the Developer Plane gt-mcp forwards to. Keeping
 // it an interface (rather than a raw gRPC client) makes the MCP handlers
 // trivially testable with an in-memory fake.
 type PluginDev interface {

@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package gta.mobile;
+package gametrace.mobile;
 
-option go_package = "gta/pkg/capture/mobile/proto";
+option go_package = "gametrace/pkg/capture/mobile/proto";
 
-// MobileCapture 由 gta-pipeline 的 mobile capture source 提供（gRPC server）。
-// gta-singbox-agent（sing-box 侧）作为 client 连接并推送连接级流量。
+// MobileCapture 由 gt-pipeline 的 mobile capture source 提供（gRPC server）。
+// gt-singbox-agent（sing-box 侧）作为 client 连接并推送连接级流量。
 // 全连接共用一条流，靠 conn_id 区分；服务端按 (conn_id, direction) 归组，
 // 但**不做**应用层分帧/重组——每个数据块原样透传为 packet，帧边界由解码插件判定。
 service MobileCapture {

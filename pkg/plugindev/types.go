@@ -1,9 +1,9 @@
 // Package plugindev is the Developer Plane: it owns the filesystem and
 // subprocesses needed to scaffold, build, discover, activate and deactivate
 // decoder plugins. It deliberately contains no gRPC or MCP code — those layers
-// live in pkg/plugindev/server and cmd/gta-mcp respectively — so the same logic
-// can run in-process (embedded in gta-mcp for dev) or as a separate
-// gta-plugin-dev binary for physical isolation in production.
+// live in pkg/plugindev/server and cmd/gt-mcp respectively — so the same logic
+// can run in-process (embedded in gt-mcp for dev) or as a separate
+// gt-plugin-dev binary for physical isolation in production.
 package plugindev
 
 import "time"

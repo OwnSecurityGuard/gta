@@ -35,7 +35,7 @@ jobs:
             exit $code
           fi
 
-  # gen_tool_table 只依赖标准库（go/ast 解析 cmd/gta-mcp/main.go），
+  # gen_tool_table 只依赖标准库（go/ast 解析 cmd/gt-mcp/main.go），
   # 不 import gta-plugin-sdk，无需 go.work / SDK checkout，保持原样。
   readme-drift:
     runs-on: ubuntu-latest
@@ -44,7 +44,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-      # 钉死 README 工具表与 cmd/gta-mcp/main.go 的 AddTool 一致。
+      # 钉死 README 工具表与 cmd/gt-mcp/main.go 的 AddTool 一致。
       - name: Regenerate tool table
         run: go run ./scripts/gen_tool_table
       - name: No drift
@@ -54,7 +54,7 @@ jobs:
   # release（T16）：tag push（v*）时交叉编译全平台产物并上传 GitHub Release。
   # 产物由 make release-matrix 生成（见 Makefile T14 注释：CGO_ENABLED=0 交叉
   # 编译，windows/amd64、linux/amd64、linux/arm64、darwin/arm64 四平台 ×
-  # gta-pipeline/gta-mcp/gta-agent 三二进制）。
+  # gt-pipeline/gt-mcp/gt-agent 三二进制）。
   # ============================================================================
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -66,7 +66,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-      # release-matrix 前置依赖 web-build：gta-mcp 产物内嵌前端（需要 node）。
+      # release-matrix 前置依赖 web-build：gt-mcp 产物内嵌前端（需要 node）。
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

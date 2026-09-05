@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gta/pkg/schema"
+	"gametrace/pkg/schema"
 
 	sdk "github.com/OwnSecurityGuard/gta-plugin-sdk"
 	sdkschema "github.com/OwnSecurityGuard/gta-plugin-sdk/schema"

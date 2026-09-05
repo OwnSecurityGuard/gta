@@ -3,12 +3,12 @@
 // The SDK's contract checker owns single-message protocol self-consistency
 // (input_id echo, done lifecycle, payload non-empty) — it can run offline in a
 // plugin's own unit tests. This package owns the batch statistical quality:
-// given a whole decode corpus it produces the gta-side QualityStats and merges
+// given a whole decode corpus it produces the gt-side QualityStats and merges
 // them with the SDK violations into a single plugindev.VerifyResult + verdict.
 //
 // The split follows the design's dividing line: "can a plugin author run it
 // offline with only the SDK?" — yes for the checker, no for the corpus-level
-// statistics, so the latter lives here in gta.
+// statistics, so the latter lives here in gametrace.
 package quality
 
 import (
@@ -18,7 +18,7 @@ import (
 	sdkcontract "github.com/OwnSecurityGuard/gta-plugin-sdk/contract"
 	sdkpb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
 
-	"gta/pkg/plugindev"
+	"gametrace/pkg/plugindev"
 )
 
 // DecodeIO is one decode input/output pair reduced to the fields the verify
@@ -52,7 +52,7 @@ type packetAgg struct {
 }
 
 // Verify runs the SDK contract checker over every DecodeIO and merges the
-// results with gta-side statistical quality into a single VerifyResult.
+// results with gt-side statistical quality into a single VerifyResult.
 func Verify(corpus []DecodeIO) *plugindev.VerifyResult {
 	res := &plugindev.VerifyResult{Verdict: "pass", Quality: &plugindev.QualityStats{}}
 	if len(corpus) == 0 {
@@ -99,7 +99,7 @@ func Verify(corpus []DecodeIO) *plugindev.VerifyResult {
 		res.Violations = append(res.Violations, viol[id])
 	}
 
-	// 2) gta-side quality statistics, aggregated per packet (InputID) so that a
+	// 2) gt-side quality statistics, aggregated per packet (InputID) so that a
 	//    packet's terminating done-response is not double-counted as "unknown".
 	q := res.Quality
 	agg := map[string]*packetAgg{}

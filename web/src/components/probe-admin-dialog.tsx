@@ -62,7 +62,7 @@ function ProbeStatusLine({ p }: { p: ProbeInfo }) {
             : "bg-muted text-muted-foreground"
         }`}
       >
-        {conn && <span className="gta-live-dot" />}
+        {conn && <span className="gt-live-dot" />}
         {conn ? "在线" : "离线"}
       </span>
       <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
@@ -196,7 +196,7 @@ export function ProbeAdminDialog({ open, onClose, onImported }: ProbeAdminDialog
           </div>
         ) : probes.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border bg-muted/40 px-3 py-6 text-center text-sm text-muted-foreground">
-            还没有探针接入。通过顶部「接入设备」生成启动码，在成员机上运行 gta-agent 完成接入。
+            还没有探针接入。通过顶部「接入设备」生成启动码，在成员机上运行 gt-agent 完成接入。
           </div>
         ) : (
           probes.map((p) => {
@@ -340,7 +340,7 @@ export function ProbeAdminDialog({ open, onClose, onImported }: ProbeAdminDialog
                         {archiveData?.from_cache ? "缓存中没有留存段。" : "该探针暂无本地留存数据。"}
                       </p>
                     ) : (
-                      <div className="max-h-40 space-y-1 overflow-auto gta-scroll">
+                      <div className="max-h-40 space-y-1 overflow-auto gt-scroll">
                         {segments.map((s) => (
                           <div
                             key={s.seg_id}

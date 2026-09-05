@@ -98,7 +98,7 @@ export function Dialog({
     >
       {/* 遮罩 */}
       <div
-        className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px] gta-fade-in"
+        className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px] gt-fade-in"
         onClick={onClose}
       />
 
@@ -107,7 +107,7 @@ export function Dialog({
         ref={panelRef}
         tabIndex={-1}
         className={cn(
-          "relative z-10 w-full max-w-md rounded-xl border border-border bg-popover text-popover-foreground shadow-xl outline-none gta-pop-in",
+          "relative z-10 w-full max-w-md rounded-xl border border-border bg-popover text-popover-foreground shadow-xl outline-none gt-pop-in",
           "overscroll-contain max-h-[90vh] flex flex-col",
           className,
         )}
@@ -144,7 +144,7 @@ export function Dialog({
           </div>
         )}
 
-        <div className="overflow-y-auto px-5 py-4 gta-scroll">{children}</div>
+        <div className="overflow-y-auto px-5 py-4 gt-scroll">{children}</div>
 
         {footer && (
           <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3.5">

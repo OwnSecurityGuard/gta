@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // AppendEvents 追加 Event 到 events 表

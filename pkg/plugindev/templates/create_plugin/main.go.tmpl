@@ -12,17 +12,17 @@ import (
 )
 
 func main() {
-	// gta-agent 托管模式：agent 注入 GTA_TUNNEL=1 / GTA_AUTH_TOKEN 环境变量，
+	// gt-agent 托管模式：agent 注入 GT_TUNNEL=1 / GT_AUTH_TOKEN 环境变量，
 	// 插件以隧道模式注册到共享 pipeline（无本地回拨端点）。
 	// 未设置环境变量时 opts 取零值，行为与 RunRegisterLoop 完全一致（本地 socket 注册）。
 	//
 	// 隧道与非隧道都必须带 token：两种模式只是「谁拨谁」不同，Register 走的是
 	// 同一条鉴权链路。曾在这里写成「仅隧道分支传 opts、否则走 RunRegisterLoop」，
-	// 导致本地直连插件的 GTA_AUTH_TOKEN 被丢弃，在开启鉴权的 pipeline
-	// （GTA_AUTH_TOKENS 非空）上必然注册失败。
+	// 导致本地直连插件的 GT_AUTH_TOKEN 被丢弃，在开启鉴权的 pipeline
+	// （GT_AUTH_TOKENS 非空）上必然注册失败。
 	sdk.RunRegisterLoopWithOptions(decodePacket, sdk.RegisterOptions{
-		Tunnel:    os.Getenv("GTA_TUNNEL") != "",
-		AuthToken: os.Getenv("GTA_AUTH_TOKEN"),
+		Tunnel:    os.Getenv("GT_TUNNEL") != "",
+		AuthToken: os.Getenv("GT_AUTH_TOKEN"),
 	})
 }
 

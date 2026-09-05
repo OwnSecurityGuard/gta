@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"gta/pkg/auth"
-	pb "gta/pkg/internalipc/proto"
+	"gametrace/pkg/auth"
+	pb "gametrace/pkg/internalipc/proto"
 )
 
 // ownerCapturingEngine 记录 engine 侧收到的调用方身份（ctx 注入结果）。

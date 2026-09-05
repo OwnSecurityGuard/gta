@@ -152,7 +152,7 @@ function hexDump(bytes: Uint8Array, maxBytes = 4096): string {
 function JsonView({ data }: { data: Record<string, unknown> }) {
   const formatted = useMemo(() => JSON.stringify(unpackJsonStrings(data), null, 2), [data]);
   return (
-    <pre className="gta-json-pre max-h-[400px] overflow-auto whitespace-pre text-xs font-mono">
+    <pre className="gt-json-pre max-h-[400px] overflow-auto whitespace-pre text-xs font-mono">
       {formatted}
     </pre>
   );
@@ -232,7 +232,7 @@ function StreamsTab({
       {streams.map((stream) => (
         <div
           key={stream.key}
-          className="rounded-lg border border-border bg-card/60 p-4 gta-fade-in"
+          className="rounded-lg border border-border bg-card/60 p-4 gt-fade-in"
         >
           {/* 流头 */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -298,7 +298,7 @@ function FrameHexRow({ payload }: { payload: string }) {
   }, [payload]);
 
   return (
-    <TableRow className="gta-fade-in">
+    <TableRow className="gt-fade-in">
       <TableCell colSpan={6} className="bg-muted/30 p-4">
         <pre className="text-xs font-mono whitespace-pre overflow-x-auto">{hex}</pre>
       </TableCell>
@@ -319,7 +319,7 @@ function RawFrames({ frames }: { frames: ConnectionFrame[] }) {
   return (
     <div className="space-y-3">
       {frames.map((frame) => (
-        <div key={frame.id} className="rounded-lg border border-border bg-card/60 p-3 gta-fade-in">
+        <div key={frame.id} className="rounded-lg border border-border bg-card/60 p-3 gt-fade-in">
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
             <span className="font-mono tabular-nums text-muted-foreground">
               {formatDateTime(frame.timestamp)}
@@ -400,7 +400,7 @@ function FramesTab({
       {rawOnly ? (
         <RawFrames frames={frames} />
       ) : (
-        <Table className="gta-table">
+        <Table className="gt-table">
           <TableHeader>
             <TableRow>
               <TableHead className="w-40">时间</TableHead>
@@ -544,7 +544,7 @@ function EventsTab({
             )}
           </button>
           {expandedId === ev.id && (
-            <div className="border-t border-border bg-muted/30 p-4 gta-fade-in">
+            <div className="border-t border-border bg-muted/30 p-4 gt-fade-in">
               <JsonView data={ev.data} />
             </div>
           )}
@@ -564,7 +564,7 @@ function DetailHeader({
   connSeq: number;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card/60 p-4 gta-fade-in">
+    <div className="rounded-lg border border-border bg-card/60 p-4 gt-fade-in">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h2 className="font-mono text-sm font-semibold">
           Connection #{String(connSeq).padStart(3, "0")}

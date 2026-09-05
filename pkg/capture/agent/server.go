@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 
-	"gta/pkg/auth"
-	"gta/pkg/capture/agent/proto"
+	"gametrace/pkg/auth"
+	"gametrace/pkg/capture/agent/proto"
 )
 
 // StreamSessionMetadataKey 是 agent 在开流时通过 gRPC metadata 声明目标会话的键。
@@ -25,7 +25,7 @@ const StreamSessionMetadataKey = "session-id"
 
 // SessionOwnerChecker 查询抓包会话的归属 owner。
 // 抽成接口是为了避免 pkg/capture 依赖 pkg/store（造成反向依赖/导入环）：
-// 宿主（cmd/gta-pipeline）用 ControlStore.GetSession 实现它注入进来。
+// 宿主（cmd/gt-pipeline）用 ControlStore.GetSession 实现它注入进来。
 type SessionOwnerChecker interface {
 	// SessionOwner 返回会话归属 owner；会话不存在时返回 ("", false)。
 	SessionOwner(sessionID string) (owner string, ok bool)
@@ -47,7 +47,7 @@ type ProbeAssignChecker interface {
 // ProbeAssignSetter 是宿主注入 ProbeAssignChecker 的可选入口（IngestServer 实现）。
 type ProbeAssignSetter interface{ SetProbeAssignChecker(ProbeAssignChecker) }
 
-// IngestServer 实现 proto.AgentIngestServer：接收 gta-agent 的包推送并经 Hub 路由。
+// IngestServer 实现 proto.AgentIngestServer：接收 gt-agent 的包推送并经 Hub 路由。
 //
 // 鉴权：由宿主在 grpc.Server 上挂 pkg/auth 的 StreamInterceptor，
 // Push 的 stream ctx 里能取到 Principal（OwnerFrom）。匿名模式下

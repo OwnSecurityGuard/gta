@@ -368,7 +368,7 @@ for u in uncertainties:
 
 ## 9. 与脚本引擎的协作（已移除）
 
-> ⚠️ Python 脚本引擎（`save_script` / `list_scripts` / `run_script` / `delete_script`）已从 gta-mcp 移除。需要自定义分析时，直接通过 `list_decoded_data` / `aggregate_query` 取数，或放到 gta-mcp 之外的独立脚本中处理。
+> ⚠️ Python 脚本引擎（`save_script` / `list_scripts` / `run_script` / `delete_script`）已从 gt-mcp 移除。需要自定义分析时，直接通过 `list_decoded_data` / `aggregate_query` 取数，或放到 gt-mcp 之外的独立脚本中处理。
 
 ---
 

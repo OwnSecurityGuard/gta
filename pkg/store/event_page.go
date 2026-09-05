@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // EventPageQuery 是事件分页查询（时间倒序）条件，

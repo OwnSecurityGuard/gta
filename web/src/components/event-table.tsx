@@ -158,7 +158,7 @@ function MessageCell({ msgName, isPush }: { msgName: string; isPush: boolean }) 
 function HighlightedJson({ data }: { data: Record<string, unknown> }) {
   const formatted = useMemo(() => JSON.stringify(unpackJsonStrings(data), null, 2), [data]);
   return (
-    <pre className="gta-json-pre max-h-[400px] overflow-auto">
+    <pre className="gt-json-pre max-h-[400px] overflow-auto">
       <HighlightedText text={formatted} />
     </pre>
   );
@@ -171,17 +171,17 @@ function HighlightedText({ text }: { text: string }) {
       {tokens.map((token, i) => {
         switch (token.type) {
           case "key":
-            return <span key={i} className="gta-json-key">{token.text}</span>;
+            return <span key={i} className="gt-json-key">{token.text}</span>;
           case "string":
-            return <span key={i} className="gta-json-string">{token.text}</span>;
+            return <span key={i} className="gt-json-string">{token.text}</span>;
           case "number":
-            return <span key={i} className="gta-json-number">{token.text}</span>;
+            return <span key={i} className="gt-json-number">{token.text}</span>;
           case "boolean":
-            return <span key={i} className="gta-json-boolean">{token.text}</span>;
+            return <span key={i} className="gt-json-boolean">{token.text}</span>;
           case "null":
-            return <span key={i} className="gta-json-null">{token.text}</span>;
+            return <span key={i} className="gt-json-null">{token.text}</span>;
           default:
-            return <span key={i} className="gta-json-punct">{token.text}</span>;
+            return <span key={i} className="gt-json-punct">{token.text}</span>;
         }
       })}
     </>
@@ -256,9 +256,9 @@ const COLSPAN = 6; // Timestamp | Dir | Msg | Capture | Summary | Size
 
 function ExpandedRow({ data }: { data: Record<string, unknown> }) {
   return (
-    <TableRow className="gta-fade-in">
+    <TableRow className="gt-fade-in">
       <TableCell colSpan={COLSPAN} className="bg-muted/30 p-4">
-        <div className="gta-json-view">
+        <div className="gt-json-view">
           <HighlightedJson data={data} />
         </div>
       </TableCell>
@@ -413,7 +413,7 @@ export function EventTable({ sessionId, filter }: EventTableProps) {
   return (
     <div className="space-y-3 relative">
       {/* 后台刷新指示 */}
-      {isFetching && !isLoading && <div className="gta-loading-bar" aria-hidden="true" />}
+      {isFetching && !isLoading && <div className="gt-loading-bar" aria-hidden="true" />}
 
       {/* 统计信息 */}
       <div className="flex items-center justify-between px-1 text-xs text-muted-foreground" aria-live="polite">
@@ -425,7 +425,7 @@ export function EventTable({ sessionId, filter }: EventTableProps) {
       </div>
 
       {/* 数据表格 */}
-      <Table className="gta-table">
+      <Table className="gt-table">
         <TableHeader>
           <TableRow>
             <TableHead className="w-44">时间</TableHead>

@@ -30,8 +30,8 @@ func (p *launchedProc) alive() bool {
 // (artifact) and the registry (runtime) are the sources of truth; Tracker only
 // caches live process handles and recent attempts for attribution.
 //
-// A single Developer Plane runs per process (embedded in gta-mcp or as the
-// standalone gta-plugin-dev binary), so a package-level default instance is
+// A single Developer Plane runs per process (embedded in gt-mcp or as the
+// standalone gt-plugin-dev binary), so a package-level default instance is
 // sufficient.
 type Tracker struct {
 	mu          sync.Mutex

@@ -1,7 +1,7 @@
 # 探针（Probe）优化设计方案
 
 > 状态：v2，已并入 review 意见（UI 以会话为中心 / 状态三维度 / 权限 creator-only）· 2026-09-05
-> 范围：gta-agent（网卡探针）/ gta-singbox-agent（移动代理探针）/ gta-pipeline / gta-mcp / WebUI
+> 范围：gt-agent（网卡探针）/ gt-singbox-agent（移动代理探针）/ gt-pipeline / gt-mcp / WebUI
 
 ---
 
@@ -9,7 +9,7 @@
 
 | 术语 | 含义 |
 |---|---|
-| **探针 probe** | 跑在被观测机器上的 agent 进程实例，有全局唯一 `probe_id`。当前形态：`gta-agent`（pcap）、`gta-singbox-agent`（mobile） |
+| **探针 probe** | 跑在被观测机器上的 agent 进程实例，有全局唯一 `probe_id`。当前形态：`gt-agent`（pcap）、`gt-singbox-agent`（mobile） |
 | **机器名** | 探针在 UI 上的显示名，默认 hostname，可在管理页改（如 `game-server-01`） |
 | **capability** | 探针能力标签：`pcap` / `mobile` / `plugin_host` |
 | **本地控制面** | 探针在自己机器上暴露的回环 HTTP 接口，给"坐在那台机器前的人"用 |
@@ -26,16 +26,16 @@
 
 ```
 ① pipeline 本机 pcap   : 网卡在 pipeline 启动时固定（-iface），start_capture(source=nic) 直接用
-② gta-agent → AgentIngest(:9092) → Hub → session
+② gt-agent → AgentIngest(:9092) → Hub → session
                         : 命令行 --server/--token/--session/--iface/--filter，人工去成员机执行
-③ gta-singbox-agent → mobile source : 已有本地回环 HTTP 控制面，pipeline 同机直连
+③ gt-singbox-agent → mobile source : 已有本地回环 HTTP 控制面，pipeline 同机直连
 ```
 
 ### 1.2 三个痛点对应到代码
 
 | 需求 | 现状 | 病灶位置 |
 |---|---|---|
-| ① 探针暴露控制接口，别用命令行改参数 | `cmd/gta-agent/main.go` 用 12 个 flag 驱动；`--session/--iface/--filter` 一旦启动不可变，改参数必须杀进程重跑 | 参数与生命周期绑死 |
+| ① 探针暴露控制接口，别用命令行改参数 | `cmd/gt-agent/main.go` 用 12 个 flag 驱动；`--session/--iface/--filter` 一旦启动不可变，改参数必须杀进程重跑 | 参数与生命周期绑死 |
 | ② 页面选机器、启停、改端口 | `StartCaptureDialog` 的"抓包探针"只是**生成一条命令让人去抄**（`buildAgentCommand`）；机器不可见、不可选、不可控 | 探针不是资源，没有身份、没有注册表、没有控制通道 |
 | ③ 数据在探针机器上持久化，可按时间离线加载 | `pkg/spool` 是**上行缓冲**：`AckN` 后 segment 即删；服务端没接住的数据（会话未建、断线超配额）永久丢失，无法事后补救 | 只有"未确认缓冲"，没有"留存" |
 
@@ -80,7 +80,7 @@
         ┌───────────────────────────┼──────────────────┼──────────────────────────────┐  │
         │ 成员机                     │ ② Event/Ack(上行) │                              │  │
         │   ┌───────────────────────▼──────────────────▼──────────┐                    │  │
-        │   │ gta-agent (常驻)                                      │                    │  │
+        │   │ gt-agent (常驻)                                      │                    │  │
         │   │  ┌────────────┐  ┌──────────┐  ┌──────────────────┐  │                    │  │
         │   │  │ControlAgent│  │ pcap loop│  │ ingest client    │──┼──③ Push(:9092)────▶│  │
         │   │  └─────┬──────┘  └────┬─────┘  └────────┬─────────┘  │                    │  │
@@ -498,7 +498,7 @@ func (q *Queue) ExportPcapNG(from, to time.Time, w io.Writer) error   // P1
 
 ```
 <datadir>/archive/
-  seg-20260905-1600.gta          帧数据（[u32 len][RawPacket]…）
+  seg-20260905-1600.gametrace          帧数据（[u32 len][RawPacket]…）
   seg-20260905-1600.idx          {seg_id, first_ts, last_ts, packets, bytes, link_type}
   ...
   send.cursor                    上行未确认游标（原 cursor.json）

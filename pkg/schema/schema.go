@@ -8,9 +8,9 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SDK 类型别名 — 契约单向流动：SDK 定义，gta 消费
+// SDK 类型别名 — 契约单向流动：SDK 定义，gametrace 消费
 //
-// 以下类型别名将 SDK 的语义契约（schema/state）桥接到 gta 内部，消除两套定义间的漂移。新增代码应直接使用 SDK 类型，旧代码通过
+// 以下类型别名将 SDK 的语义契约（schema/state）桥接到 gametrace 内部，消除两套定义间的漂移。新增代码应直接使用 SDK 类型，旧代码通过
 // 别名兼容。
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ type Schema = sdkschema.Schema
 // float32/float64/bool/string/bytes/array/object/null）。
 type SchemaType = sdkschema.Type
 
-// Semantic 是字段的语义标注（builtin/x- experimental/gta. reserved）。
+// Semantic 是字段的语义标注（builtin/x- experimental/gametrace. reserved）。
 type Semantic = sdkschema.Semantic
 
 // ─────────────────────────────────────────────────────────────────────────────

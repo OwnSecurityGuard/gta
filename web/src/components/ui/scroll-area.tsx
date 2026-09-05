@@ -5,7 +5,7 @@ const ScrollArea = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
   ({ className, children, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("relative overflow-auto gta-scroll", className)}
+      className={cn("relative overflow-auto gt-scroll", className)}
       {...props}
     >
       {children}

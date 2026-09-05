@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // TestPGIntegration 是针对真实 PostgreSQL 后端的端到端校验，默认跳过。
 //
-// 运行条件：设置环境变量 GTA_TEST_PG_DSN 为可写的 PG 连接串，例如：
+// 运行条件：设置环境变量 GT_TEST_PG_DSN 为可写的 PG 连接串，例如：
 //
-//	GTA_TEST_PG_DSN="postgres://user:pass@localhost:5432/gta?sslmode=disable" \
+//	GT_TEST_PG_DSN="postgres://user:pass@localhost:5432/gametrace?sslmode=disable" \
 //	  go test ./pkg/store -run TestPGIntegration -v
 //
 // 该测试验证 PG 方言翻译的正确性：?→$N 占位符、ON CONFLICT  upsert、
@@ -23,9 +23,9 @@ import (
 // 以及控制元数据（sessions / plugin_debug_access）与事件数据的双后端一致性。
 // 不依赖业务代码，直接走 pkg/store 的工厂与接口。
 func TestPGIntegration(t *testing.T) {
-	dsn := os.Getenv("GTA_TEST_PG_DSN")
+	dsn := os.Getenv("GT_TEST_PG_DSN")
 	if dsn == "" {
-		t.Skip("GTA_TEST_PG_DSN not set; skipping live PostgreSQL integration test")
+		t.Skip("GT_TEST_PG_DSN not set; skipping live PostgreSQL integration test")
 	}
 	ctx := context.Background()
 	now := time.Now()

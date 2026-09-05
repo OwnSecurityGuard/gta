@@ -9,9 +9,9 @@ import (
 	"time"
 
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
-	"gta/pkg/capture"
-	"gta/pkg/event"
-	"gta/pkg/schema"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/event"
+	"gametrace/pkg/schema"
 )
 
 // ErrDispatcherClosed 在流已关闭后提交请求时返回。

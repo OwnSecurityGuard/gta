@@ -1,4 +1,4 @@
-module gta
+module gametrace
 
 go 1.25.5
 
@@ -19,7 +19,7 @@ require (
 	modernc.org/sqlite v1.54.0
 )
 
-// 契约单向流动：SDK 定义，gta 消费。
+// 契约单向流动：SDK 定义，gametrace 消费。
 // 已切换为已发布的远程模块 gta-plugin-sdk v0.5.0（无 replace），
 // 任何人 clone 后可直接构建。本地开发调试 SDK 时再临时加 replace。
 

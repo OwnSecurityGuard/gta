@@ -211,7 +211,7 @@ export function ProjectPage({
   }
 
   return (
-    <div className="h-full overflow-auto gta-scroll">
+    <div className="h-full overflow-auto gt-scroll">
       <div className="mx-auto max-w-4xl space-y-6 p-6">
         {/* 返回 + 头部 */}
         <button
@@ -227,7 +227,7 @@ export function ProjectPage({
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-lg font-semibold gta-gradient-text">{project.name}</h1>
+                <h1 className="text-lg font-semibold gt-gradient-text">{project.name}</h1>
                 {project.game && <Badge variant="outline">{project.game}</Badge>}
                 <Badge variant="secondary">
                   <span className={`mr-1 h-1.5 w-1.5 rounded-full ${statusDot(running ? "running" : undefined)}`} />

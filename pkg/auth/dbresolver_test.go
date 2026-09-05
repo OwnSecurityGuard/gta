@@ -65,7 +65,7 @@ func TestDBResolver(t *testing.T) {
 
 // TestFirstResolverMatrix 覆盖组合语义的四种部署形态。
 func TestFirstResolverMatrix(t *testing.T) {
-	envWithToken := mustStatic(t, "alice=gta_a:admin")
+	envWithToken := mustStatic(t, "alice=gt_a:admin")
 	envEmpty := mustStatic(t, "")
 
 	t.Run("env only", func(t *testing.T) {
@@ -73,7 +73,7 @@ func TestFirstResolverMatrix(t *testing.T) {
 		if !r.Required() {
 			t.Fatal("env token means required")
 		}
-		if p, ok := r.Resolve("gta_a"); !ok || !p.IsAdmin || p.Owner != "alice" {
+		if p, ok := r.Resolve("gt_a"); !ok || !p.IsAdmin || p.Owner != "alice" {
 			t.Fatalf("env resolve: %v %v", p, ok)
 		}
 		if _, ok := r.Resolve("other"); ok {
@@ -91,7 +91,7 @@ func TestFirstResolverMatrix(t *testing.T) {
 		if p, ok := r.Resolve("tok-bob"); !ok || p.Owner != "bob" {
 			t.Fatalf("db resolve: %v %v", p, ok)
 		}
-		if _, ok := r.Resolve("gta_a"); ok {
+		if _, ok := r.Resolve("gt_a"); ok {
 			t.Fatal("env empty: env tokens must not resolve")
 		}
 	})
@@ -111,7 +111,7 @@ func TestFirstResolverMatrix(t *testing.T) {
 		db := newUsersDB(t)
 		seedUser(t, db, "bob", "tok-bob", false)
 		r := NewFirstResolver(envWithToken, NewDBResolver(db))
-		if p, ok := r.Resolve("gta_a"); !ok || p.Owner != "alice" {
+		if p, ok := r.Resolve("gt_a"); !ok || p.Owner != "alice" {
 			t.Fatalf("env precedence: %v %v", p, ok)
 		}
 		if p, ok := r.Resolve("tok-bob"); !ok || p.Owner != "bob" {

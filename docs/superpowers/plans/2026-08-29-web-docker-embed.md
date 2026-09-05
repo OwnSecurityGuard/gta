@@ -1,42 +1,42 @@
-# Web 前端内嵌 gta-mcp / Docker 集成 — 实现计划
+# Web 前端内嵌 gt-mcp / Docker 集成 — 实现计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 Web 前端以 `go:embed` 内嵌进 gta-mcp 并打通 Docker 构建链，浏览器直接访问 `http://<host>:8781` 即可用 Web UI。
+**Goal:** 把 Web 前端以 `go:embed` 内嵌进 gt-mcp 并打通 Docker 构建链，浏览器直接访问 `http://<host>:8781` 即可用 Web UI。
 
-**Architecture:** `cmd/gta-mcp/webui.go` 提供 embed FS 上的静态 handler，以"命中嵌入文件才返回静态、其余原样进鉴权链"的方式与现有 authed handler 组合（静态免鉴权、API 语义零变化）；构建链为 vite 产物（`web/dist`）→ `make web-build` 同步到 `cmd/gta-mcp/webui/`（git 只跟踪 `.gitkeep`）/ Dockerfile 新增 node 阶段 → COPY 进 builder 后编译。
+**Architecture:** `cmd/gt-mcp/webui.go` 提供 embed FS 上的静态 handler，以"命中嵌入文件才返回静态、其余原样进鉴权链"的方式与现有 authed handler 组合（静态免鉴权、API 语义零变化）；构建链为 vite 产物（`web/dist`）→ `make web-build` 同步到 `cmd/gt-mcp/webui/`（git 只跟踪 `.gitkeep`）/ Dockerfile 新增 node 阶段 → COPY 进 builder 后编译。
 
 **Tech Stack:** Go 1.25（`embed`、`io/fs`、`http.FileServerFS`、`testing/fstest`）；Node 22 + npm（vite 6 build）；Docker 多阶段；Makefile；docker-compose。
 
 **Spec:** `docs/superpowers/specs/2026-08-29-web-docker-embed-design.md`
 
 **关键事实（已核实，勿重复调查）：**
-- `cmd/gta-mcp/main.go` 约 2890 行的路由组装是：`root := http.NewServeMux(); root.HandleFunc("/singbox/profile", ...); root.Handle("/", authed); handler := http.Handler(root)`。`authed = corsMiddleware(allowedOrigins, authMiddleware(resolver, mux))`（`cmd/gta-mcp/http_server.go:63`），内层 `mux` 精确注册 `/sse` `/message` `/mcp` `/events/plugins`，未知路径落到 mux 的 404。
+- `cmd/gt-mcp/main.go` 约 2890 行的路由组装是：`root := http.NewServeMux(); root.HandleFunc("/singbox/profile", ...); root.Handle("/", authed); handler := http.Handler(root)`。`authed = corsMiddleware(allowedOrigins, authMiddleware(resolver, mux))`（`cmd/gt-mcp/http_server.go:63`），内层 `mux` 精确注册 `/sse` `/message` `/mcp` `/events/plugins`，未知路径落到 mux 的 404。
 - `.dockerignore` 现在整目录排除 `web/`（第 20 行）——node 阶段需要 web 源码进上下文，必须改。
-- 根 `.gitignore` 已有 `dist/`（第 42 行，全局）与 `web/dist/`（第 58 行）；`cmd/gta-mcp/webui/` 目前不存在、也不被忽略。
+- 根 `.gitignore` 已有 `dist/`（第 42 行，全局）与 `web/dist/`（第 58 行）；`cmd/gt-mcp/webui/` 目前不存在、也不被忽略。
 - Makefile：`release-matrix` 是 `.PHONY` target（第 97 行），CI release job（`.github/workflows/ci.yml:59-88`，ubuntu-latest + setup-go）调用它；ubuntu runner 自带 node，但计划仍显式加 `actions/setup-node@v4` 保证版本确定。
 - `web/package.json` 的 `build = tsc -b && vite build`，产物在 `web/dist`（gitignore 已覆盖）。前端请求全部相对路径（`/mcp`、`/events/plugins`），同源即工作。
-- 测试助手 `mustResolver(t, spec)` 在 `pkg/auth/interceptor_test.go`；`buildHTTPHandler(allowedOrigins, resolver, mux)` 在 `cmd/gta-mcp/http_server.go`。
+- 测试助手 `mustResolver(t, spec)` 在 `pkg/auth/interceptor_test.go`；`buildHTTPHandler(allowedOrigins, resolver, mux)` 在 `cmd/gt-mcp/http_server.go`。
 
 ---
 
 ### Task 1: webui 嵌入目录 + 静态 handler（含未构建兜底）
 
 **Files:**
-- Create: `cmd/gta-mcp/webui/.gitkeep`（空文件）
-- Create: `cmd/gta-mcp/webui.go`
-- Create: `cmd/gta-mcp/webui_test.go`
-- Modify: `cmd/gta-mcp/main.go`（root mux 的 `"/"` 注册处，约 2890 行）
+- Create: `cmd/gt-mcp/webui/.gitkeep`（空文件）
+- Create: `cmd/gt-mcp/webui.go`
+- Create: `cmd/gt-mcp/webui_test.go`
+- Modify: `cmd/gt-mcp/main.go`（root mux 的 `"/"` 注册处，约 2890 行）
 
 - [ ] **Step 1: 创建嵌入目录与空 `.gitkeep`**
 
 ```bash
-cd E:/gta && mkdir -p cmd/gta-mcp/webui && touch cmd/gta-mcp/webui/.gitkeep
+cd E:/gta && mkdir -p cmd/gt-mcp/webui && touch cmd/gt-mcp/webui/.gitkeep
 ```
 
 （`//go:embed` 要求目录至少含一个文件；用 `all:webui` 前缀才能包含点开头文件，见 Step 3。）
 
-- [ ] **Step 2: 写失败测试 `cmd/gta-mcp/webui_test.go`**
+- [ ] **Step 2: 写失败测试 `cmd/gt-mcp/webui_test.go`**
 
 ```go
 package main
@@ -47,7 +47,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"gta/pkg/auth"
+	"gametrace/pkg/auth"
 )
 
 // builtFS 模拟"已执行 make web-build"的嵌入目录（vite 产物形态）。
@@ -149,7 +149,7 @@ func TestWebUI_APIGoesThroughAuth(t *testing.T) {
 	inner.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	authed := buildHTTPHandler(nil, mustResolver(t, "alice=gta_aaa"), inner)
+	authed := buildHTTPHandler(nil, mustResolver(t, "alice=gt_aaa"), inner)
 	h := serveWebOrAPI(builtFS(), authed)
 
 	rec := doGet(t, h, "/mcp")
@@ -159,7 +159,7 @@ func TestWebUI_APIGoesThroughAuth(t *testing.T) {
 	rec2 := httptest.NewRecorder()
 	h.ServeHTTP(rec2, func() *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
-		req.Header.Set("Authorization", "Bearer gta_aaa")
+		req.Header.Set("Authorization", "Bearer gt_aaa")
 		return req
 	}())
 	if rec2.Code != http.StatusOK {
@@ -211,10 +211,10 @@ var _ = auth.AnonymousOwner
 
 - [ ] **Step 3: 运行测试确认失败**
 
-Run: `cd E:/gta && go test ./cmd/gta-mcp/ -run TestWebUI -v`
+Run: `cd E:/gta && go test ./cmd/gt-mcp/ -run TestWebUI -v`
 Expected: 编译失败，`undefined: serveWebOrAPI`
 
-- [ ] **Step 4: 创建 `cmd/gta-mcp/webui.go`**
+- [ ] **Step 4: 创建 `cmd/gt-mcp/webui.go`**
 
 ```go
 package main
@@ -236,9 +236,9 @@ var webUIEmbed embed.FS
 // 保证"任何情况下 go build ./... 都成功"——未构建也能起服务，给出可操作的提示。
 const webUIPlaceholderHTML = `<!DOCTYPE html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><title>GTA Web UI</title></head>
+<head><meta charset="utf-8"><title>GameTrace Web UI</title></head>
 <body style="font-family: system-ui, sans-serif; padding: 2rem;">
-<h1>GTA Web UI 未构建</h1>
+<h1>GameTrace Web UI 未构建</h1>
 <p>当前二进制未嵌入前端静态资源。请在仓库根目录执行 <code>make web-build</code> 后重新编译（或重新构建 Docker 镜像）。</p>
 </body>
 </html>`
@@ -298,12 +298,12 @@ func serveWebOrAPI(fsys fs.FS, authed http.Handler) http.Handler {
 
 - [ ] **Step 5: 运行测试确认通过**
 
-Run: `cd E:/gta && go test ./cmd/gta-mcp/ -run TestWebUI -v -count=1`
+Run: `cd E:/gta && go test ./cmd/gt-mcp/ -run TestWebUI -v -count=1`
 Expected: 6 个测试全 PASS
 
 - [ ] **Step 6: 在 main.go 挂载**
 
-在 `cmd/gta-mcp/main.go` 找到（约 2889-2891 行）：
+在 `cmd/gt-mcp/main.go` 找到（约 2889-2891 行）：
 
 ```go
 	root := http.NewServeMux()
@@ -323,13 +323,13 @@ Expected: 6 个测试全 PASS
 
 - [ ] **Step 7: 回归验证**
 
-Run: `cd E:/gta && go build ./... && go test ./cmd/gta-mcp/ -count=1 2>&1 | tail -2`
+Run: `cd E:/gta && go build ./... && go test ./cmd/gt-mcp/ -count=1 2>&1 | tail -2`
 Expected: 编译通过、包测试 ok
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd E:/gta && git add cmd/gta-mcp/webui/.gitkeep cmd/gta-mcp/webui.go cmd/gta-mcp/webui_test.go cmd/gta-mcp/main.go && git commit -m "feat(mcp): 内嵌 Web UI 静态资源（go:embed），未构建时返回内置提示；静态免鉴权、API 鉴权语义不变"
+cd E:/gta && git add cmd/gt-mcp/webui/.gitkeep cmd/gt-mcp/webui.go cmd/gt-mcp/webui_test.go cmd/gt-mcp/main.go && git commit -m "feat(mcp): 内嵌 Web UI 静态资源（go:embed），未构建时返回内置提示；静态免鉴权、API 鉴权语义不变"
 ```
 
 ---
@@ -346,9 +346,9 @@ cd E:/gta && git add cmd/gta-mcp/webui/.gitkeep cmd/gta-mcp/webui.go cmd/gta-mcp
 
 ```gitignore
 
-# gta-mcp 内嵌 Web UI 产物（make web-build / Docker webui 阶段生成；仅 .gitkeep 入库）
-cmd/gta-mcp/webui/*
-!cmd/gta-mcp/webui/.gitkeep
+# gt-mcp 内嵌 Web UI 产物（make web-build / Docker webui 阶段生成；仅 .gitkeep 入库）
+cmd/gt-mcp/webui/*
+!cmd/gt-mcp/webui/.gitkeep
 ```
 
 - [ ] **Step 2: Makefile 新增 web-build 并挂到 release-matrix**
@@ -362,16 +362,16 @@ cmd/gta-mcp/webui/*
 2b. 在 `release-matrix` target 之前插入：
 
 ```make
-# web-build：构建前端并把产物同步进 cmd/gta-mcp/webui/（go:embed 嵌入目录）。
+# web-build：构建前端并把产物同步进 cmd/gt-mcp/webui/（go:embed 嵌入目录）。
 # 产物出在 web/dist（vite 默认、已被 gitignore），同步时清掉 webui 下旧产物但
 # 保留 .gitkeep（go:embed 要求目录非空、且它是仓库唯一 tracked 文件）。
 web-build:
 	set -e; \
 	cd web && npm ci && npm run build; \
 	cd ..; \
-	find cmd/gta-mcp/webui -mindepth 1 ! -name .gitkeep -delete; \
-	cp -r web/dist/. cmd/gta-mcp/webui/; \
-	echo "webui assets:"; ls cmd/gta-mcp/webui
+	find cmd/gt-mcp/webui -mindepth 1 ! -name .gitkeep -delete; \
+	cp -r web/dist/. cmd/gt-mcp/webui/; \
+	echo "webui assets:"; ls cmd/gt-mcp/webui
 ```
 
 2c. `release-matrix:` 行（第 97 行）改为（加前置依赖，release 产物内嵌前端）：
@@ -385,10 +385,10 @@ release-matrix: web-build
 Run: `cd E:/gta && make web-build 2>&1 | tail -8`
 Expected: npm ci/build 成功，列出的 webui 目录含 `index.html`、`assets/` 等
 
-Run: `cd E:/gta && git status --short web/ cmd/gta-mcp/webui/`
+Run: `cd E:/gta && git status --short web/ cmd/gt-mcp/webui/`
 Expected: 干净（产物全被忽略，`.gitkeep` 仍在）
 
-Run: `cd E:/gta && go run ./cmd/gta-mcp -work-dir "$(mktemp -d)" -addr 127.0.0.1:0 & sleep 8` 后按 Task 12 记录的方式从 `<workdir>/addr.mcp.json` 拿地址，`curl -s http://<addr>/ | head -c 200` → 应返回真实前端 index.html（含 `<div id="root">` 或 vite 产物特征），`curl -s -o /dev/null -w "%{http_code}" -X POST http://<addr>/mcp` → 401（未配 token 时应为 200——注意：本地起服务若没配 GTA_AUTH_TOKENS 则 /mcp 是 200，此时验证的是"API 不被静态吞掉"即可）。验证完 kill 进程。
+Run: `cd E:/gta && go run ./cmd/gt-mcp -work-dir "$(mktemp -d)" -addr 127.0.0.1:0 & sleep 8` 后按 Task 12 记录的方式从 `<workdir>/addr.mcp.json` 拿地址，`curl -s http://<addr>/ | head -c 200` → 应返回真实前端 index.html（含 `<div id="root">` 或 vite 产物特征），`curl -s -o /dev/null -w "%{http_code}" -X POST http://<addr>/mcp` → 401（未配 token 时应为 200——注意：本地起服务若没配 GT_AUTH_TOKENS 则 /mcp 是 200，此时验证的是"API 不被静态吞掉"即可）。验证完 kill 进程。
 
 （若 `go run` 前台挂住影响执行，用后台 + kill；与 Task 12 冒烟同款手法。）
 
@@ -406,7 +406,7 @@ cd E:/gta && git add Makefile .gitignore && git commit -m "build: 新增 make we
 - Modify: `.dockerignore`（第 20 行 `web/`）
 - Modify: `Dockerfile`（头部注释、builder 前、builder 内 COPY）
 - Modify: `docker-compose.yml`（pipeline 的 build.args）
-- Modify: `.env.example`（GTA_MCP_PORT 注释、VITE_ENABLE_RAW_DEBUG）
+- Modify: `.env.example`（GT_MCP_PORT 注释、VITE_ENABLE_RAW_DEBUG）
 
 - [ ] **Step 1: `.dockerignore` 放开 web 源码**
 
@@ -425,7 +425,7 @@ web/dist/
 
 ```dockerfile
 # ============================================================================
-# 阶段 0：webui（前端静态资源 → go:embed 进 gta-mcp）
+# 阶段 0：webui（前端静态资源 → go:embed 进 gt-mcp）
 # ============================================================================
 FROM node:22-bookworm-slim AS webui
 
@@ -448,14 +448,14 @@ RUN npm run build
 2b. 在 builder 阶段的 `COPY . .`（第 42 行）之后、`RUN CGO_ENABLED=1 ...` 之前插入：
 
 ```dockerfile
-# 前端产物覆盖进 embed 目录（webui/.gitkeep 会一并保留，无碍），gta-mcp 编译时嵌入。
-COPY --from=webui /web/dist/ ./cmd/gta-mcp/webui/
+# 前端产物覆盖进 embed 目录（webui/.gitkeep 会一并保留，无碍），gt-mcp 编译时嵌入。
+COPY --from=webui /web/dist/ ./cmd/gt-mcp/webui/
 ```
 
 2c. 头部注释块（第 1-12 行）末尾追加一行说明：
 
 ```dockerfile
-# webui 阶段构建前端静态资源，编译期以 go:embed 嵌入 gta-mcp（浏览器直接访问 8781）。
+# webui 阶段构建前端静态资源，编译期以 go:embed 嵌入 gt-mcp（浏览器直接访问 8781）。
 ```
 
 - [ ] **Step 3: compose 透传前端 build arg**
@@ -466,22 +466,22 @@ COPY --from=webui /web/dist/ ./cmd/gta-mcp/webui/
     build:
       context: .
       args:
-        VERSION: ${GTA_VERSION:-dev}
-        GIT_COMMIT: ${GTA_GIT_COMMIT:-unknown}
-        # 前端构建期门控（嵌入 gta-mcp 的 Web UI）：默认关；调试原始包面板时置 1 重建镜像
+        VERSION: ${GT_VERSION:-dev}
+        GIT_COMMIT: ${GT_GIT_COMMIT:-unknown}
+        # 前端构建期门控（嵌入 gt-mcp 的 Web UI）：默认关；调试原始包面板时置 1 重建镜像
         VITE_ENABLE_RAW_DEBUG: ${VITE_ENABLE_RAW_DEBUG:-0}
 ```
 
 - [ ] **Step 4: `.env.example` 更新**
 
-4a. `GTA_MCP_PORT` 的注释（第 22 行）改为：
+4a. `GT_MCP_PORT` 的注释（第 22 行）改为：
 
 ```bash
 # MCP HTTP/SSE（团队客户端连接）；同一端口同时提供 Web UI（浏览器打开 http://<host>:8781）
-GTA_MCP_PORT=8781
+GT_MCP_PORT=8781
 ```
 
-4b. 在 "CORS / 版本注入" 段（`GTA_GIT_COMMIT=unknown` 之后）追加：
+4b. 在 "CORS / 版本注入" 段（`GT_GIT_COMMIT=unknown` 之后）追加：
 
 ```bash
 
@@ -492,13 +492,13 @@ VITE_ENABLE_RAW_DEBUG=0
 
 - [ ] **Step 5: Docker 构建冒烟（本机 docker 可用时执行；不可用则记录跳过、留 Task 6）**
 
-Run: `cd E:/gta && docker build --build-arg VITE_ENABLE_RAW_DEBUG=0 -t gta-server:webui-test . 2>&1 | tail -5`
+Run: `cd E:/gta && docker build --build-arg VITE_ENABLE_RAW_DEBUG=0 -t gt-server:webui-test . 2>&1 | tail -5`
 Expected: 全阶段成功（含 webui 的 npm ci/build 与 Go 编译）
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd E:/gta && git add .dockerignore Dockerfile docker-compose.yml .env.example && git commit -m "build(docker): webui 阶段构建前端并嵌入 gta-mcp；compose/.env 透传 VITE_ENABLE_RAW_DEBUG"
+cd E:/gta && git add .dockerignore Dockerfile docker-compose.yml .env.example && git commit -m "build(docker): webui 阶段构建前端并嵌入 gt-mcp；compose/.env 透传 VITE_ENABLE_RAW_DEBUG"
 ```
 
 ---
@@ -511,7 +511,7 @@ cd E:/gta && git add .dockerignore Dockerfile docker-compose.yml .env.example &&
 - [ ] **Step 1: 在 release job 的 setup-go 之后、Build release matrix 之前插入**
 
 ```yaml
-      # release-matrix 现以前置依赖 make web-build 构建前端（嵌入 gta-mcp）。
+      # release-matrix 现以前置依赖 make web-build 构建前端（嵌入 gt-mcp）。
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -545,20 +545,20 @@ cd E:/gta && git add .github/workflows/ci.yml && git commit -m "ci: release job 
 ```markdown
 ## 8. 浏览器访问 Web UI
 
-gta-mcp 内嵌了 Web 前端（`make web-build` 或 Docker `webui` 构建阶段生成，编译期
+gt-mcp 内嵌了 Web 前端（`make web-build` 或 Docker `webui` 构建阶段生成，编译期
 `go:embed` 进二进制）。compose 部署完成后，浏览器直接打开：
 
     http://<服务器IP>:8781
 
-- 配置了 `GTA_AUTH_TOKENS` 时首次访问会出现 401 横幅并自动弹出设置：在「访问令牌」
-  填入你的 token（与 gta-agent 用的同一份）保存即可；令牌只保存在本机浏览器。
+- 配置了 `GT_AUTH_TOKENS` 时首次访问会出现 401 横幅并自动弹出设置：在「访问令牌」
+  填入你的 token（与 gt-agent 用的同一份）保存即可；令牌只保存在本机浏览器。
 - 会话/插件列表显示归属徽标；admin 可在会话列表顶部切换「只看我的 / 全部」。
 - 「开始抓包」支持本机网卡与远程 agent 两种来源；远程 agent 会给出可直接复制的
-  `gta-agent` 启动命令。
+  `gt-agent` 启动命令。
 - 用 `go build` 直接编译的裸二进制若未构建前端，打开 8781 会显示「Web UI 未构建」
   提示：执行 `make web-build` 后重新编译即可。
 - SSE（插件事件实时推送）经查询参数携带 token（`/events/plugins?token=...`），
-  若在 gta-mcp 前面加反向代理，注意对 `token` 查询参数脱敏或关闭 access log。
+  若在 gt-mcp 前面加反向代理，注意对 `token` 查询参数脱敏或关闭 access log。
 ```
 
 - [ ] **Step 2: `docs/member-onboarding.md` 补 Web 入口**
@@ -597,9 +597,9 @@ Expected: 24/24（本任务未改前端代码，防误伤）
 
 ```bash
 cd E:/gta && make web-build 2>&1 | tail -3
-go build -o bin/gta-mcp-webui-test.exe ./cmd/gta-mcp
+go build -o bin/gt-mcp-webui-test.exe ./cmd/gt-mcp
 WORK=$(mktemp -d)
-./bin/gta-mcp-webui-test.exe -work-dir "$WORK" -addr 127.0.0.1:0 > "$WORK/mcp.log" 2>&1 &
+./bin/gt-mcp-webui-test.exe -work-dir "$WORK" -addr 127.0.0.1:0 > "$WORK/mcp.log" 2>&1 &
 sleep 6
 ADDR=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).addr)" "$WORK/addr.mcp.json" 2>/dev/null || grep -o '127.0.0.1:[0-9]*' "$WORK/mcp.log" | head -1)
 echo "addr=$ADDR"
@@ -617,17 +617,17 @@ Expected: `root:200 text/html`（内容含 vite 产物特征如 `assets/` 引用
 
 ```bash
 WORK2=$(mktemp -d)
-GTA_AUTH_TOKENS="alice=gta_tok_aaa:admin" ./bin/gta-mcp-webui-test.exe -work-dir "$WORK2" -addr 127.0.0.1:0 > "$WORK2/mcp.log" 2>&1 &
+GT_AUTH_TOKENS="alice=gt_tok_aaa:admin" ./bin/gt-mcp-webui-test.exe -work-dir "$WORK2" -addr 127.0.0.1:0 > "$WORK2/mcp.log" 2>&1 &
 sleep 6
 ADDR2=$(node -e "..." "$WORK2/addr.mcp.json")
 curl -s -o /dev/null -w "root:%{http_code}\n" "http://$ADDR2/"            # 200（静态免鉴权）
 curl -s -o /dev/null -w "mcp-noauth:%{http_code}\n" -X POST "http://$ADDR2/mcp" -H "Content-Type: application/json" -d '{}'   # 401
-curl -s -o /dev/null -w "sse-token:%{http_code}\n" --max-time 20 "http://$ADDR2/events/plugins?token=gta_tok_aaa"             # 200
+curl -s -o /dev/null -w "sse-token:%{http_code}\n" --max-time 20 "http://$ADDR2/events/plugins?token=gt_tok_aaa"             # 200
 kill %2
 ```
 （`node -e "..."` 处填与上面相同的取址表达式。）
 
-清理：`rm bin/gta-mcp-webui-test.exe`。
+清理：`rm bin/gt-mcp-webui-test.exe`。
 
 - [ ] **Step 4: Docker compose 端到端（本机 docker 可用时）**
 

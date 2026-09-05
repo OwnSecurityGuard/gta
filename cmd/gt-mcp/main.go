@@ -1,0 +1,3382 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"log/slog"
+	randv2 "math/rand/v2"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/OwnSecurityGuard/gta-plugin-sdk/contract"
+	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"gopkg.in/yaml.v3"
+
+	"gametrace/docs"
+	"gametrace/pkg/auth"
+	"gametrace/pkg/authz"
+	"gametrace/pkg/config"
+	"gametrace/pkg/event"
+	"gametrace/pkg/internalipc"
+	pb "gametrace/pkg/internalipc/proto"
+	"gametrace/pkg/logging"
+	"gametrace/pkg/plugin"
+	plugindevclient "gametrace/pkg/plugindev/client"
+	plugindevserver "gametrace/pkg/plugindev/server"
+	"gametrace/pkg/schema"
+	"gametrace/pkg/store"
+	"gametrace/pkg/version"
+
+	_ "modernc.org/sqlite"
+)
+
+type sessionMetadata struct {
+	// Owner 是会话归属者（pkg/auth 的 Principal.Owner）。
+	// 空串表示匿名（本地单机用法），落到 current.json；非空落到 current.<owner>.json。
+	Owner string `json:"owner,omitempty"`
+	// ProjectID 是会话所属的项目（projects.id）。空串表示未归属任何项目。
+	// 持久化到 metadata.json，供 list_all_sessions 暴露给前端派生在线/离线状态。
+	ProjectID string `json:"project_id,omitempty"`
+	// TenantID 是会话归属租户（默认 'default'）。与 controlStore 的 sessions.tenant_id 镜像。
+	TenantID     string                 `json:"tenant_id,omitempty"`
+	SessionID    string                 `json:"session_id"`
+	StartedAt    string                 `json:"started_at"`
+	StoppedAt    string                 `json:"stopped_at,omitempty"`
+	Status       string                 `json:"status"`
+	Port         int                    `json:"port"`
+	Plugin       string                 `json:"plugin"`
+	Interface    string                 `json:"interface"`
+	PCAPFile     string                 `json:"pcap_file,omitempty"`
+	Source       string                 `json:"source,omitempty"` // nic | proxy
+	ListenAddr   string                 `json:"listen_addr,omitempty"`
+	RawPackets   int64                  `json:"raw_packets,omitempty"`
+	Events       int64                  `json:"events,omitempty"`
+	Metrics      int64                  `json:"metrics,omitempty"`
+	DecodeErrors int64                  `json:"decode_errors,omitempty"`
+	DurationSec  float64                `json:"duration_sec,omitempty"`
+	DBPath       string                 `json:"db_path"`
+	Extra        map[string]interface{} `json:"extra,omitempty"`
+
+	// ManifestSnapshot 是会话创建时的插件 manifest 快照（plugin.yaml 原文）。
+	// 从 controlStore.SessionMeta.ManifestSnapshot 同步，用于 MCP get_session_status 输出。
+	ManifestSnapshot string `json:"manifest_snapshot,omitempty"`
+}
+
+// ownerFilterFromCtx 已由 authz.go 的 visibleSessionFilter 取代
+//（项目协作边界下，列表可见性需要附加可见项目集合）。
+
+// pluginEventJSON 是插件事件 SSE 推送的 JSON 负载，与 proto PluginEvent 对应。
+type pluginEventJSON struct {
+	Type       string `json:"type"` // register | deregister | online | offline
+	InstanceID string `json:"instance_id"`
+	Name       string `json:"name"`
+	Online     bool   `json:"online"`
+	Timestamp  int64  `json:"timestamp_unix"`
+}
+
+// captureReader 组合 EventReader + ProjectionReader，供 gt-mcp 查询事件和投影数据。
+// gt-mcp 只读，通过此接口访问 capture.sqlite，便于未来替换存储后端。
+type captureReader interface {
+	store.EventReader
+	store.ProjectionReader
+}
+
+type mcpCapture struct {
+	mu          sync.Mutex
+	iface       string
+	pluginsDir  string
+	workDir     string
+	mcpServer   *server.MCPServer
+	sessionMgr  *sessionManager
+	runRegistry *RunRegistry
+	projects    *projectStore
+	users       *userStore
+	// 自助注册（/access/register）：envResolver 做保留名检查；openRegister 由
+	// 装配处按 "token 鉴权开启 && GT_AUTH_REGISTER!=off" 计算后写入。
+	envResolver  *auth.StaticResolver
+	openRegister bool
+	// authz 是项目/会话/插件/租约动作的鉴权器（策略在 pkg/authz，role 解析在本包）。
+	authz *projectAuthorizer
+	// 启动码（GT-XXXX）存取；ownerSecret 用的 token 表在装配处解析填充。
+	accessCodes   *accessCodeStore
+	tokensByOwner map[string]string
+
+	// gRPC client 连接 gt-pipeline
+	pipelineClient pb.CaptureControlClient
+	grpcConn       *grpc.ClientConn
+
+	// Developer Plane client (PluginDev gRPC). gt-mcp forwards scaffold/list/
+	// build/activate to it and never touches the filesystem or subprocesses
+	// directly. Nil means the Developer Plane is not configured for this
+	// capture instance.
+	pdClient plugindevclient.PluginDev
+	pdConn   *grpc.ClientConn
+
+	// ControlStore 读取会话元数据（db_path 等）
+	controlStore store.ControlStoreBackend
+
+	// readerOpener 打开指定会话的 capture 存储返回 captureReader。
+	// 生产按 dbDriver 路由（sqlite 走 capture.sqlite；postgres 走共享 PG 库）；
+	// 测试可注入共享实例避免 Windows 文件锁。
+	readerOpener func(dbPath, sessionID string) (captureReader, error)
+
+	// enableRawDebug 控制原始包工具是否注册到 MCP surface。
+	// 原始包能力仅限插件调试场景，默认不暴露。
+	enableRawDebug bool
+
+	// httpAddr 是本进程 HTTP 服务监听地址（如 ":8781"），
+	// 用于构造手机 sing-box 客户端可导入的远程 profile 二维码 URI。
+	httpAddr string
+
+	// lanIPOverride 由 main() 注入：显式指定本机 LAN IP。
+	// 缺省时走启发式（见 proxy_lease.go lanIP()）。
+	lanIPOverride string
+
+	// 事件总线：插件注册/注销/上下线事件经 WatchPlugins 流汇聚后广播给 SSE 订阅者。
+	eventMu   sync.Mutex
+	eventSubs map[chan pluginEventJSON]struct{}
+
+	// buildMu 串行化下载 Agent 的服务端编译（go:embed 配置文件须独占写入源码目录）。
+	buildMu sync.Mutex
+}
+
+type sessionManager struct {
+	workDir string
+	mu      sync.Mutex
+}
+
+func newSessionManager(workDir string) *sessionManager {
+	return &sessionManager{workDir: workDir}
+}
+
+func (sm *sessionManager) sessionsDir() string {
+	return filepath.Join(sm.workDir, "sessions")
+}
+
+func (sm *sessionManager) absDBPath(sessionID string) string {
+	path := sm.dbPath(sessionID)
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
+}
+
+// currentShardName 返回 owner 对应的 current 分片文件名。
+// 匿名 owner（""）保持使用 current.json（本地单机回归底线）；
+// 非 anon owner 落到 current.<owner>.json，多客户端共享 workDir 时互不覆盖。
+// owner 中的不安全字符（文件系统/转义风险）统一替换为 '_'。
+// 注意：替换会引入分片碰撞（如 "team/prod" 与 "team:prod" 都落 current.team_prod.json；
+// Windows 文件系统大小写不敏感，"Alice" 与 "alice" 共用分片）。可接受：owner 来自
+// 受信的 token 解析器（pkg/auth），而非任意用户输入；碰撞只影响 current 指针共享，
+// 不影响 control.sqlite 里的会话归属过滤。
+func currentShardName(owner string) string {
+	if owner == "" {
+		return "current.json"
+	}
+	var b strings.Builder
+	for _, r := range owner {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return "current." + b.String() + ".json"
+}
+
+func (sm *sessionManager) currentPathFor(owner string) string {
+	return filepath.Join(sm.workDir, currentShardName(owner))
+}
+
+func (sm *sessionManager) generateSessionID() string {
+	// 毫秒时间戳 + 4 位随机数，避免同毫秒内碰撞。
+	return fmt.Sprintf("%s_%04d", time.Now().Format("20060102_150405.000"), randInt(10000))
+}
+
+// randInt 返回 [0, n) 范围内的伪随机整数。
+// 使用 math/rand/v2 的全局随机源，无需加锁，并发安全。
+func randInt(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return randv2.IntN(n)
+}
+
+func (sm *sessionManager) sessionDir(sessionID string) string {
+	return filepath.Join(sm.sessionsDir(), sessionID)
+}
+
+func (sm *sessionManager) dbPath(sessionID string) string {
+	return filepath.Join(sm.sessionDir(sessionID), "capture.sqlite")
+}
+
+func (sm *sessionManager) createSession(metadata sessionMetadata) (string, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sessionDir := sm.sessionDir(metadata.SessionID)
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		return "", err
+	}
+
+	pluginsDir := filepath.Join(sessionDir, "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		return "", err
+	}
+
+	if err := sm.writeCurrent(metadata); err != nil {
+		return "", err
+	}
+
+	return sessionDir, nil
+}
+
+func (sm *sessionManager) writeCurrent(metadata sessionMetadata) error {
+	tmpPath := sm.currentPathFor(metadata.Owner) + ".tmp"
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, sm.currentPathFor(metadata.Owner))
+}
+
+// readCurrent 读取指定 owner 的 current 分片。
+// owner 为空串读 current.json（匿名 / 本地单机用法）。
+func (sm *sessionManager) readCurrent(owner string) (*sessionMetadata, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	return sm.readCurrentLocked(owner)
+}
+
+func (sm *sessionManager) readCurrentLocked(owner string) (*sessionMetadata, error) {
+	data, err := os.ReadFile(sm.currentPathFor(owner))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var metadata sessionMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, err
+	}
+	return &metadata, nil
+}
+
+// listSessions 列出 workDir 下的会话元数据（filesystem 层），按 started_at 降序。
+// f 控制 owner 可见性：metadata.json 无 owner 字段的历史会话视为匿名（""），
+// 因此匿名过滤器对既有本地数据行为不变；AllOwners=true（admin）不过滤。
+func (sm *sessionManager) listSessions(f store.SessionOwnerFilter) ([]sessionMetadata, error) {
+	sessionsDir := sm.sessionsDir()
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []sessionMetadata{}, nil
+		}
+		return nil, err
+	}
+
+	var sessions []sessionMetadata
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		sessionID := entry.Name()
+		meta, err := sm.readSessionMetadata(sessionID, f.Owner)
+		if err != nil {
+			slog.Warn("read session metadata failed", "session_id", sessionID, "error", err)
+			continue
+		}
+		if meta != nil {
+			if f.Matches(store.SessionMeta{Owner: meta.Owner}) {
+				sessions = append(sessions, *meta)
+			}
+		}
+	}
+
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].StartedAt > sessions[j].StartedAt
+	})
+
+	return sessions, nil
+}
+
+func (sm *sessionManager) sessionMetadataPath(sessionID string) string {
+	return filepath.Join(sm.sessionDir(sessionID), "metadata.json")
+}
+
+func (sm *sessionManager) writeSessionMetadata(sessionID string, metadata sessionMetadata) error {
+	path := sm.sessionMetadataPath(sessionID)
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+func (sm *sessionManager) readSessionMetadata(sessionID, owner string) (*sessionMetadata, error) {
+	current, err := sm.readCurrent(owner)
+	if err != nil {
+		return nil, err
+	}
+	if current != nil && current.SessionID == sessionID {
+		return current, nil
+	}
+
+	path := sm.sessionMetadataPath(sessionID)
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var metadata sessionMetadata
+		if err := json.Unmarshal(data, &metadata); err == nil {
+			return &metadata, nil
+		}
+	}
+
+	dbPath := sm.absDBPath(sessionID)
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	startedAt := info.ModTime().Format(time.RFC3339)
+	return &sessionMetadata{
+		SessionID: sessionID,
+		StartedAt: startedAt,
+		Status:    "stopped",
+		DBPath:    dbPath,
+	}, nil
+}
+
+func (sm *sessionManager) deleteSession(sessionID, owner string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	current, err := sm.readCurrentLocked(owner)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if current != nil && current.SessionID == sessionID {
+		tmpPath := sm.currentPathFor(owner) + ".tmp"
+		if err := os.WriteFile(tmpPath, []byte("{}"), 0644); err != nil {
+			return err
+		}
+		if err := os.Rename(tmpPath, sm.currentPathFor(owner)); err != nil {
+			return err
+		}
+	}
+
+	sessionDir := sm.sessionDir(sessionID)
+	return os.RemoveAll(sessionDir)
+}
+
+func newMCPCapture(iface, pluginsDir, workDir, pipelineAddr, httpAddr string, mcpServer *server.MCPServer, enableRawDebug bool, dbDriver, dbDSN string) (*mcpCapture, error) {
+	runRegistry, err := NewRunRegistry(workDir)
+	if err != nil {
+		slog.Warn("init run registry failed", "error", err)
+		// 不阻断启动，run 窗口功能降级
+	}
+
+	// gRPC client 连接 gt-pipeline。
+	// 默认拨号 :8088（TCP），可通过 -pipeline-addr 覆盖。
+	var conn *grpc.ClientConn
+	conn, err = internalipc.DialGRPCAddr(pipelineAddr)
+	if err != nil {
+		return nil, fmt.Errorf("dial pipeline: %w", err)
+	}
+	client := pb.NewCaptureControlClient(conn)
+
+	// Developer Plane client. By default an embedded PluginDev gRPC server is
+	// started (rooted at pluginsDir) so gt-mcp works standalone for local
+	// development. In production, set GT_PLUGINDEV_ADDR to point at the
+	// standalone gt-plugin-dev binary for physical isolation.
+	pdClient, pdConn, err := dialPluginDev(pluginsDir, os.Getenv("GT_PLUGINDEV_ADDR"))
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("dial plugin dev: %w", err)
+	}
+
+	// ControlStore：sqlite 走 control.sqlite 文件路径；postgres 走共享 PG DSN。
+	controlPath := filepath.Join(workDir, "control.sqlite")
+	controlDSNOrPath := controlPath
+	if store.IsPostgres(dbDriver) {
+		controlDSNOrPath = dbDSN
+	}
+	controlStore, err := store.OpenControlStore(dbDriver, controlDSNOrPath)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("open control store: %w", err)
+	}
+
+	// projects / access_codes 等组织-访问子系统始终落在本地 sqlite 文件
+	// （不在本次 PG 化范围）：sqlite 模式复用 control.sqlite；postgres 模式用
+	// 独立的 control-aux.sqlite，避免与 PG 控制库耦合。
+	var auxDB *sql.DB
+	if store.IsPostgres(dbDriver) {
+		auxDBPath := filepath.Join(workDir, "control-aux.sqlite")
+		auxDB, err = sql.Open("sqlite", auxDBPath)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("open aux sqlite: %w", err)
+		}
+	} else {
+		auxDB = controlStore.DB()
+	}
+	projects := newProjectStoreDB(auxDB)
+	if err := projects.Init(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("init project store: %w", err)
+	}
+	users := newUserStore(auxDB)
+	if err := users.Init(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("init user store: %w", err)
+	}
+
+	// 启动码表（access_codes）落在同一个 auxDB（sqlite 模式即 control.sqlite）。
+	accessCodes := newAccessCodeStore(auxDB)
+	if err := accessCodes.Init(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("init access code store: %w", err)
+	}
+
+	m := &mcpCapture{
+		iface:          iface,
+		pluginsDir:     pluginsDir,
+		workDir:        workDir,
+		mcpServer:      mcpServer,
+		sessionMgr:     newSessionManager(workDir),
+		runRegistry:    runRegistry,
+		projects:       projects,
+		users:          users,
+		authz:          newProjectAuthorizer(projects),
+		accessCodes:    accessCodes,
+		tokensByOwner:  loadTokensByOwner(),
+		pipelineClient: client,
+		grpcConn:       conn,
+		pdClient:       pdClient,
+		pdConn:         pdConn,
+		controlStore:   controlStore,
+		readerOpener: func(path, sessionID string) (captureReader, error) {
+			if store.IsPostgres(dbDriver) {
+				return store.OpenCaptureStoreReadOnly(dbDriver, dbDSN, nil, sessionID)
+			}
+			return store.NewSQLiteStore(path, nil)
+		},
+		enableRawDebug: enableRawDebug,
+		httpAddr:       httpAddr,
+		eventSubs:      map[chan pluginEventJSON]struct{}{},
+	}
+	// 订阅 gt-pipeline 的插件事件流并广播给 SSE 客户端（断线自动重连）。
+	m.startPluginEventWatcher()
+	return m, nil
+}
+
+// dialPluginDev resolves the Developer Plane client. When addr is non-empty it
+// dials the standalone gt-plugin-dev server at that address. Otherwise it
+// starts an embedded PluginDev gRPC server rooted at pluginsDir and dials it
+// over loopback, so local development needs no separate process. The returned
+// conn must be closed by the caller (it is the client-side connection; the
+// embedded server runs for the process lifetime).
+func dialPluginDev(pluginsDir, addr string) (plugindevclient.PluginDev, *grpc.ClientConn, error) {
+	if addr != "" {
+		conn, err := internalipc.DialGRPCAddr(addr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("dial plugindev %q: %w", addr, err)
+		}
+		return plugindevclient.NewGRPCClient(conn), conn, nil
+	}
+
+	lis, err := internalipc.ListenAddr("127.0.0.1:0")
+	if err != nil {
+		return nil, nil, fmt.Errorf("listen embedded plugindev: %w", err)
+	}
+	srv := plugindevserver.New(pluginsDir)
+	go func() {
+		// Serve blocks; on listener close it returns. Errors are logged, not fatal.
+		if serveErr := srv.Serve(lis); serveErr != nil {
+			slog.Warn("embedded plugindev server stopped", "error", serveErr)
+		}
+	}()
+	conn, err := internalipc.DialGRPCAddr(lis.Addr().String())
+	if err != nil {
+		return nil, nil, fmt.Errorf("dial embedded plugindev: %w", err)
+	}
+	return plugindevclient.NewGRPCClient(conn), conn, nil
+}
+
+func (m *mcpCapture) handleStartCapture(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	port, _ := req.RequireInt("port") // proxy 源下端口可选
+	pluginName := req.GetString("plugin", "")
+	pcapFile := req.GetString("pcap_file", "")
+	if pcapFile != "" && !filepath.IsAbs(pcapFile) {
+		pcapFile, _ = filepath.Abs(pcapFile)
+	}
+
+	// 抓包来源：nic（网卡，默认）| proxy（移动代理 gt-singbox-agent 推送）| agent（gt-agent 推流）
+	// "mobile" 是 proxy 的历史别名。
+	source := req.GetString("source", "nic")
+	if source == "mobile" {
+		source = "proxy"
+	}
+	agentSource := false
+	switch source {
+	case "", "nic", "proxy", "agent":
+	default:
+		return errorResult(fmt.Errorf("unsupported source %q (allowed: nic|proxy|agent)", source)), nil
+	}
+	if source == "agent" {
+		agentSource = true
+	}
+	projectID := req.GetString("project_id", "")
+	// 绑定项目要求对该项目可读（成员即可把会话抓进项目，方案 §3.2 session 轴）。
+	var projectTenant string
+	if projectID != "" && m.projects != nil {
+		target, err := m.projects.Get(ctx, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if target == nil {
+			return errorResult(fmt.Errorf("project %s not found", projectID)), nil
+		}
+		if err := m.authz.Can(ctx, authz.ActionProjectRead, projectResource(target)); err != nil {
+			return errorResult(fmt.Errorf("project %s not found", projectID)), nil
+		}
+		projectTenant = target.TenantID
+	}
+	listenAddr := req.GetString("listen_addr", "")
+	slog.Info("start_capture requested", "port", port, "plugin", pluginName, "pcap_file", pcapFile, "source", source, "listen_addr", listenAddr)
+
+	// 构造 gRPC request
+	grpcReq := &pb.StartCaptureRequest{
+		Plugin:    pluginName,
+		Port:      int32(port),
+		Agent:     agentSource,
+		ProjectId: projectID,
+	}
+	// 透传调用方身份：pipeline 记录会话归属（SessionMeta.Owner）并做 owner 作用域插件路由。
+	// pluginOwners 附带调用者所属项目的插件归属 owner：项目成员可按名解析项目插件。
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		grpcReq.Owner = p.Owner
+		grpcReq.AllOwners = p.IsAdmin
+		grpcReq.PluginOwners = m.pluginOwnersFor(ctx, p.Owner)
+	}
+	switch {
+	case source == "proxy":
+		if strings.TrimSpace(listenAddr) == "" {
+			listenAddr = "127.0.0.1:9090"
+		}
+		grpcReq.Source = &pb.StartCaptureRequest_Mobile{
+			Mobile: &pb.MobileSourceConfig{
+				ListenAddr: listenAddr,
+			},
+		}
+	case pcapFile != "":
+		grpcReq.Source = &pb.StartCaptureRequest_File{
+			File: &pb.PcapFileConfig{Path: pcapFile},
+		}
+	case agentSource:
+		// 纯 agent source：不设置基础 source，pipeline 侧仅订阅 agent hub
+	default:
+		// Live capture：使用配置的网卡，若 Device 为空则由 pipeline 自动探测所有网卡
+		if port <= 0 {
+			return errorResult(fmt.Errorf("port is required for source=nic")), nil
+		}
+		grpcReq.Source = &pb.StartCaptureRequest_Live{
+			Live: &pb.PcapLiveConfig{Device: m.iface},
+		}
+	}
+
+	resp, err := m.pipelineClient.StartCapture(ctx, grpcReq)
+	if err != nil {
+		return errorResult(fmt.Errorf("start capture: %w", err)), nil
+	}
+
+	// 记录当前 session（current.json + 每会话 metadata.json）
+	// 写 metadata.json 使 getDBPath 即使 gt-mcp 与 gt-pipeline 的 workDir 不一致，
+	// 也能通过 pipeline 返回的绝对 db_path 定位到正确的会话库。
+	meta := sessionMetadata{
+		Owner:      auth.OwnerFrom(ctx),
+		TenantID:   projectTenant,
+		ProjectID:  projectID,
+		SessionID:  resp.GetSessionId(),
+		StartedAt:  time.Now().Format(time.RFC3339),
+		Status:     "running",
+		Port:       port,
+		Plugin:     pluginName,
+		Interface:  m.iface,
+		PCAPFile:   pcapFile,
+		Source:     source,
+		ListenAddr: listenAddr,
+		DBPath:     resp.GetDbPath(),
+	}
+	if err := m.sessionMgr.writeSessionMetadata(resp.GetSessionId(), meta); err != nil {
+		slog.Warn("write session metadata failed", "session_id", resp.GetSessionId(), "error", err)
+	}
+	m.sessionMgr.writeCurrent(meta)
+
+	slog.Info("start_capture succeeded", "session_id", resp.GetSessionId(), "port", port, "plugin", pluginName, "source", source, "db_path", resp.GetDbPath())
+	return successResult(map[string]any{
+		"status":      "started",
+		"session_id":  resp.GetSessionId(),
+		"port":        port,
+		"plugin":      pluginName,
+		"source":      source,
+		"db_path":     resp.GetDbPath(),
+		"interface":   m.iface,
+		"listen_addr": listenAddr,
+		"project_id":  projectID,
+	}), nil
+}
+
+func (m *mcpCapture) handleStopCapture(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	owner := auth.OwnerFrom(ctx)
+	sessionID := req.GetString("session_id", "")
+	slog.Info("stop_capture requested", "session_id", sessionID)
+
+	if sessionID == "" {
+		// 回退到当前 session（向后兼容）
+		sess, err := m.sessionMgr.readCurrent(owner)
+		if err != nil {
+			return errorResult(fmt.Errorf("read current session: %w", err)), nil
+		}
+		if sess == nil || sess.Status == "stopped" {
+			slog.Warn("stop_capture rejected: no active capture session")
+			return errorResult(fmt.Errorf("no active capture session")), nil
+		}
+		sessionID = sess.SessionID
+	} else if err := m.authorizeSession(ctx, sessionID); err != nil {
+		// 显式指定 session_id 时校验归属（admin 全通过）
+		return errorResult(err), nil
+	}
+
+	resp, err := m.pipelineClient.StopCapture(ctx, &pb.StopCaptureRequest{SessionId: sessionID})
+	if err != nil {
+		// pipeline 侧已无此会话（典型：pipeline 重启后内存态丢失，或会话已在
+		// 服务端停止，而 metadata.json 仍是 running）。停止是幂等操作：本地
+		// 标记 stopped 而非报错，否则用户会陷入「页面显示运行中、停止却失败」
+		// 的状态死锁。其它错误照常透出。
+		if status.Code(err) != codes.FailedPrecondition {
+			return errorResult(fmt.Errorf("stop capture: %w", err)), nil
+		}
+		slog.Warn("stop_capture: no active capture on pipeline, marking stopped locally", "session_id", sessionID, "error", err)
+		resp = &pb.StopCaptureResponse{}
+	}
+
+	// 更新会话元数据：优先 current 会话，否则按 session_id 读取——显式停止
+	// 非当前会话也要落盘终态，否则列表会一直显示 running。
+	sess, serr := m.sessionMgr.readCurrent(owner)
+	if serr != nil || sess == nil || sess.SessionID != sessionID {
+		s2, s2err := m.sessionMgr.readSessionMetadata(sessionID, owner)
+		if s2err != nil {
+			s2 = nil
+		}
+		sess = s2
+	}
+	if sess != nil {
+		sess.Status = "stopped"
+		sess.StoppedAt = time.Now().Format(time.RFC3339)
+		// 幂等路径（pipeline 无此会话）resp 计数为 0：保留元数据已有计数，
+		// 只有用真实停止结果（非零）才覆盖，避免把历史计数清零。
+		if resp.GetRawPackets() > 0 || resp.GetEvents() > 0 || resp.GetMetrics() > 0 || resp.GetDecodeErrors() > 0 {
+			sess.RawPackets = resp.GetRawPackets()
+			sess.Events = resp.GetEvents()
+			sess.Metrics = resp.GetMetrics()
+			sess.DecodeErrors = resp.GetDecodeErrors()
+		}
+		if resp.GetDurationSec() > 0 {
+			sess.DurationSec = resp.GetDurationSec()
+		}
+		if cur, cerr := m.sessionMgr.readCurrent(owner); cerr == nil && cur != nil && cur.SessionID == sessionID {
+			m.sessionMgr.writeCurrent(*sess)
+		}
+		m.sessionMgr.writeSessionMetadata(sess.SessionID, *sess)
+	}
+
+	slog.Info("stop_capture completed", "session_id", sessionID, "raw_packets", resp.GetRawPackets(), "events", resp.GetEvents(), "metrics", resp.GetMetrics(), "decode_errors", resp.GetDecodeErrors(), "duration_sec", resp.GetDurationSec())
+	return successResult(map[string]any{
+		"status":        "stopped",
+		"session_id":    sessionID,
+		"raw_packets":   resp.GetRawPackets(),
+		"events":        resp.GetEvents(),
+		"metrics":       resp.GetMetrics(),
+		"decode_errors": resp.GetDecodeErrors(),
+		"duration_sec":  resp.GetDurationSec(),
+	}), nil
+}
+
+func (m *mcpCapture) handleGetSessionStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	owner := auth.OwnerFrom(ctx)
+	sessionID := req.GetString("session_id", "")
+
+	// 如果未指定 session_id，回退到当前 session
+	if sessionID == "" {
+		sess, err := m.sessionMgr.readCurrent(owner)
+		if err != nil {
+			slog.Warn("read current session failed", "error", err)
+			return successResult(map[string]any{"state": "idle"}), nil
+		}
+		if sess == nil {
+			return successResult(map[string]any{"state": "idle"}), nil
+		}
+		sessionID = sess.SessionID
+	}
+
+	slog.Debug("get_session_status requested", "session_id", sessionID)
+
+	// 显式指定 session_id 时校验归属（admin 全通过）
+	if req.GetString("session_id", "") != "" {
+		if err := m.authorizeSession(ctx, sessionID); err != nil {
+			return errorResult(err), nil
+		}
+	}
+
+	// 通过 gRPC 查询实时状态
+	if m.pipelineClient != nil {
+		resp, err := m.pipelineClient.GetCaptureStatus(ctx, &pb.GetCaptureStatusRequest{SessionId: sessionID})
+		if err == nil {
+			return successResult(map[string]any{
+				"session_id":    sessionID,
+				"state":         resp.GetState(),
+				"source_name":   resp.GetSourceName(),
+				"packets_in":    resp.GetPacketsIn(),
+				"raw_count":     resp.GetRawCount(),
+				"event_count":   resp.GetEventCount(),
+				"metric_count":  resp.GetMetricCount(),
+				"decode_errors": resp.GetDecodeErrors(),
+				"drops":         resp.GetDrops(),
+				"errors":        resp.GetErrors(),
+				"err":           resp.GetErr(),
+				// agent 连接活性：agent_connected=true 仅表示推流连接已建立，
+				// 与 raw_count 无关——"连上了但一个包都没有"是常见状态，
+				// UI 据此给不同的排查指引（去启动游戏 vs 去检查 agent）。
+				"agent_connected":      resp.GetAgentConnected(),
+				"agent_last_seen_unix": resp.GetAgentLastSeenUnix(),
+			}), nil
+		}
+		// gRPC 查询失败，降级返回 sessionMgr 中的元数据
+		slog.Warn("get_session_status gRPC failed, falling back to metadata", "error", err, "session_id", sessionID)
+	}
+
+	// 返回 sessionMgr 中的元数据
+	sess, err := m.sessionMgr.readSessionMetadata(sessionID, owner)
+	if err != nil || sess == nil {
+		return successResult(map[string]any{"state": "closed", "session_id": sessionID}), nil
+	}
+	result := map[string]any{
+		"session_id":    sess.SessionID,
+		"state":         sess.Status,
+		"port":          sess.Port,
+		"plugin":        sess.Plugin,
+		"interface":     sess.Interface,
+		"pcap_file":     sess.PCAPFile,
+		"raw_packets":   sess.RawPackets,
+		"events":        sess.Events,
+		"metrics":       sess.Metrics,
+		"decode_errors": sess.DecodeErrors,
+		"duration_sec":  sess.DurationSec,
+		"db_path":       sess.DBPath,
+	}
+	if sess.ManifestSnapshot != "" {
+		result["manifest_snapshot"] = sess.ManifestSnapshot
+	}
+	return successResult(result), nil
+}
+
+func (m *mcpCapture) handleListPlugins(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// Discovery lives in the Developer Plane (pkg/plugindev). gt-mcp is a pure
+	// forwarder — it never touches the filesystem here.
+	if m.pdClient == nil {
+		return errorResult(fmt.Errorf("plugin dev not available (Developer Plane not configured)")), nil
+	}
+	resp, err := m.pdClient.ListPlugins(ctx)
+	if err != nil {
+		slog.Error("list_plugins failed", "error", err)
+		return errorResult(err), nil
+	}
+	plugins := make([]map[string]string, 0, len(resp.Plugins))
+	for _, p := range resp.Plugins {
+		plugins = append(plugins, map[string]string{
+			"name":   p.Name,
+			"binary": p.Binary,
+			"dir":    p.Dir,
+		})
+	}
+	slog.Info("list_plugins completed", "count", len(plugins))
+	return successResult(map[string]any{"plugins": plugins, "count": len(plugins)}), nil
+}
+
+// exeExt returns the executable suffix for the current platform (".exe" on
+// Windows, empty elsewhere).
+func exeExt() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+func (m *mcpCapture) handleGetPluginContract(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return successResult(map[string]any{"contract_yaml": string(contract.RawYAML())}), nil
+}
+
+func (m *mcpCapture) handleGetPluginDevGuide(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return successResult(map[string]any{"guide": string(docs.DevGuide())}), nil
+}
+
+func (m *mcpCapture) handleListRegisteredPlugins(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if m.pipelineClient == nil {
+		return errorResult(fmt.Errorf("pipeline client not available")), nil
+	}
+	// owner 作用域：非 admin 只见自己的 + 匿名（系统）插件；admin 见全部。
+	// 身份经 RPC 透传给 pipeline（capturecontrol.Server 注入 ctx）。
+	grpcReq := &pb.ListPluginsRequest{}
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		grpcReq.Owner = p.Owner
+		grpcReq.AllOwners = p.IsAdmin
+	}
+	resp, err := m.pipelineClient.ListPlugins(ctx, grpcReq)
+	if err != nil {
+		slog.Error("list_registered_plugins failed", "error", err)
+		return errorResult(fmt.Errorf("list registered plugins: %w", err)), nil
+	}
+	var plugins []map[string]any
+	for _, p := range resp.GetPlugins() {
+		plugins = append(plugins, map[string]any{
+			"instance_id":    p.GetInstanceId(),
+			"name":           p.GetName(),
+			"protocol":       p.GetProtocol(),
+			"type":           p.GetType(),
+			"api_version":    p.GetApiVersion(),
+			"socket_path":    p.GetSocketPath(),
+			"online":         p.GetOnline(),
+			"last_heartbeat": p.GetLastHeartbeatUnix(),
+			"owner":          p.GetOwner(),
+		})
+	}
+	return successResult(map[string]any{"plugins": plugins}), nil
+}
+
+func (m *mcpCapture) handleGetPluginManifest(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if m.pipelineClient == nil {
+		return errorResult(fmt.Errorf("pipeline client not available")), nil
+	}
+	name := req.GetString("name", "")
+	// owner 作用域查找：只能查到自己 + 匿名（系统）插件的 manifest；admin 不限。
+	grpcReq := &pb.GetPluginManifestRequest{Name: name}
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		grpcReq.Owner = p.Owner
+		grpcReq.AllOwners = p.IsAdmin
+	}
+	resp, err := m.pipelineClient.GetPluginManifest(ctx, grpcReq)
+	if err != nil {
+		slog.Error("get_plugin_manifest failed", "error", err)
+		return errorResult(fmt.Errorf("get plugin manifest: %w", err)), nil
+	}
+	return successResult(map[string]any{
+		"name":     resp.GetName(),
+		"manifest": string(resp.GetManifest()),
+	}), nil
+}
+
+func (m *mcpCapture) handleDeregisterPlugin(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if m.pipelineClient == nil {
+		return errorResult(fmt.Errorf("pipeline client not available")), nil
+	}
+	instanceID := req.GetString("instance_id", "")
+	name := req.GetString("name", "")
+	if instanceID == "" && name == "" {
+		return errorResult(fmt.Errorf("instance_id or name is required")), nil
+	}
+	resp, err := m.pipelineClient.DeregisterPlugin(ctx, &pb.DeregisterPluginRequest{
+		InstanceId: instanceID,
+		Name:       name,
+	})
+	if err != nil {
+		slog.Error("deregister_plugin failed", "error", err)
+		return errorResult(fmt.Errorf("deregister plugin: %w", err)), nil
+	}
+	return successResult(map[string]any{
+		"ok":          resp.GetOk(),
+		"instance_id": resp.GetInstanceId(),
+		"name":        resp.GetName(),
+	}), nil
+}
+
+func (m *mcpCapture) handleSetSessionPlugin(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	pluginName := req.GetString("plugin", "")
+	if sessionID == "" || pluginName == "" {
+		return errorResult(fmt.Errorf("session_id and plugin are required")), nil
+	}
+	if m.pipelineClient == nil {
+		return errorResult(fmt.Errorf("pipeline client not available")), nil
+	}
+	slog.Info("set_session_plugin requested", "session_id", sessionID, "plugin", pluginName)
+	// 归属校验：只能给自家会话换插件（admin 全通过）
+	if err := m.authorizeSession(ctx, sessionID); err != nil {
+		return errorResult(err), nil
+	}
+	grpcReq := &pb.SetSessionPluginRequest{
+		SessionId: sessionID,
+		Plugin:    pluginName,
+	}
+	// 项目成员可切到项目插件：附带你属项目插件归属 owner。
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		grpcReq.PluginOwners = m.pluginOwnersFor(ctx, p.Owner)
+	}
+	resp, err := m.pipelineClient.SetSessionPlugin(ctx, grpcReq)
+	if err != nil {
+		return errorResult(fmt.Errorf("set session plugin: %w", err)), nil
+	}
+	if !resp.GetOk() {
+		return errorResult(fmt.Errorf("set session plugin failed: %s", resp.GetMessage())), nil
+	}
+	slog.Info("set_session_plugin succeeded", "session_id", sessionID, "plugin", pluginName)
+	return successResult(map[string]any{
+		"session_id": resp.GetSessionId(),
+		"plugin":     resp.GetPlugin(),
+	}), nil
+}
+
+func (m *mcpCapture) handleListInterfaces(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if m.pipelineClient == nil {
+		return errorResult(fmt.Errorf("pipeline client not available")), nil
+	}
+	resp, err := m.pipelineClient.ListInterfaces(ctx, &pb.ListInterfacesRequest{})
+	if err != nil {
+		slog.Error("list_interfaces failed", "error", err)
+		return errorResult(fmt.Errorf("list interfaces: %w", err)), nil
+	}
+	var out []map[string]any
+	for _, name := range resp.GetNames() {
+		out = append(out, map[string]any{"name": name})
+	}
+	slog.Info("list_interfaces completed", "count", len(out))
+	return successResult(map[string]any{"interfaces": out}), nil
+}
+
+func (m *mcpCapture) handleListLiveSessions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if m.pipelineClient == nil {
+		return errorResult(fmt.Errorf("pipeline client not available")), nil
+	}
+	resp, err := m.pipelineClient.ListCaptureSessions(ctx, &pb.ListCaptureSessionsRequest{})
+	if err != nil {
+		slog.Error("list_live_sessions failed", "error", err)
+		return errorResult(fmt.Errorf("list capture sessions: %w", err)), nil
+	}
+	var sessions []map[string]any
+	for _, s := range resp.GetSessions() {
+		sessions = append(sessions, map[string]any{
+			"session_id":      s.GetSessionId(),
+			"state":           s.GetState(),
+			"source_name":     s.GetSourceName(),
+			"port":            s.GetPort(),
+			"plugin":          s.GetPlugin(),
+			"interface":       s.GetInterface(),
+			"pcap_file":       s.GetPcapFile(),
+			"started_at_unix": s.GetStartedAtUnix(),
+		})
+	}
+	slog.Info("list_live_sessions completed", "count", len(sessions))
+	return successResult(map[string]any{"count": len(sessions), "sessions": sessions}), nil
+}
+
+func (m *mcpCapture) handleAggregateQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	expression, err := req.RequireString("expression")
+	if err != nil {
+		return errorResult(err), nil
+	}
+	sessionID := req.GetString("session_id", "")
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("aggregate_query requested", "expression", expression, "db_path", dbPath, "session_id", sessionID)
+	if dbPath == "" {
+		slog.Warn("aggregate_query rejected: no capture database available")
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	metrics, err := reader.QueryMetrics(ctx, store.MetricQuery{})
+	if err != nil {
+		return errorResult(fmt.Errorf("query metrics: %w", err)), nil
+	}
+
+	program, err := expr.Compile(expression, expr.Env(map[string]any{
+		"name":   "",
+		"window": "",
+		"value":  0.0,
+		"group":  map[string]string{},
+	}))
+	if err != nil {
+		return errorResult(fmt.Errorf("compile expression: %w", err)), nil
+	}
+
+	var matched []map[string]any
+	for _, metric := range metrics {
+		env := map[string]any{
+			"name":   metric.Name,
+			"window": metric.Window.Format(time.RFC3339),
+			"value":  metric.Value,
+			"group":  metric.Group,
+		}
+		out, err := expr.Run(program, env)
+		if err != nil {
+			continue
+		}
+		if v, ok := out.(bool); ok && v {
+			matched = append(matched, map[string]any{
+				"name":   metric.Name,
+				"window": metric.Window.Format(time.RFC3339),
+				"group":  metric.Group,
+				"value":  metric.Value,
+			})
+		}
+	}
+	slog.Info("aggregate_query completed", "expression", expression, "matched", len(matched))
+	out := map[string]any{"count": len(matched), "metrics": matched}
+	// Semantic Contract v1 §13：从 manifest 快照派生可聚合字段（contract.CanAggregate），
+	// 供 Agent 编写 rules.yaml 的 value/group_by 时对齐声明。
+	if fields := aggregatableContractFields(m.getManifestSnapshot(sessionID)); len(fields) > 0 {
+		out["aggregatable_fields"] = fields
+	}
+	return successResult(out), nil
+}
+
+// aggregatableFieldView 是 aggregate_query 返回的 manifest 可聚合字段视图。
+type aggregatableFieldView struct {
+	Schema string `json:"schema"`
+	Field  string `json:"field"`
+	Alias  string `json:"alias,omitempty"`
+}
+
+// aggregatableContractFields 用 SDK 契约入口 contract.CanAggregate 列出 manifest 中
+// 声明为 aggregatable 的字段。快照缺失或解析失败时返回 nil（契约信息为可选补充）。
+func aggregatableContractFields(snapshot string) []aggregatableFieldView {
+	if snapshot == "" {
+		return nil
+	}
+	m, err := plugin.ParseManifest([]byte(snapshot))
+	if err != nil {
+		return nil
+	}
+	idx := contract.ManifestSchemaIndex(m)
+	var out []aggregatableFieldView
+	for wire, s := range idx {
+		for name, f := range s.Fields {
+			if !contract.CanAggregate(m, wire, name) {
+				continue
+			}
+			v := aggregatableFieldView{Schema: wire, Field: name}
+			if f != nil {
+				v.Alias = f.Alias
+			}
+			out = append(out, v)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Schema != out[j].Schema {
+			return out[i].Schema < out[j].Schema
+		}
+		return out[i].Field < out[j].Field
+	})
+	return out
+}
+
+func (m *mcpCapture) handleGetCaptureSchema(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("get_capture_schema requested", "db_path", dbPath, "session_id", sessionID)
+	if dbPath == "" {
+		slog.Warn("get_capture_schema rejected: no capture database available")
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	sessionDir := filepath.Dir(dbPath)
+
+	// 打开 reader 用于 loadDataFields 采样推断（manifest 缺失时的兜底路径）
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(fmt.Errorf("open reader: %w", err)), nil
+	}
+	defer reader.Close()
+
+	// 1. events 表的列（包含 data.* 展开后的字段）
+	// 这些字段同时也是 list_decoded_data filter 表达式的 env 变量。
+	queryFields := []map[string]any{
+		{"name": "id", "type": "string", "description": "decoded event uuid"},
+		{"name": "timestamp", "type": "string", "description": "event timestamp (RFC3339)"},
+		{"name": "session_id", "type": "string", "description": "capture session id or tcp flow key"},
+		{"name": "protocol", "type": "string", "description": "transport protocol, e.g. tcp"},
+		{"name": "raw_len", "type": "number", "description": "original packet length"},
+		{"name": "flow_id", "type": "number", "description": "direction-agnostic flow hash (5-tuple)"},
+		{"name": "direction", "type": "string", "description": "client_to_server | server_to_client | unknown"},
+		{"name": "msg_name", "type": "string", "description": "business message name"},
+		{"name": "msg_id", "type": "number", "description": "per-flow auto-increment message id"},
+		{"name": "is_push", "type": "number", "description": "1 if server push, 0 otherwise"},
+		{"name": "src", "type": "string", "description": "source addr (ip:port)"},
+		{"name": "dst", "type": "string", "description": "destination addr (ip:port)"},
+		{"name": "tcp_flags", "type": "string", "description": "TCP control flags (FIN|RST|...), non-empty means tcp_close event"},
+	}
+	decodedColumns := make([]map[string]any, len(queryFields))
+	copy(decodedColumns, queryFields)
+
+	// data.* 字段三优先级：manifest 声明（Semantic Contract 真源）> schema.json > event_index 采样。
+	var dataFields []dataField
+	fieldSource := "event_index_sampling"
+	if snapshot := m.getManifestSnapshot(sessionID); snapshot != "" {
+		if mf, ok := manifestDataFields(snapshot); ok {
+			dataFields = mf
+			fieldSource = "manifest"
+		}
+	}
+	if dataFields == nil {
+		mf, err := loadDataFields(ctx, sessionDir, reader)
+		if err != nil {
+			slog.Warn("load data fields failed", "error", err)
+		}
+		if mf != nil {
+			dataFields = mf
+			if _, err := os.Stat(filepath.Join(sessionDir, "schema.json")); err == nil {
+				fieldSource = "schema.json"
+			}
+		}
+	}
+	for _, f := range dataFields {
+		decodedColumns = append(decodedColumns, map[string]any{
+			"name":        "data." + f.name,
+			"type":        f.typ,
+			"description": "plugin decoded field",
+		})
+	}
+
+	// 2. state_changes 投影表的列
+	stateChangeColumns := []map[string]any{
+		{"name": "id", "type": "string", "description": "state change uuid"},
+		{"name": "session_id", "type": "string", "description": "capture session id"},
+		{"name": "flow_id", "type": "string", "description": "flow id"},
+		{"name": "timestamp", "type": "string", "description": "change timestamp (RFC3339)"},
+		{"name": "subject_type", "type": "string", "description": "e.g. Building, Hero"},
+		{"name": "subject_id", "type": "string", "description": "subject identifier"},
+		{"name": "op", "type": "string", "description": "set | delete | merge"},
+		{"name": "path", "type": "string", "description": "changed path/field"},
+		{"name": "before", "type": "any", "description": "previous value (JSON)"},
+		{"name": "after", "type": "any", "description": "new value (JSON)"},
+		{"name": "version", "type": "number", "description": "optional version"},
+	}
+
+	// 3. aggregated_metrics 表的列
+	metricColumns := []map[string]any{
+		{"name": "name", "type": "string", "description": "metric output name, e.g. http_req_count"},
+		{"name": "window", "type": "string", "description": "metric window start (RFC3339)"},
+		{"name": "value", "type": "number", "description": "metric value"},
+		{"name": "group", "type": "map[string]string", "description": "group tags, access by group['data.method']"},
+	}
+
+	// 3. 读取 rules.yaml，返回扁平化规则信息
+	var rules []map[string]any
+	rulesPath := filepath.Join(sessionDir, "rules.yaml")
+	if rulesData, err := os.ReadFile(rulesPath); err == nil {
+		var f config.File
+		if err := yaml.Unmarshal(rulesData, &f); err == nil {
+			for _, r := range f.Rules {
+				rules = append(rules, map[string]any{
+					"name":     r.Name,
+					"filter":   r.Filter,
+					"type":     r.Aggregate.Type,
+					"window":   r.Aggregate.Window,
+					"group_by": r.Aggregate.GroupBy,
+					"value":    r.Aggregate.Value,
+					"output":   r.Aggregate.Output,
+				})
+			}
+		} else {
+			slog.Warn("parse rules.yaml failed", "path", rulesPath, "error", err)
+		}
+	}
+
+	// 4. 生成示例表达式
+	examples := buildExamples(dataFields, rules)
+
+	// 5. 契约声明视图（schema/state 层，从 manifest 快照派生）
+	var manifestView map[string]any
+	if snapshot := m.getManifestSnapshot(sessionID); snapshot != "" {
+		manifestView = manifestDeclarationView(snapshot)
+	}
+	result := map[string]any{
+		"sources": []map[string]any{
+			{
+				"name":        "events",
+				"description": "解码后的事件表，list_decoded_data 的数据来源",
+				"columns":     decodedColumns,
+			},
+			{
+				"name":        "state_changes",
+				"description": "状态变更投影表，list_state_changes 的数据来源",
+				"columns":     stateChangeColumns,
+			},
+			{
+				"name":        "aggregated_metrics",
+				"description": "聚合指标表，aggregate_query 的数据来源",
+				"columns":     metricColumns,
+			},
+		},
+		"query_fields": queryFields,
+		"rules":        rules,
+		"examples":     examples,
+		"field_source": fieldSource,
+	}
+	if manifestView != nil {
+		result["manifest"] = manifestView
+	}
+
+	slog.Info("get_capture_schema completed", "session_dir", sessionDir, "field_source", fieldSource, "decoded_columns", len(decodedColumns), "rules", len(rules))
+	return successResult(result), nil
+}
+
+type dataField struct {
+	name string
+	typ  string
+}
+
+// getManifestSnapshot 返回会话创建时保存的 plugin manifest 快照（plugin.yaml 原文）。
+// 优先 ControlStore（持久层），无则返回空串。
+func (m *mcpCapture) getManifestSnapshot(sessionID string) string {
+	if m.controlStore != nil && sessionID != "" {
+		if meta, err := m.controlStore.GetSession(context.Background(), sessionID); err == nil && meta != nil {
+			return meta.ManifestSnapshot
+		}
+	}
+	return ""
+}
+
+// manifestDataFields 从 manifest 快照派生 data.* 字段清单（Semantic Contract 真源）。
+// 返回 ok=false 表示快照缺失或未声明任何 schema 字段，调用方回退到 schema.json / 采样。
+func manifestDataFields(snapshot string) ([]dataField, bool) {
+	m, err := plugin.ParseManifest([]byte(snapshot))
+	if err != nil {
+		return nil, false
+	}
+	idx := contract.ManifestSchemaIndex(m)
+	if len(idx) == 0 {
+		return nil, false
+	}
+	var fields []dataField
+	for _, s := range idx {
+		for name, f := range s.Fields {
+			if f == nil {
+				continue
+			}
+			fields = append(fields, dataField{name: name, typ: string(f.Type)})
+		}
+	}
+	if len(fields) == 0 {
+		return nil, false
+	}
+	sort.Slice(fields, func(i, j int) bool { return fields[i].name < fields[j].name })
+	return fields, true
+}
+
+// manifestDeclarationView 把 manifest 的契约声明（schema/state）压成
+// MCP 可返回的紧凑视图，让 Agent 无需连接插件即可了解会话的契约能力。
+func manifestDeclarationView(snapshot string) map[string]any {
+	m, err := plugin.ParseManifest([]byte(snapshot))
+	if err != nil {
+		return nil
+	}
+	// capabilities：转成字符串列表。
+	var caps []string
+	for cap, on := range m.Capabilities {
+		if on {
+			caps = append(caps, string(cap))
+		}
+	}
+	sort.Strings(caps)
+	out := map[string]any{
+		"name":         m.Name,
+		"protocol":     m.Protocol,
+		"capabilities": caps,
+	}
+
+	// schema 层：字段 + semantic / 查询能力位。
+	type fieldView struct {
+		Name         string `json:"name"`
+		Type         string `json:"type"`
+		Semantic     string `json:"semantic,omitempty"`
+		Queryable    bool   `json:"queryable,omitempty"`
+		Aggregatable bool   `json:"aggregatable,omitempty"`
+		Groupable    bool   `json:"groupable,omitempty"`
+		Alias        string `json:"alias,omitempty"`
+	}
+	var schemas []map[string]any
+	idx := contract.ManifestSchemaIndex(m)
+	for wire, s := range idx {
+		var fvs []fieldView
+		for name, f := range s.Fields {
+			if f == nil {
+				continue
+			}
+			fvs = append(fvs, fieldView{
+				Name: name, Type: string(f.Type), Semantic: string(f.Semantic),
+				Queryable: f.Queryable, Aggregatable: f.Aggregatable,
+				Groupable: f.Groupable, Alias: f.Alias,
+			})
+		}
+		sort.Slice(fvs, func(i, j int) bool { return fvs[i].Name < fvs[j].Name })
+		schemas = append(schemas, map[string]any{"id": wire, "fields": fvs})
+	}
+	if len(schemas) > 0 {
+		out["schemas"] = schemas
+	}
+
+	// state 层：subject 类型 + id 字段 + 路径白名单。
+	if len(m.States) > 0 {
+		var states []map[string]any
+		for _, s := range m.States {
+			states = append(states, map[string]any{
+				"subject_type": s.Type, "id_field": s.IDField, "paths": s.Paths,
+			})
+		}
+		out["states"] = states
+	}
+
+	return out
+}
+
+func loadDataFields(ctx context.Context, sessionDir string, reader captureReader) ([]dataField, error) {
+	// 优先读取 schema.json
+	schemaPath := filepath.Join(sessionDir, "schema.json")
+	if schemaData, err := os.ReadFile(schemaPath); err == nil {
+		var s schema.Schema
+		if err := json.Unmarshal(schemaData, &s); err == nil && s.Fields != nil {
+			fields := make([]dataField, 0, len(s.Fields))
+			for name, f := range s.Fields {
+				fields = append(fields, dataField{name: name, typ: string(f.Type)})
+			}
+			sort.Slice(fields, func(i, j int) bool { return fields[i].name < fields[j].name })
+			return fields, nil
+		}
+	}
+
+	// 回退：从 event_index 采样推断 projection_json
+	rows, err := reader.RawQuery(ctx, "SELECT projection_json FROM event_index LIMIT 50")
+	if err != nil {
+		return nil, err
+	}
+
+	seen := map[string]string{}
+	for _, row := range rows {
+		// projection_json 列可能是 []byte 或 string，统一处理
+		var jsonStr string
+		switch v := row["projection_json"].(type) {
+		case []byte:
+			jsonStr = string(v)
+		case string:
+			jsonStr = v
+		default:
+			continue
+		}
+		var data map[string]any
+		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+			continue
+		}
+		for k, v := range data {
+			if _, exists := seen[k]; exists {
+				continue
+			}
+			seen[k] = inferType(v)
+		}
+	}
+
+	fields := make([]dataField, 0, len(seen))
+	for name, typ := range seen {
+		fields = append(fields, dataField{name: name, typ: typ})
+	}
+	sort.Slice(fields, func(i, j int) bool { return fields[i].name < fields[j].name })
+	return fields, nil
+}
+
+func inferType(v any) string {
+	switch v.(type) {
+	case string:
+		return "string"
+	case float64:
+		return "number"
+	case bool:
+		return "boolean"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	default:
+		return "unknown"
+	}
+}
+
+func buildExamples(fields []dataField, rules []map[string]any) map[string][]string {
+	examples := map[string][]string{
+		"aggregate_query": {},
+	}
+
+	// 为每个规则生成一个示例
+	for _, r := range rules {
+		name, _ := r["name"].(string)
+		if name == "" {
+			continue
+		}
+		examples["aggregate_query"] = append(examples["aggregate_query"], fmt.Sprintf("name == %q", name))
+	}
+
+	// 如果有 method 字段，给出按方法过滤的示例
+	hasMethod := false
+	for _, f := range fields {
+		if f.name == "method" {
+			hasMethod = true
+			break
+		}
+	}
+	if hasMethod {
+		examples["aggregate_query"] = append(examples["aggregate_query"], `group["data.method"] == "GET"`)
+	}
+
+	// list_decoded_data filter 示例 - 基于实际字段动态生成
+	filterExamples := []string{
+		`protocol == "tcp"`,
+		`raw_len > 100`,
+	}
+
+	// 根据实际 data 字段生成示例
+	for _, f := range fields {
+		switch f.name {
+		case "type":
+			filterExamples = append(filterExamples, `data.type == "request"`)
+		case "method":
+			filterExamples = append(filterExamples, `data.method == "GET"`)
+		case "path":
+			filterExamples = append(filterExamples, `data.path contains "/api"`)
+		case "body_len":
+			filterExamples = append(filterExamples, `data.body_len > 50`)
+		case "status":
+			filterExamples = append(filterExamples, `data.status == "200"`)
+		}
+		// 如果是 number 类型，生成比较示例
+		if f.typ == "number" && f.name != "body_len" {
+			filterExamples = append(filterExamples, fmt.Sprintf(`data.%s > 5`, f.name))
+		}
+	}
+
+	// 添加组合条件示例
+	if hasMethod {
+		filterExamples = append(filterExamples, `data.method == "POST" && data.body_len > 100`)
+	}
+
+	examples["list_decoded_data_filter"] = filterExamples
+
+	return examples
+}
+
+func (m *mcpCapture) handleListDecodedData(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+	sessionID := req.GetString("session_id", "")
+	filterExpr := req.GetString("filter", "")
+	// sessionID 为空时解析为当前会话的实际 ID：分页查询（QueryEventPage /
+	// StreamEventsDesc / capture context）都以 events.session_id 过滤，需要真实值。
+	// 旧实现的空串会过滤出 0 行（"默认当前会话"对事件查询从未真正生效）。
+	if sessionID == "" {
+		owner := auth.OwnerFrom(ctx)
+		if current, cErr := m.sessionMgr.readCurrent(owner); cErr == nil && current != nil && current.SessionID != "" {
+			sessionID = current.SessionID
+		}
+	}
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("list_decoded_data requested", "limit", limit, "offset", offset, "filter", filterExpr, "db_path", dbPath, "session_id", sessionID)
+	if dbPath == "" {
+		slog.Warn("list_decoded_data rejected: no capture database available")
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	// Compile filter expression if provided.
+	var program *vm.Program
+	var pd filterPushdown
+	if filterExpr != "" {
+		program, err = expr.Compile(filterExpr, expr.Env(queryEnv()))
+		if err != nil {
+			return errorResult(fmt.Errorf("compile filter: %w", err)), nil
+		}
+		// 提取可下推 SQL 的 type 谓词（protocol == "http" 等）。
+		pd, err = parseFilterPushdown(filterExpr)
+		if err != nil {
+			// expr.Compile 已通过，parse 不应失败；保守降级为无下推（语义不受影响）。
+			slog.Debug("parse filter pushdown failed (fallback to no pushdown)", "filter", filterExpr, "error", err)
+			pd = filterPushdown{}
+		}
+	} else {
+		pd = filterPushdown{Pure: true}
+	}
+
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	pager, ok := reader.(store.EventPager)
+	if !ok {
+		return errorResult(fmt.Errorf("event reader does not support paging")), nil
+	}
+
+	// 捕获上下文索引：从 event_index 轻量行计算连接序号/流序号（无 payload 解码）。
+	// 仅代理抓包（conn_id 非空）的事件会获得 capture 字段，供前端展示 Capture Context。
+	captureIdx := buildCaptureContextFromIndex(ctx, reader, sessionID)
+
+	pageQ := store.EventPageQuery{SessionID: sessionID, TypeEq: pd.TypeEq, TypeNot: pd.TypeNot}
+
+	// 纯 SQL 分页路径：filter 为空，或 filter 恰好被 type 谓词完全表达。
+	// LIMIT/OFFSET/COUNT 全部下推到 SQL，payload msgpack 仅对页内行解码。
+	// 这是前端 2s 轮询的默认路径，代价 O(page) 而非 O(全量事件)。
+	if program == nil || pd.Pure {
+		pageLimit := limit
+		if pageLimit <= 0 {
+			// 保持旧语义：limit<=0 返回空页 + 精确 total。
+			pageLimit = 1
+		}
+		pageEvents, total, err := pager.QueryEventPage(ctx, pageQ, pageLimit, offset)
+		if err != nil {
+			return errorResult(fmt.Errorf("query events: %w", err)), nil
+		}
+		rawLenMap := lookupRawLens(ctx, reader, pageEvents)
+		var events []map[string]any
+		if limit > 0 {
+			events = make([]map[string]any, 0, len(pageEvents))
+			for _, ev := range pageEvents {
+				events = append(events, decodedEventMap(ev, captureIdx, rawLenMap))
+			}
+		}
+		slog.Info("list_decoded_data completed", "filter", filterExpr, "total_matched", total, "returned", len(events), "path", "sql-page")
+		return successResult(map[string]any{
+			"total_matched": total,
+			"count":         len(events),
+			"events":        events,
+		}), nil
+	}
+
+	// 应用层过滤路径：SQL 下推 type 谓词缩小候选集，流式分批求值完整表达式。
+	// 内存 O(batch + 页)；total 需精确，故遍历全部候选行（与旧实现 CPU 同阶，
+	// 但不再全量物化事件，且纯 protocol 过滤不会走到这里）。
+	var (
+		totalMatched int
+		pageMaps     []map[string]any
+	)
+	err = pager.StreamEventsDesc(ctx, pageQ, 500, func(batch []*event.Event) (bool, error) {
+		rawLenMap := lookupRawLens(ctx, reader, batch)
+		for _, ev := range batch {
+			eventMap := decodedEventMap(ev, captureIdx, rawLenMap)
+			out, err := expr.Run(program, eventMap)
+			if err != nil {
+				slog.Debug("filter eval error", "event_id", ev.Identity.ID, "error", err)
+				continue
+			}
+			if v, ok := out.(bool); !ok || !v {
+				continue
+			}
+			totalMatched++
+			if totalMatched > offset && totalMatched <= offset+limit {
+				pageMaps = append(pageMaps, eventMap)
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		return errorResult(fmt.Errorf("filter events: %w", err)), nil
+	}
+
+	slog.Info("list_decoded_data completed", "filter", filterExpr, "total_matched", totalMatched, "returned", len(pageMaps), "path", "stream-filter")
+	return successResult(map[string]any{
+		"total_matched": totalMatched,
+		"count":         len(pageMaps),
+		"events":        pageMaps,
+	}), nil
+}
+
+// lookupRawLens 批量查询原始包长度（SELECT id, LENGTH(payload) WHERE id IN ...），
+// 作用于页内/批内事件，返回 RawPacketID → 字节数映射。
+// 查询失败非致命：返回空 map，raw_len 字段为 0。
+func lookupRawLens(ctx context.Context, reader captureReader, events []*event.Event) map[string]int {
+	rawLenMap := make(map[string]int, len(events))
+	dbReader, ok := reader.(interface{ DB() *sql.DB })
+	if !ok {
+		return rawLenMap
+	}
+	var ids []string
+	for _, ev := range events {
+		if ev.Context.RawPacketID != "" {
+			ids = append(ids, ev.Context.RawPacketID)
+		}
+	}
+	if len(ids) == 0 {
+		return rawLenMap
+	}
+	placeholder := strings.Repeat(",?", len(ids)-1)
+	rows, qErr := dbReader.DB().QueryContext(ctx,
+		"SELECT id, COALESCE(LENGTH(payload),0) FROM raw_packets WHERE id IN (?"+placeholder+")",
+		toAnySlice(ids)...,
+	)
+	if qErr != nil {
+		slog.Debug("batch raw_len lookup failed (non-fatal)", "error", qErr)
+		return rawLenMap
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var ln int
+		if err := rows.Scan(&id, &ln); err == nil {
+			rawLenMap[id] = ln
+		}
+	}
+	return rawLenMap
+}
+
+// decodedEventMap 构造 list_decoded_data 输出的事件 map（字段契约与旧实现一致）。
+func decodedEventMap(ev *event.Event, captureIdx map[string]captureContextJSON, rawLenMap map[string]int) map[string]any {
+	dataContent := ev.Payload.Value.ToAny()
+	if dataContent == nil {
+		dataContent = map[string]any{}
+	}
+	rawLen := 0
+	if ev.Context.RawPacketID != "" {
+		rawLen = rawLenMap[ev.Context.RawPacketID]
+	}
+	eventMap := map[string]any{
+		"id":         string(ev.Identity.ID),
+		"timestamp":  ev.Identity.Timestamp.Format(time.RFC3339),
+		"session_id": ev.Identity.SessionID,
+		"protocol":   string(ev.Identity.Type),
+		"raw_len":    rawLen,
+		"data":       dataContent,
+	}
+	if cc, ok := captureIdx[string(ev.Identity.ID)]; ok {
+		eventMap["capture"] = cc
+	}
+	return eventMap
+}
+
+// captureContextJSON 是单个事件的捕获上下文（Capture Context），
+// 前端据此展示 "Captured By / Connection / Stream / Source"（代理抓包特有）。
+type captureContextJSON struct {
+	CapturedBy string `json:"captured_by"`
+	ConnID     string `json:"conn_id"`
+	ConnSeq    int    `json:"conn_seq"`   // 连接序号（1-based，按连接最新事件时间倒序）
+	StreamID   string `json:"stream_id"`  // 流分组键（correlation_id 或事件 ID）
+	StreamSeq  int    `json:"stream_seq"` // 连接内流序号（1-based，按流首事件时间正序）
+	Source     string `json:"source"`
+}
+
+// captureDisplayName 把抓包来源映射为展示名（如 mobile → Mobile Proxy）。
+func captureDisplayName(source string) string {
+	switch source {
+	case "mobile":
+		return "Mobile Proxy"
+	case "":
+		return "Proxy"
+	default:
+		return source
+	}
+}
+
+// buildCaptureContext 基于全量事件计算每个事件的连接/流序号。
+//
+// 连接序号：按连接最新事件时间倒序（与 Connections 页面一致），最新连接为 1。
+// 流序号：连接内按流首事件时间正序（Stream View 语义），每流从 1 递增。
+// 流分组键：correlation_id 非空的事件同组；未关联事件各自成流。
+// 仅 conn_id 非空（代理抓包）的事件会被编入索引。
+func buildCaptureContext(events []*event.Event) map[string]captureContextJSON {
+	out := make(map[string]captureContextJSON, len(events))
+	connSeqByID := make(map[string]int)
+	streamSeqByConn := make(map[string]int)
+	connEvents := make(map[string][]*event.Event)
+
+	for _, ev := range events {
+		connID := ev.Context.ConnID
+		if connID == "" {
+			continue
+		}
+		if _, ok := connSeqByID[connID]; !ok {
+			connSeqByID[connID] = len(connSeqByID) + 1
+			streamSeqByConn[connID] = 0
+		}
+		connEvents[connID] = append(connEvents[connID], ev)
+	}
+
+	for connID, evs := range connEvents {
+		// evs 来自 QueryEventsDesc（时间倒序），反转为正序以符合流首事件时间正序。
+		asc := make([]*event.Event, len(evs))
+		for i, ev := range evs {
+			asc[len(evs)-1-i] = ev
+		}
+		seenStream := make(map[string]bool)
+		for _, ev := range asc {
+			key := ev.Trace.CorrelationID
+			if key == "" {
+				key = string(ev.Identity.ID)
+			}
+			if !seenStream[key] {
+				seenStream[key] = true
+				streamSeqByConn[connID]++
+			}
+			out[string(ev.Identity.ID)] = captureContextJSON{
+				CapturedBy: captureDisplayName(ev.Context.Source),
+				ConnID:     connID,
+				ConnSeq:    connSeqByID[connID],
+				StreamID:   key,
+				StreamSeq:  streamSeqByConn[connID],
+				Source:     ev.Context.Source,
+			}
+		}
+	}
+	return out
+}
+
+// connectionReader 连接聚合查询能力（由 *store.SQLiteStore 实现）。
+// 与 captureReader 分离：Connections 页面是代理抓包专有能力，非通用事件查询。
+type connectionReader interface {
+	QueryConnections(ctx context.Context, sessionID string, limit, offset int) ([]store.ConnectionSummary, error)
+	QueryConnectionDetail(ctx context.Context, sessionID, connID string) (*store.ConnectionDetail, error)
+	QueryConnectionStreams(ctx context.Context, sessionID, connID string, limit, offset int) ([]store.ConnectionStream, error)
+	QueryConnectionFrames(ctx context.Context, connID string, limit, offset int) ([]store.ConnectionFrame, error)
+}
+
+// asConnectionReader 把 captureReader 断言为 connectionReader；后端不支持时返回错误。
+func asConnectionReader(r captureReader) (connectionReader, error) {
+	cr, ok := r.(connectionReader)
+	if !ok {
+		return nil, fmt.Errorf("store backend does not support connection queries")
+	}
+	return cr, nil
+}
+
+// handleListConnections 返回代理抓包的连接列表（按 conn_id 聚合，最新在前）。
+func (m *mcpCapture) handleListConnections(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("list_connections requested", "session_id", sessionID, "limit", limit, "offset", offset, "db_path", dbPath)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	cr, err := asConnectionReader(reader)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	conns, err := cr.QueryConnections(ctx, sessionID, limit, offset)
+	if err != nil {
+		return errorResult(fmt.Errorf("query connections: %w", err)), nil
+	}
+
+	slog.Info("list_connections completed", "session_id", sessionID, "count", len(conns))
+	return successResult(map[string]any{
+		"count":       len(conns),
+		"connections": conns,
+	}), nil
+}
+
+// handleGetConnectionDetail 返回单个连接的详情（头部信息 + 统计）。
+func (m *mcpCapture) handleGetConnectionDetail(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	connID := req.GetString("conn_id", "")
+
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("get_connection_detail requested", "session_id", sessionID, "conn_id", connID, "db_path", dbPath)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+	if connID == "" {
+		return errorResult(fmt.Errorf("conn_id is required")), nil
+	}
+
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	cr, err := asConnectionReader(reader)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	detail, err := cr.QueryConnectionDetail(ctx, sessionID, connID)
+	if err != nil {
+		return errorResult(fmt.Errorf("query connection detail: %w", err)), nil
+	}
+	if detail == nil {
+		return errorResult(fmt.Errorf("connection not found: %s", connID)), nil
+	}
+
+	slog.Info("get_connection_detail completed", "session_id", sessionID, "conn_id", connID)
+	return successResult(map[string]any{
+		"connection": detail,
+	}), nil
+}
+
+// handleListConnectionStreams 返回连接内按关联键分组的流（Stream View）。
+func (m *mcpCapture) handleListConnectionStreams(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	connID := req.GetString("conn_id", "")
+	limit := req.GetInt("limit", 200)
+	offset := req.GetInt("offset", 0)
+
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("list_connection_streams requested", "session_id", sessionID, "conn_id", connID, "db_path", dbPath)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+	if connID == "" {
+		return errorResult(fmt.Errorf("conn_id is required")), nil
+	}
+
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	cr, err := asConnectionReader(reader)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	streams, err := cr.QueryConnectionStreams(ctx, sessionID, connID, limit, offset)
+	if err != nil {
+		return errorResult(fmt.Errorf("query connection streams: %w", err)), nil
+	}
+
+	slog.Info("list_connection_streams completed", "session_id", sessionID, "conn_id", connID, "count", len(streams))
+	return successResult(map[string]any{
+		"count":   len(streams),
+		"streams": streams,
+	}), nil
+}
+
+// handleListConnectionFrames 返回连接内的原始帧（Frames / Raw 子页）。
+func (m *mcpCapture) handleListConnectionFrames(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	connID := req.GetString("conn_id", "")
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("list_connection_frames requested", "session_id", sessionID, "conn_id", connID, "db_path", dbPath)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+	if connID == "" {
+		return errorResult(fmt.Errorf("conn_id is required")), nil
+	}
+
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	cr, err := asConnectionReader(reader)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	frames, err := cr.QueryConnectionFrames(ctx, connID, limit, offset)
+	if err != nil {
+		return errorResult(fmt.Errorf("query connection frames: %w", err)), nil
+	}
+
+	slog.Info("list_connection_frames completed", "session_id", sessionID, "conn_id", connID, "count", len(frames))
+	return successResult(map[string]any{
+		"count":  len(frames),
+		"frames": frames,
+	}), nil
+}
+
+// handleListRawPackets 查询指定 session 的 raw_packets 表。
+// 支持 protocol/src/dst 过滤和分页，payload 以 base64 返回。
+// 该工具属于受限调试能力，仅在 --enable-raw-debug 开启时注册。
+func (m *mcpCapture) handleListRawPackets(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+	sessionID := req.GetString("session_id", "")
+	protocol := req.GetString("protocol", "")
+	src := req.GetString("src", "")
+	dst := req.GetString("dst", "")
+
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("list_raw_packets requested", "limit", limit, "offset", offset, "protocol", protocol, "src", src, "dst", dst, "db_path", dbPath, "session_id", sessionID)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	rows, err := reader.QueryRawPackets(ctx, store.RawPacketQuery{
+		Protocol: protocol,
+		Src:      src,
+		Dst:      dst,
+		Limit:    limit,
+		Offset:   offset,
+	})
+	if err != nil {
+		return errorResult(fmt.Errorf("query raw packets: %w", err)), nil
+	}
+
+	packets := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		packets = append(packets, map[string]any{
+			"id":          r.ID,
+			"timestamp":   r.Timestamp.Format(time.RFC3339),
+			"src":         r.Src,
+			"dst":         r.Dst,
+			"protocol":    r.Protocol,
+			"payload":     base64.StdEncoding.EncodeToString(r.Payload),
+			"payload_len": len(r.Payload),
+			"link_type":   r.LinkType,
+		})
+	}
+
+	slog.Info("list_raw_packets completed", "count", len(packets))
+	return successResult(map[string]any{
+		"count":   len(packets),
+		"packets": packets,
+	}), nil
+}
+
+// handleListStateChanges 查询指定 session 的 state_changes 投影表。
+// 支持按 subject_type、subject_id、op、path、flow_id 过滤和分页。
+func (m *mcpCapture) handleListStateChanges(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+	sessionID := req.GetString("session_id", "")
+	subjectType := req.GetString("subject_type", "")
+	subjectID := req.GetString("subject_id", "")
+	op := req.GetString("op", "")
+	path := req.GetString("path", "")
+	flowID := req.GetString("flow_id", "")
+
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	slog.Info("list_state_changes requested", "limit", limit, "offset", offset, "subject_type", subjectType, "subject_id", subjectID, "op", op, "path", path, "flow_id", flowID, "db_path", dbPath, "session_id", sessionID)
+	if dbPath == "" {
+		return errorResult(fmt.Errorf("no capture database available; start a capture first")), nil
+	}
+
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	q := store.StateChangeQuery{
+		SessionID:   sessionID,
+		SubjectType: subjectType,
+		SubjectID:   subjectID,
+		Op:          op,
+		Path:        path,
+		FlowID:      flowID,
+		Limit:       limit,
+		Offset:      offset,
+	}
+	rows, err := reader.QueryStateChanges(ctx, q)
+	if err != nil {
+		return errorResult(fmt.Errorf("query state changes: %w", err)), nil
+	}
+
+	changes := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		changes = append(changes, map[string]any{
+			"id":           r.ID,
+			"event_id":     r.EventID,
+			"session_id":   r.SessionID,
+			"flow_id":      r.FlowID,
+			"timestamp":    r.Timestamp.Format(time.RFC3339),
+			"subject_type": r.SubjectType,
+			"subject_id":   r.SubjectID,
+			"op":           r.Op,
+			"path":         r.Path,
+			"before":       json.RawMessage(r.Before),
+			"after":        json.RawMessage(r.After),
+			"version":      r.Version,
+			"metadata":     json.RawMessage(r.Metadata),
+		})
+	}
+
+	slog.Info("list_state_changes completed", "count", len(changes))
+	return successResult(map[string]any{
+		"count":   len(changes),
+		"changes": changes,
+	}), nil
+}
+
+// handleQueryCaptureTable 提供对内部投影/审计表的只读出口。
+// event_index（schema indexable_fields 投影）与 plugin_debug_access（采样审计留痕）
+// 此前没有任何专用 MCP 工具暴露，AI 无法验证其是否生效；本工具以白名单方式安全开放
+// SELECT（表名来自固定允许列表，杜绝注入），limit/offset 走参数化。
+func (m *mcpCapture) handleQueryCaptureTable(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	allowed := map[string]bool{
+		"event_index":         true,
+		"plugin_debug_access": true,
+		"raw_packets":         true,
+		"events":              true,
+		"state_changes":       true,
+		"aggregated_metrics":  true,
+	}
+	sessionID := req.GetString("session_id", "")
+	table := req.GetString("table", "")
+	limit := req.GetInt("limit", 100)
+	offset := req.GetInt("offset", 0)
+	if sessionID == "" {
+		return errorResult(fmt.Errorf("session_id is required")), nil
+	}
+	if !allowed[table] {
+		return errorResult(fmt.Errorf("table %q is not in the allowlist; use one of: event_index, plugin_debug_access, raw_packets, events, state_changes, aggregated_metrics", table)), nil
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	reader, err := m.openReader(ctx, sessionID)
+	if err != nil {
+		return errorResult(err), nil
+	}
+	defer reader.Close()
+
+	query := fmt.Sprintf("SELECT * FROM %s WHERE session_id=? ORDER BY rowid LIMIT ? OFFSET ?", table)
+	rows, err := reader.RawQuery(ctx, query, sessionID, limit, offset)
+	if err != nil {
+		return errorResult(fmt.Errorf("query %s: %w", table, err)), nil
+	}
+	return successResult(map[string]any{
+		"table": table,
+		"count": len(rows),
+		"rows":  rows,
+	}), nil
+}
+
+// handleDecodeRawPackets 用指定插件对离线会话的 raw_packets 批量解码，
+// 结果写入该 session 的 events 表（随后可用 list_decoded_data 查询）。
+// 仅允许解码已停止的 session；插件必须指定。
+// 该工具属于受限调试能力，仅在 --enable-raw-debug 开启时注册。
+func (m *mcpCapture) handleDecodeRawPackets(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	pluginName := req.GetString("plugin", "")
+	protocol := req.GetString("protocol", "")
+	src := req.GetString("src", "")
+	dst := req.GetString("dst", "")
+	limit := req.GetInt("limit", 0)
+	clearExisting := req.GetBool("clear_existing", true)
+
+	if sessionID == "" {
+		return errorResult(fmt.Errorf("session_id is required")), nil
+	}
+	if pluginName == "" {
+		return errorResult(fmt.Errorf("plugin is required")), nil
+	}
+
+	slog.Info("decode_raw_packets requested",
+		"session_id", sessionID, "plugin", pluginName, "protocol", protocol,
+		"src", src, "dst", dst, "limit", limit, "clear_existing", clearExisting)
+
+	if m.pipelineClient == nil {
+		return errorResult(fmt.Errorf("pipeline client not available")), nil
+	}
+
+	resp, err := m.pipelineClient.DecodeRawPackets(ctx, &pb.DecodeRawPacketsRequest{
+		SessionId:     sessionID,
+		Plugin:        pluginName,
+		Protocol:      protocol,
+		Src:           src,
+		Dst:           dst,
+		Limit:         int64(limit),
+		ClearExisting: clearExisting,
+	})
+	if err != nil {
+		return errorResult(fmt.Errorf("decode raw packets: %w", err)), nil
+	}
+
+	slog.Info("decode_raw_packets completed",
+		"session_id", sessionID, "plugin", pluginName,
+		"total_raw", resp.GetTotalRaw(), "decoded", resp.GetDecoded(), "decode_errors", resp.GetDecodeErrors())
+	return successResult(map[string]any{
+		"status":         "decoded",
+		"session_id":     sessionID,
+		"plugin":         pluginName,
+		"total_raw":      resp.GetTotalRaw(),
+		"decoded":        resp.GetDecoded(),
+		"decode_errors":  resp.GetDecodeErrors(),
+		"clear_existing": clearExisting,
+	}), nil
+}
+
+// handleTestPlugin 用指定插件对离线会话的 raw_packets 解码并采样返回，用于验证插件解码质量。
+// 原始包字节仅 gt-pipeline 进程内使用，绝不回传前端；结果不落库（隔离测试）。
+// 本工具不暴露原始包，因此不依赖 --enable-raw-debug，常驻可用。
+func (m *mcpCapture) handleTestPlugin(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID := req.GetString("session_id", "")
+	pluginName := req.GetString("plugin", "")
+	protocol := req.GetString("protocol", "")
+	src := req.GetString("src", "")
+	dst := req.GetString("dst", "")
+	limit := req.GetInt("limit", 0)
+	sampleLimit := req.GetInt("sample_limit", 0)
+
+	if sessionID == "" {
+		return errorResult(fmt.Errorf("session_id is required")), nil
+	}
+	if pluginName == "" {
+		return errorResult(fmt.Errorf("plugin is required")), nil
+	}
+	if m.pipelineClient == nil {
+		return errorResult(fmt.Errorf("pipeline client not available")), nil
+	}
+
+	slog.Info("test_plugin requested",
+		"session_id", sessionID, "plugin", pluginName, "protocol", protocol,
+		"src", src, "dst", dst, "limit", limit, "sample_limit", sampleLimit)
+
+	resp, err := m.pipelineClient.TestPlugin(ctx, &pb.TestPluginRequest{
+		SessionId:   sessionID,
+		Plugin:      pluginName,
+		Protocol:    protocol,
+		Src:         src,
+		Dst:         dst,
+		Limit:       int64(limit),
+		SampleLimit: int64(sampleLimit),
+	})
+	if err != nil {
+		return errorResult(fmt.Errorf("test plugin: %w", err)), nil
+	}
+
+	slog.Info("test_plugin completed",
+		"session_id", sessionID, "plugin", pluginName,
+		"total_raw", resp.GetTotalRaw(), "decoded", resp.GetDecoded(), "decode_errors", resp.GetDecodeErrors())
+	return successResult(map[string]any{
+		"status":         "tested",
+		"session_id":     sessionID,
+		"plugin":         pluginName,
+		"total_raw":      resp.GetTotalRaw(),
+		"decoded":        resp.GetDecoded(),
+		"decode_errors":  resp.GetDecodeErrors(),
+		"type_histogram": resp.GetTypeHistogram(),
+		"sample_events":  resp.GetSampleEvents(),
+		"error_samples":  resp.GetErrorSamples(),
+	}), nil
+}
+
+// queryEnv returns the expr environment for decoded event queries.
+func queryEnv() map[string]any {
+	return map[string]any{
+		"id":         "",
+		"timestamp":  "",
+		"session_id": "",
+		"protocol":   "",
+		"raw_len":    0,
+		"data":       map[string]any{},
+	}
+}
+
+// openReader 打开指定 session 的 capture.sqlite 返回 captureReader 用于查询。
+func (m *mcpCapture) openReader(ctx context.Context, sessionID string) (captureReader, error) {
+	dbPath, err := m.getDBPath(ctx, sessionID)
+	if err != nil || dbPath == "" {
+		return nil, fmt.Errorf("no db path for session %s: %w", sessionID, err)
+	}
+	return m.readerOpener(dbPath, sessionID)
+}
+
+// authorizeSession 已迁移至 authz.go（ActionSessionRead 收口 + 删除兜底放行）。
+
+// getDBPath 获取指定 session 的 db_path。
+// authorizeSession 先做 ActionSessionRead 鉴权；随后按
+// controlStore（全量读，项目会话对成员可见）→ metadata.json → current 的顺序解析路径。
+func (m *mcpCapture) getDBPath(ctx context.Context, sessionID string) (string, error) {
+	if err := m.authorizeSession(ctx, sessionID); err != nil {
+		slog.Warn("getDBPath: session access denied", "session_id", sessionID, "error", err)
+		return "", err
+	}
+	// 1. 尝试 ControlStore（鉴权已通过，读全量避免 owner 过滤误伤项目会话）
+	if m.controlStore != nil && sessionID != "" {
+		meta, err := m.controlStore.GetSession(ctx, sessionID)
+		if err == nil && meta != nil {
+			slog.Info("getDBPath: resolved via controlStore", "session_id", sessionID, "db_path", meta.DBPath)
+			return meta.DBPath, nil
+		}
+		slog.Debug("getDBPath: controlStore miss", "session_id", sessionID, "err", err)
+	}
+	owner := auth.OwnerFrom(ctx)
+	// 2. 回退到 sessionMgr（metadata.json，含 pipeline 返回的绝对 db_path）
+	if sessionID != "" {
+		meta, err := m.sessionMgr.readSessionMetadata(sessionID, owner)
+		if err == nil && meta != nil {
+			slog.Info("getDBPath: resolved via sessionMgr metadata", "session_id", sessionID, "db_path", meta.DBPath)
+			return meta.DBPath, nil
+		}
+	}
+	// 3. 尝试当前 session
+	current, err := m.sessionMgr.readCurrent(owner)
+	if err == nil && current != nil {
+		slog.Info("getDBPath: resolved via current session", "session_id", sessionID, "current_session_id", current.SessionID, "db_path", current.DBPath)
+		return current.DBPath, nil
+	}
+	slog.Warn("getDBPath: no db path resolved", "session_id", sessionID)
+	return "", nil
+}
+
+func (m *mcpCapture) handleListAllSessions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// 项目是协作边界：可见范围 = 自己的会话 ∪ 可见项目的会话（含文件系统侧过滤）。
+	f, err := m.visibleSessionFilter(ctx)
+	if err != nil {
+		slog.Error("list_all_sessions: resolve filter failed", "error", err)
+		return errorResult(err), nil
+	}
+	sessions, err := m.sessionMgr.listSessions(f)
+	if err != nil {
+		slog.Error("list_all_sessions failed", "error", err)
+		return errorResult(err), nil
+	}
+
+	// 可选 status 过滤（failed/success）。"failed" 映射到内部 status="error"。
+	statusFilter := req.GetString("status", "")
+	matchStatus := func(s string) bool {
+		if statusFilter == "" {
+			return true
+		}
+		if statusFilter == "failed" {
+			return s == "error"
+		}
+		return s == statusFilter
+	}
+
+	// 用 pipeline 的 live sessions（gRPC）补全 running 会话的实时状态，
+	// 避免 gt-mcp 与 gt-pipeline 的 workDir 漂移、或 metadata.json 缺失时，
+	// running 会话被降级逻辑误标为 stopped（端口/插件/网卡也随之丢失）。
+	liveByID := map[string]map[string]any{}
+	liveListOK := false
+	if m.pipelineClient != nil {
+		if resp, lerr := m.pipelineClient.ListCaptureSessions(ctx, &pb.ListCaptureSessionsRequest{}); lerr == nil {
+			liveListOK = true
+			for _, s := range resp.GetSessions() {
+				liveByID[s.GetSessionId()] = map[string]any{
+					"state":  s.GetState(),
+					"port":   s.GetPort(),
+					"plugin": s.GetPlugin(),
+					"iface":  s.GetInterface(),
+				}
+			}
+		} else {
+			slog.Warn("list_all_sessions: live sessions unavailable, falling back to local metadata", "error", lerr)
+		}
+	}
+
+	// 返回所有会话（包括已停止的离线会话），running 的用 live 信息覆盖
+	out := []map[string]any{}
+	seen := map[string]bool{}
+	// liveStatusCache 缓存 running 会话的实时计数（GetCaptureStatus gRPC）。
+	// metadata.json 的 raw_packets/events 只在会话停止时落盘，运行中恒为启动
+	// 时的 0——不补的话前端「最近会话」卡片会一直显示 0 events / 0 packets。
+	// running 会话通常个位数，逐个查询成本可忽略；失败时静默降级用 metadata 值。
+	liveStatusCache := map[string]*pb.GetCaptureStatusResponse{}
+	fetchLiveStatus := func(sessionID string) *pb.GetCaptureStatusResponse {
+		if m.pipelineClient == nil {
+			return nil
+		}
+		if st, ok := liveStatusCache[sessionID]; ok {
+			return st
+		}
+		var st *pb.GetCaptureStatusResponse
+		if resp, err := m.pipelineClient.GetCaptureStatus(ctx, &pb.GetCaptureStatusRequest{SessionId: sessionID}); err == nil {
+			st = resp
+		} else {
+			slog.Warn("list_all_sessions: live status unavailable, falling back to metadata counters", "error", err, "session_id", sessionID)
+		}
+		liveStatusCache[sessionID] = st
+		return st
+	}
+	for _, sess := range sessions {
+		status := sess.Status
+		port := sess.Port
+		plugin := sess.Plugin
+		iface := sess.Interface
+		rawPackets := sess.RawPackets
+		events := sess.Events
+		decodeErrors := sess.DecodeErrors
+		// 状态校正：live 列表成功返回、但其中没有这个「running」会话——
+		// 说明 pipeline 侧会话已不存在（典型：pipeline 重启后内存态丢失），
+		// metadata.json 的 running 是过期的。显示层直接判 stopped，与
+		// stop_capture 的幂等语义配套，消除「显示运行中但停止报错」的死锁。
+		if liveListOK && status == "running" {
+			if _, ok := liveByID[sess.SessionID]; !ok {
+				status = "stopped"
+			}
+		}
+		if live, ok := liveByID[sess.SessionID]; ok {
+			if state, _ := live["state"].(string); state != "" {
+				status = state
+			}
+			if p, _ := live["port"].(int32); p != 0 {
+				port = int(p)
+			}
+			if p, _ := live["plugin"].(string); p != "" {
+				plugin = p
+			}
+			if iv, _ := live["iface"].(string); iv != "" {
+				iface = iv
+			}
+			// 运行中的会话用实时计数覆盖（停止后 metadata 已是终值，无需覆盖）。
+			if status == "running" {
+				if st := fetchLiveStatus(sess.SessionID); st != nil {
+					rawPackets = st.GetRawCount()
+					events = st.GetEventCount()
+					decodeErrors = st.GetDecodeErrors()
+				}
+			}
+		}
+		if !matchStatus(status) {
+			continue
+		}
+		seen[sess.SessionID] = true
+		out = append(out, map[string]any{
+			"session_id":    sess.SessionID,
+			"owner":         sess.Owner,
+			"project_id":    sess.ProjectID,
+			"started_at":    sess.StartedAt,
+			"stopped_at":    sess.StoppedAt,
+			"status":        status,
+			"port":          port,
+			"plugin":        plugin,
+			"interface":     iface,
+			"pcap_file":     sess.PCAPFile,
+			"source":        sess.Source,
+			"extra":         sess.Extra,
+			"listen_addr":   sess.ListenAddr,
+			"raw_packets":   rawPackets,
+			"events":        events,
+			"metrics":       sess.Metrics,
+			"decode_errors": decodeErrors,
+			"duration_sec":  sess.DurationSec,
+			"db_path":       sess.DBPath,
+		})
+	}
+
+	// 补上仅存在于 pipeline live、但 sessionMgr 未枚举到的会话（workDir 漂移兜底）
+	for id, live := range liveByID {
+		if seen[id] {
+			continue
+		}
+		// live 兜底同样不能把他人会话透给非 admin 调用方：ListCaptureSessions
+		// 的请求没有 owner 字段，pipeline 返回的是所有会话摘要，这里若不加
+		// 校验，alice 会经兜底循环看到 bob 运行中会话的 session_id/port/db_path。
+		// 可见性规则与 authorizeSession（controlStore→metadata.json 兜底）保持一致。
+		// 注意 authorizeSession 对"两处都查不到"的会话是刻意放行的（匿名/本地
+		// 单机基线 + workDir 漂移容错）；因此 token 模式部署必须让 mcp 与
+		// pipeline 共享同一 control.sqlite（compose 已如此配置），否则漂移的
+		// 他人 live 会话仍会以"两处未知"的名义浮出。
+		if err := m.authorizeSession(ctx, id); err != nil {
+			continue
+		}
+		status, _ := live["state"].(string)
+		port, _ := live["port"].(int32)
+		plugin, _ := live["plugin"].(string)
+		iface, _ := live["iface"].(string)
+		if !matchStatus(status) {
+			continue
+		}
+		out = append(out, map[string]any{
+			"session_id": id,
+			"status":     status,
+			"port":       int(port),
+			"plugin":     plugin,
+			"interface":  iface,
+			"db_path":    m.sessionMgr.dbPath(id),
+		})
+	}
+
+	slog.Info("list_all_sessions completed", "count", len(out), "local", len(sessions), "live", len(liveByID))
+	return successResult(map[string]any{"count": len(out), "sessions": out}), nil
+}
+
+func (m *mcpCapture) handleDeleteSession(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	sessionID, err := req.RequireString("session_id")
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	// 检查 session 是否正在运行
+	owner := auth.OwnerFrom(ctx)
+	current, err := m.sessionMgr.readCurrent(owner)
+	running := err == nil && current != nil && current.Status == "running" && current.SessionID == sessionID
+
+	if running {
+		slog.Warn("delete_session rejected: session is running", "session_id", sessionID)
+		return errorResult(fmt.Errorf("cannot delete running session %s; stop it first", sessionID)), nil
+	}
+
+	// 归属校验：只能删除自己的会话（admin 全通过）
+	if err := m.authorizeSession(ctx, sessionID); err != nil {
+		return errorResult(err), nil
+	}
+
+	if err := m.sessionMgr.deleteSession(sessionID, owner); err != nil {
+		slog.Error("delete_session failed", "session_id", sessionID, "error", err)
+		return errorResult(err), nil
+	}
+
+	slog.Info("delete_session completed", "session_id", sessionID)
+	return successResult(map[string]any{"status": "deleted", "session_id": sessionID}), nil
+}
+
+func successResult(v any) *mcp.CallToolResult {
+	vMap, ok := v.(map[string]any)
+	if !ok {
+		// 尝试将结构体通过 JSON 序列化/反序列化转为 map[string]any
+		b, err := json.Marshal(v)
+		if err == nil {
+			var m map[string]any
+			if err := json.Unmarshal(b, &m); err == nil {
+				vMap = m
+			}
+		}
+		if vMap == nil {
+			vMap = map[string]any{"result": v}
+		}
+	}
+	vMap["ok"] = true
+	b, _ := json.Marshal(vMap)
+	return mcp.NewToolResultText(string(b))
+}
+
+func errorResult(err error) *mcp.CallToolResult {
+	b, _ := json.Marshal(map[string]any{"ok": false, "error": err.Error()})
+	return mcp.NewToolResultText(string(b))
+}
+
+// toAnySlice 将 []string 转为 []any，用于 SQL IN 查询的变参展开。
+func toAnySlice(ss []string) []any {
+	r := make([]any, len(ss))
+	for i := range ss {
+		r[i] = ss[i]
+	}
+	return r
+}
+
+// subscribeEvents 注册一个 SSE 订阅者，返回事件通道与退订函数。
+func (m *mcpCapture) subscribeEvents() (<-chan pluginEventJSON, func()) {
+	ch := make(chan pluginEventJSON, 16)
+	m.eventMu.Lock()
+	m.eventSubs[ch] = struct{}{}
+	m.eventMu.Unlock()
+	unsub := func() {
+		m.eventMu.Lock()
+		delete(m.eventSubs, ch)
+		m.eventMu.Unlock()
+		close(ch)
+	}
+	return ch, unsub
+}
+
+// broadcastPluginEvent 把事件推送给所有 SSE 订阅者。慢订阅者丢弃，避免阻塞广播。
+func (m *mcpCapture) broadcastPluginEvent(ev pluginEventJSON) {
+	m.eventMu.Lock()
+	defer m.eventMu.Unlock()
+	for ch := range m.eventSubs {
+		select {
+		case ch <- ev:
+		default:
+			// 慢订阅者丢弃，避免阻塞广播主路径
+		}
+	}
+}
+
+// startPluginEventWatcher 订阅 gt-pipeline 的 WatchPlugins gRPC 流，
+// 逐条广播给 SSE 订阅者。断线后带指数退避自动重连，保证事件不丢。
+func (m *mcpCapture) startPluginEventWatcher() {
+	if m.pipelineClient == nil {
+		return
+	}
+	go func() {
+		backoff := time.Second
+		for {
+			stream, err := m.pipelineClient.WatchPlugins(context.Background(), &pb.WatchPluginsRequest{})
+			if err != nil {
+				slog.Warn("watch plugins stream failed, retrying", "error", err, "backoff", backoff.String())
+				time.Sleep(backoff)
+				if backoff < 15*time.Second {
+					backoff *= 2
+				}
+				continue
+			}
+			backoff = time.Second
+			for {
+				ev, err := stream.Recv()
+				if err != nil {
+					slog.Warn("watch plugins recv failed, reconnecting", "error", err)
+					break
+				}
+				m.broadcastPluginEvent(pluginEventJSON{
+					Type:       ev.GetType(),
+					InstanceID: ev.GetInstanceId(),
+					Name:       ev.GetName(),
+					Online:     ev.GetOnline(),
+					Timestamp:  ev.GetTimestampUnix(),
+				})
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+}
+
+// handleEventsSSE 以 text/event-stream 向浏览器推送插件事件（SSE）。
+// 事件名 "plugin"，data 为 pluginEventJSON 的 JSON；浏览器用 EventSource 订阅。
+func (m *mcpCapture) handleEventsSSE(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	ch, unsub := m.subscribeEvents()
+	defer unsub()
+
+	// 15s 心跳注释，保持连接活跃并探测断线。
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			_, _ = fmt.Fprintf(w, ": keep-alive\n\n")
+			flusher.Flush()
+		case ev := <-ch:
+			data, err := json.Marshal(ev)
+			if err != nil {
+				continue
+			}
+			_, _ = fmt.Fprintf(w, "event: plugin\ndata: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
+}
+
+// resolvePluginsDir resolves the plugins directory to an absolute path.
+// When the default relative value "plugins" is used, it is resolved relative
+// to the running executable so that built binaries find plugins next to them.
+// If that executable-relative path does not exist, it falls back to resolving
+// relative to the current working directory to keep `go run` usable.
+func resolvePluginsDir(input string) (string, error) {
+	if filepath.IsAbs(input) {
+		return filepath.Clean(input), nil
+	}
+
+	// For the default value, prefer a directory next to the executable.
+	if input == "plugins" {
+		exePath, err := os.Executable()
+		if err == nil {
+			exeDir := filepath.Dir(exePath)
+			candidate := filepath.Join(exeDir, input)
+			if _, err := os.Stat(candidate); err == nil {
+				return filepath.Abs(candidate)
+			}
+		}
+	}
+
+	abs, err := filepath.Abs(input)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
+func main() {
+	// 统一配置（T10）：-config 指向 gametrace.yaml（可选）。优先级 flag > 环境变量 GT_* > 配置文件 > 默认值。
+	cfgPath := flag.String("config", "", "统一配置文件 gametrace.yaml 路径（可选；优先级 flag > 环境变量 GT_* > 配置文件 > 默认值）")
+	addr := flag.String("addr", ":8781", "SSE server address（支持 :0 动态分配，实际地址回写 <workdir>/addr.mcp.json）")
+	iface := flag.String("iface", "", "capture interface; empty means all available interfaces")
+	pluginsDir := flag.String("plugins-dir", "plugins", "plugins directory")
+	// 手机所在 LAN 中可达的本机 IPv4。docker / Hyper-V 环境下启发式探测容易被
+	// 虚拟网卡带偏（例如 docker bridge 172.18.x），此时必须显式覆盖——
+	// 例如 -lan-ip=192.168.1.10 或 GT_LAN_IP=192.168.1.10。
+	// 二维码里的 host:port 必须用这个地址，手机才连得上。
+	lanIP := flag.String("lan-ip", os.Getenv("GT_LAN_IP"),
+		"override detected host LAN IP for QR-code connect address (env GT_LAN_IP)")
+	// 工作目录解析规则（T10）：显式 -work-dir > GT_HOME > gametrace.yaml workdir >
+	// CWD 既有数据探测（存在 control.sqlite/sessions/runs 时沿用 CWD）> ~/.gametrace。
+	workDir := flag.String("work-dir", ".", "working directory for session databases（显式传参优先；否则 GT_HOME > gametrace.yaml workdir > CWD 既有数据沿用 > ~/.gametrace）")
+	pipelineAddr := flag.String("pipeline-addr", ":9888", "gt-pipeline gRPC 地址（默认 :9888）")
+	debug := flag.Bool("debug", false, "enable debug logging")
+	enableRawDebug := flag.Bool("enable-raw-debug", os.Getenv("GT_MCP_ENABLE_RAW_DEBUG") == "1", "暴露原始包调试工具（list_raw_packets / decode_raw_packets），仅限插件开发调试；默认关闭")
+	logFormat := flag.String("log-format", "json", "log format: json | text")
+	logFile := flag.String("log-file", "", "log file path (default: <workdir>/logs/gt-mcp.log)")
+	allowedOrigins := flag.String("allowed-origins", os.Getenv("GT_MCP_ALLOWED_ORIGINS"), "CORS 允许的跨域 Origin（逗号分隔，如 http://localhost:5173,https://gametrace.example.com）；留空不返回 CORS 头（同源用法不受影响）")
+	// 存储驱动：默认 sqlite（每会话 capture.sqlite + 全局 control.sqlite）。
+	// 设 "postgres" 时启用 PostgreSQL，DSN 由 -db-dsn / 环境变量 GT_DB_DSN 提供。
+	// flag 默认值直接取环境变量，故优先级为 flag 显式 > GT_DB_* 环境变量 > 默认 sqlite。
+	dbDriver := flag.String("db-driver", os.Getenv("GT_DB_DRIVER"), "storage driver: sqlite (default) | postgres")
+	dbDSN := flag.String("db-dsn", os.Getenv("GT_DB_DSN"), "postgres DSN (when -db-driver=postgres); 环境变量 GT_DB_DSN")
+	// 会话保留策略（存储优化）：TTL 与数量上限防止 sessions/ 无限膨胀。
+	// flag 默认值已读环境变量（GT_SESSION_RETENTION_DAYS / GT_MAX_SESSIONS），
+	// 均可设 0 关闭对应策略；gametrace.yaml sessions.* 在 flag 与环境变量均未设置时生效。
+	sessionTTLDays := flag.Int("session-ttl-days", configEnvInt("GT_SESSION_RETENTION_DAYS", 7), "会话保留天数：无写入活动超过该天数的会话被周期清理（0 关闭；gametrace.yaml sessions.retention_days）")
+	maxSessions := flag.Int("max-sessions", configEnvInt("GT_MAX_SESSIONS", 200), "最大保留会话数：超出时从最旧的非运行会话清理（0 不限制；gametrace.yaml sessions.max_sessions）")
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println("gt-mcp " + version.String())
+		return
+	}
+
+	// 存储驱动默认 sqlite；postgres 必须有 DSN。
+	if *dbDriver == "" {
+		*dbDriver = "sqlite"
+	}
+	if store.IsPostgres(*dbDriver) && *dbDSN == "" {
+		slog.Error("storage driver=postgres requires -db-dsn (or GT_DB_DSN)")
+		os.Exit(1)
+	}
+
+	flagSet := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
+	// 加载统一配置并按优先级合并（flag 显式 > 环境变量 > 文件 > 默认值）。
+	// -config 显式指定的路径不存在时硬错误（防止拼错路径静默退回默认配置）。
+	cfg, err := config.Load(*cfgPath, flagSet["config"])
+	if err != nil {
+		slog.Error("load config", "path", *cfgPath, "error", err)
+		os.Exit(1)
+	}
+	if !flagSet["addr"] && cfg.MCP.Addr != "" {
+		*addr = cfg.MCP.Addr
+	}
+	// pipeline-addr 是要连接的 pipeline CaptureControl gRPC 地址，与 pipeline 的
+	// control_addr 是同一个配置点（gametrace.yaml pipeline.control_addr / GT_CONTROL_ADDR）。
+	if !flagSet["pipeline-addr"] && cfg.Pipeline.ControlAddr != "" {
+		*pipelineAddr = cfg.Pipeline.ControlAddr
+	}
+	// allowed-origins 的 flag 默认值本身就读 GT_MCP_ALLOWED_ORIGINS（环境变量已兜底），
+	// 这里只在 flag 未显式传入且环境变量为空时用配置文件值补齐。
+	if !flagSet["allowed-origins"] && *allowedOrigins == "" && cfg.MCP.AllowedOrigins != "" {
+		*allowedOrigins = cfg.MCP.AllowedOrigins
+	}
+	// 会话保留策略：flag 默认值已读环境变量，这里在 flag 与环境变量均未设置时
+	// 用 gametrace.yaml sessions.* 补齐（yaml 显式 0 无法表达"关闭"，请用 flag/env 置 0）。
+	if !flagSet["session-ttl-days"] && cfg.Sessions.RetentionDays > 0 {
+		*sessionTTLDays = cfg.Sessions.RetentionDays
+	}
+	if !flagSet["max-sessions"] && cfg.Sessions.MaxSessions > 0 {
+		*maxSessions = cfg.Sessions.MaxSessions
+	}
+
+	// 工作目录：显式 flag > GT_HOME > gametrace.yaml workdir > CWD 既有数据沿用 > ~/.gametrace。
+	absWorkDir, err := config.ResolveWorkDir(*workDir, flagSet["work-dir"], cfg.WorkDir)
+	if err != nil {
+		slog.Error("resolve workdir", "error", err)
+		os.Exit(1)
+	}
+
+	// 统一日志初始化：文件落盘 + stderr 双写 + 按大小轮转
+	logCfg := logging.DefaultConfig()
+	if *debug {
+		logCfg.Level = slog.LevelDebug
+	}
+	logCfg.Format = logging.Format(*logFormat)
+	if *logFile == "" {
+		*logFile = filepath.Join(absWorkDir, "logs", "gt-mcp.log")
+	}
+	logCfg.FilePath = *logFile
+	// T17：GT_LOG_FILE_DISABLED / GT_LOG_STDERR_DISABLED 可关闭文件落盘或 stderr 双写（容器部署用）。
+	logCfg = logging.FromEnv(logCfg)
+	logging.MustInit(logCfg)
+
+	resolvedPluginsDir, err := resolvePluginsDir(*pluginsDir)
+	if err != nil {
+		slog.Error("resolve plugins directory failed", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("using plugins directory", "plugins_dir", resolvedPluginsDir)
+
+	s := server.NewMCPServer("game-traffic-analysis", "1.0.0",
+		server.WithToolCapabilities(true),
+	)
+
+	// 注意：这里必须传解析后的 absWorkDir，而不是 *workDir 原始值。
+	// *workDir 的 flag 默认值是 "."，直接传给 newMCPCapture 会让数据目录锚在进程
+	// CWD 上，从而完全绕过 GT_HOME（容器里 CWD=/ 时表现为
+	// "open control store: unable to open database file (14)"）。
+	capture, err := newMCPCapture(*iface, resolvedPluginsDir, absWorkDir, *pipelineAddr, *addr, s, *enableRawDebug, *dbDriver, *dbDSN)
+	if err != nil {
+		slog.Error("init mcp capture", "error", err)
+		os.Exit(1)
+	}
+	defer capture.grpcConn.Close()
+	defer capture.controlStore.Close()
+	if capture.pdConn != nil {
+		defer capture.pdConn.Close()
+	}
+
+	// 把 -lan-ip / GT_LAN_IP 注入 lanIP 探测（proxy_lease.go / agent_download.go /
+	// singbox_profile.go 都通过该函数拿 host:port 拼二维码）。
+	// 没有覆盖时走启发式（含 docker bridge / hyper-v / WSL 排除）。
+	capture.lanIPOverride = *lanIP
+	lanIPOverride = *lanIP // 同时注入 package 级变量，让非 mcpCapture 的调用点也用得上
+	if v := strings.TrimSpace(*lanIP); v != "" {
+		source := "env"
+		if flagSet["lan-ip"] {
+			source = "flag"
+		}
+		slog.Info("lan ip override enabled", "lan_ip", v, "source", source)
+	}
+
+	// 会话保留策略（存储优化）：启动即清一轮，之后周期执行。
+	// 默认 TTL 7 天 / 最多 200 个会话；-session-ttl-days 0 / -max-sessions 0 关闭对应项。
+	retention := retentionPolicy{
+		TTL:         time.Duration(*sessionTTLDays) * 24 * time.Hour,
+		MaxSessions: *maxSessions,
+	}
+	if retention.TTL > 0 || retention.MaxSessions > 0 {
+		slog.Info("session retention enabled", "ttl", retention.TTL.String(), "max_sessions", retention.MaxSessions)
+		go capture.runRetentionLoop(retention, 30*time.Minute)
+	}
+
+	s.AddTool(mcp.NewTool("start_capture",
+		mcp.WithDescription("Start capturing traffic. Capture sources: source=nic (default) captures on a network interface filtered by port; source=proxy starts the mobile proxy gRPC listener (gt-singbox-agent connects and pushes connection-level frames); source=agent subscribes to the agent hub (a running gt-agent pushes raw frames for this session_id). Sources can be combined where supported (e.g. agent with pcap_file). Packets are always captured and stored; an optional plugin enables protocol decoding."),
+		mcp.WithNumber("port", mcp.DefaultNumber(0), mcp.Description("Server port to capture or filter, e.g. 8080. Required for source=nic; ignored for source=proxy")),
+		mcp.WithString("plugin", mcp.Description("Optional plugin name for protocol decoding, e.g. http. If omitted or no matching plugin is found, only raw packets are stored.")),
+		mcp.WithString("pcap_file", mcp.Description("Optional pcap file to replay instead of live capture")),
+		mcp.WithString("source", mcp.DefaultString("nic"), mcp.Description("Capture source: nic (network interface, default), proxy (mobile proxy via gt-singbox-agent) or agent (raw frames pushed by gt-agent via the agent hub)")),
+		mcp.WithString("listen_addr", mcp.DefaultString("127.0.0.1:9090"), mcp.Description("For source=proxy: gRPC listen address that gt-singbox-agent connects to, e.g. 127.0.0.1:9090 or unix:///tmp/gt-mobile.sock")),
+	), capture.handleStartCapture)
+
+	s.AddTool(mcp.NewTool("stop_capture",
+		mcp.WithDescription("Stop a running capture session and flush all data"),
+		mcp.WithString("session_id", mcp.Description("Session ID to stop; defaults to current session")),
+	), capture.handleStopCapture)
+
+	s.AddTool(mcp.NewTool("get_session_status",
+		mcp.WithDescription("Get capture status for a specific or current session"),
+		mcp.WithString("session_id", mcp.Description("Session ID to query; defaults to current session")),
+	), capture.handleGetSessionStatus)
+
+	s.AddTool(mcp.NewTool("list_plugins",
+		mcp.WithDescription("List available decoder plugins"),
+	), capture.handleListPlugins)
+
+	s.AddTool(mcp.NewTool("create_plugin",
+		mcp.WithDescription("Scaffold a new decoder plugin project (plugin.yaml + main.go + go.mod) from templates. The skeleton registers itself via github.com/OwnSecurityGuard/gta-plugin-sdk. IMPORTANT: the generated decoder receives a COMPLETE link-layer frame (not L7) for pcap sources — when the pinned SDK ships the framing package, the scaffold uses framing.ExtractL7 + framing.Reassembler; otherwise it is explicitly marked framing-unavailable. Returns the actual output_dir (absolute), the exact sdk_version pinned, and whether framing is available. Ready to compile after adjusting the replace path (point it at the local gta-plugin-sdk repo or the published remote module)."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name, kebab-case, e.g. my-game-decoder")),
+		mcp.WithString("protocol", mcp.Required(), mcp.Description("Protocol the plugin decodes, e.g. my_game")),
+		mcp.WithString("protocol_version", mcp.Description("Optional protocol version, e.g. game/v3")),
+		mcp.WithString("hints", mcp.Description("Optional match hints as JSON array of strings or comma-separated, e.g. [\"tcp\",\"port:7000\"]")),
+		mcp.WithString("output_dir", mcp.Description("Strict target directory for the generated project; files are written directly there. Defaults to <plugins_dir>/<name> when omitted.")),
+	), capture.handleCreatePlugin)
+
+	s.AddTool(mcp.NewTool("build_plugin",
+		mcp.WithDescription("Compile a scaffolded plugin project via the Developer Plane. Returns structured file:line:col diagnostics on failure so the AI can fix the exact location without reading SDK files. On success the artifact state advances scaffolded → compiled and any prior validated proof is invalidated."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case), e.g. my-game-decoder")),
+		mcp.WithNumber("timeout_sec", mcp.Description("Optional build timeout in seconds (default 120)")),
+	), capture.handleBuildPlugin)
+
+	s.AddTool(mcp.NewTool("activate_plugin",
+		mcp.WithDescription("Launch the local plugin binary and inject GT_REGISTRY_ADDR so it registers with the runtime. The Developer Plane owns only the process it launches; deactivate_plugin tears it down. registry_addr resolves in order: explicit arg → GT_REGISTRY_ADDR env → the pipeline's actual registry address (read via get_registry_addr), so you usually don't need to pass it. After launch, activation is NOT considered complete on a mere pid/activate-ok: it jointly verifies list_registered_plugins (registered), status_plugin.online (online), and get_plugin_manifest (manifest_present) — all three must hold before integrated=true."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case) to launch")),
+		mcp.WithString("registry_addr", mcp.Description("Runtime registry address, e.g. :9091. Defaults to env GT_REGISTRY_ADDR, then to the pipeline's address (via get_registry_addr)")),
+	), capture.handleActivatePlugin)
+
+	s.AddTool(mcp.NewTool("deactivate_plugin",
+		mcp.WithDescription("Stop the plugin process the Developer Plane launched for name, and best-effort force-deregister it from the runtime registry. Safe to call when the plugin is already offline."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case) to stop")),
+	), capture.handleDeactivatePlugin)
+
+	s.AddTool(mcp.NewTool("status_plugin",
+		mcp.WithDescription("Return the dual-state view of a plugin (design §2): artifact (unknown→scaffolded→compiled→validated, from disk) merged with runtime (offline→registered→active, from the registry), plus the last build/activate attempt for failure attribution and a suggested next_action. Use this as the per-iteration entry point."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case), e.g. my-game-decoder")),
+	), capture.handleStatusPlugin)
+
+	s.AddTool(mcp.NewTool("explain_plugin",
+		mcp.WithDescription("Attribute the most recent build or activate failure of a plugin (design §2.3 / P3a). Reads the Developer Plane's last attempt and returns structured findings (category + optional SDK contract rule_id + why + fix), plus a next_action. The returned ref is what status_plugin's last_attempt.explain_ref points back to. On a failed build/activate the Developer Plane already auto-runs this, so status surfaces the ref immediately."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Plugin name (kebab-case), e.g. my-game-decoder")),
+		mcp.WithString("action", mcp.Description("Optional: which attempt to explain (build | activate | deactivate). Omit to explain the latest attempt")),
+		mcp.WithObject("verify", mcp.Description("Optional verify result from plugin.verify, shape {violations, quality, verdict}. When provided, decode-class attribution is derived from it; when omitted, the Developer Plane attributes the most recent recorded verify result.")),
+	), capture.handleExplainPlugin)
+
+	s.AddTool(mcp.NewTool("get_plugin_contract",
+		mcp.WithDescription("Return the full contract.yaml spec for the GameTrace decoder plugin API. Use this as the single source of truth when writing or reviewing plugin code."),
+	), capture.handleGetPluginContract)
+
+	s.AddTool(mcp.NewTool("get_plugin_dev_guide",
+		mcp.WithDescription("Return the full plugin development guide (markdown). Covers architecture, plugin.yaml schema, Decode RPC contract, lifecycle, framing, and best practices. KEY TAKEAWAY: for pcap sources DecodeRequest.payload is a COMPLETE link-layer frame (link header + IP + TCP/UDP + app bytes), NOT pre-stripped L7 — strip it per link_type with framing.ExtractL7 and reassemble TCP with framing.Reassembler first. Only ProxyPayload(1001)/TLSPlaintext(1002) are already L7. Read this BEFORE writing any decoder."),
+	), capture.handleGetPluginDevGuide)
+
+	s.AddTool(mcp.NewTool("create_proxy_lease",
+		mcp.WithDescription("Create a per-user/device mobile proxy capture lease: the pipeline allocates dedicated ports, starts an independent mobile capture session and spawns a dedicated gt-singbox-agent with its own filter config — multiple users never share or fight over one session. Returns the lease snapshot including lan_ip, connect_addr (HTTP CONNECT proxy address for the phone) and singbox_uri (scan-to-import QR content). Each user may hold up to 5 leases; release with release_proxy_lease."),
+		mcp.WithString("plugin", mcp.Description("Optional decoder plugin name bound to the lease session")),
+		mcp.WithArray("include_hosts", mcp.Description("Optional host filter list (comma or JSON array), e.g. [\"api.example.com\"]"), mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithArray("include_ports", mcp.Description("Optional port filter list (comma or JSON array), e.g. [443, 8080]"), mcp.Items(map[string]any{"type": "number"})),
+		mcp.WithString("device", mcp.Description("Optional device label for identification, e.g. alice-phone")),
+		mcp.WithString("project_id", mcp.Description("Optional project ID the lease session belongs to")),
+	), capture.handleCreateProxyLease)
+
+	s.AddTool(mcp.NewTool("list_proxy_leases",
+		mcp.WithDescription("List the caller's active mobile proxy capture leases with runtime status (agent process, session, live connection activity) plus lan_ip/connect_addr/singbox_uri per lease. Admin callers see all owners' leases."),
+	), capture.handleListProxyLeases)
+
+	s.AddTool(mcp.NewTool("get_proxy_lease",
+		mcp.WithDescription("Get one mobile proxy capture lease's status snapshot by lease_id (= session_id). Includes agent liveness, session state and live connection activity plus the QR connect addresses."),
+		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID returned by create_proxy_lease (= session_id)")),
+	), capture.handleGetProxyLease)
+
+	s.AddTool(mcp.NewTool("release_proxy_lease",
+		mcp.WithDescription("Release a mobile proxy capture lease: stops its capture session, terminates its gt-singbox-agent and frees the ports (idempotent). The lease's QR code / singbox profile stops working immediately. Other users' leases are unaffected."),
+		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID to release (= session_id)")),
+	), capture.handleReleaseProxyLease)
+
+	// 租约内的抓包开关：手机始终连着同一个代理端口，靠 start/stop 切换抓包会话。
+	// 不抓包时无原始包落盘、零上报；新会话独立 session_id / 独立 SQLite。
+	s.AddTool(mcp.NewTool("start_lease_capture",
+		mcp.WithDescription("Start a fresh capture session on an existing proxy lease (the phone's VPN/QR keeps working unchanged). Each start yields a brand-new session_id with isolated SQLite store and zero data overlap with prior sessions. No need to recreate the lease or rescan the QR."),
+		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID returned by create_proxy_lease")),
+		mcp.WithString("plugin", mcp.Description("Override decoder plugin for this capture (defaults to the lease's bound plugin)")),
+		mcp.WithArray("include_hosts", mcp.Description("Override connection host filter"), mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithArray("include_ports", mcp.Description("Override connection port filter"), mcp.Items(map[string]any{"type": "number"})),
+	), capture.handleStartLeaseCapture)
+
+	s.AddTool(mcp.NewTool("stop_lease_capture",
+		mcp.WithDescription("Stop the current capture session on a proxy lease and return the lease to idle. The phone's VPN/QR stays connected — start_lease_capture can begin a fresh session at any time. After stop, raw packets cease being captured/uploaded."),
+		mcp.WithString("lease_id", mcp.Required(), mcp.Description("Lease ID whose current capture should stop")),
+	), capture.handleStopLeaseCapture)
+
+	// ---- 探针管理（v2 探针优化）：probe_start_capture 是 Sessions 一级页的
+	// "创建抓包"（选机器+端口+开始）；其余服务于 管理>探针 页 ----
+	s.AddTool(mcp.NewTool("list_probes",
+		mcp.WithDescription("List capture probes visible to the caller (creator-scoped; admin sees all). Each probe carries the 3-dimension status: connection_state (online/offline), capture_state (idle/starting/running/stopped/failed) and data stats (last_packet/last_upload). Use probe_start_capture to start a capture on one."),
+	), capture.handleListProbes)
+
+	s.AddTool(mcp.NewTool("get_probe",
+		mcp.WithDescription("Get one probe's full 3-dimension status snapshot (connection / capture state machine / data counters + local archive summary)."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID returned by list_probes")),
+	), capture.handleGetProbe)
+
+	s.AddTool(mcp.NewTool("probe_start_capture",
+		mcp.WithDescription("Start a capture session on a selected probe (the user-facing 'create capture' flow: pick machine + ports + start). Creates a new session owned by the caller and assigns it to the probe via desired-state; returns session_id — poll get_session_status for the capture state machine (starting → running). The probe must be online."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID to capture on (from list_probes)")),
+		mcp.WithArray("ports", mcp.Description("TCP ports to filter, e.g. [8080]. Empty = capture everything"), mcp.Items(map[string]any{"type": "number"})),
+		mcp.WithArray("hosts", mcp.Description("Optional host filter list"), mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithString("iface", mcp.Description("Optional interface name on the probe machine; empty = probe auto-detects the default interface")),
+		mcp.WithString("plugin", mcp.Description("Optional decoder plugin bound to the session")),
+		mcp.WithString("project_id", mcp.Description("Optional project the session belongs to")),
+	), capture.handleProbeStartCapture)
+
+	s.AddTool(mcp.NewTool("probe_stop_capture",
+		mcp.WithDescription("Stop the probe's current capture and close its session (probe stays resident). Returns the stopped session_id; empty if the probe was not capturing."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID to stop")),
+	), capture.handleProbeStopCapture)
+
+	s.AddTool(mcp.NewTool("probe_update_filter",
+		mcp.WithDescription("Hot-update the probe's capture filter (BPF recompile, capture continues uninterrupted). Empty ports/hosts clears the filter (capture all)."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+		mcp.WithArray("ports", mcp.Description("TCP ports filter"), mcp.Items(map[string]any{"type": "number"})),
+		mcp.WithArray("hosts", mcp.Description("Host filter list"), mcp.Items(map[string]any{"type": "string"})),
+	), capture.handleProbeUpdateFilter)
+
+	s.AddTool(mcp.NewTool("probe_retry_capture",
+		mcp.WithDescription("Retry the last failed capture assignment on a probe (capture_state=failed). Probe must be online."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+	), capture.handleProbeRetryCapture)
+
+	s.AddTool(mcp.NewTool("probe_rename",
+		mcp.WithDescription("Rename a probe (display name, defaults to hostname at registration)."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+		mcp.WithString("name", mcp.Required(), mcp.Description("New display name, e.g. game-server-01")),
+	), capture.handleProbeRename)
+
+	s.AddTool(mcp.NewTool("probe_revoke",
+		mcp.WithDescription("Revoke a probe's long-term credential: the probe's token stops working immediately and it must re-register (claim code / user token) next start. Use when a machine is decommissioned or its credentials leaked."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+	), capture.handleProbeRevoke)
+
+	s.AddTool(mcp.NewTool("probe_list_archive",
+		mcp.WithDescription("List the probe's locally persisted capture archive segments (retention-managed, survives probe restarts). refresh=true queries the live probe; offline probes fall back to the server-side cache (from_cache=true, may be stale). Use with probe_import_archive to load a time range into a new session."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID")),
+		mcp.WithNumber("from_unix", mcp.Description("Range start, unix seconds (0 = unbounded)")),
+		mcp.WithNumber("to_unix", mcp.Description("Range end, unix seconds (0 = unbounded)")),
+		mcp.WithBoolean("refresh", mcp.Description("Query the live probe and refresh the cache (default false = cache only)")),
+	), capture.handleProbeListArchive)
+
+	s.AddTool(mcp.NewTool("probe_import_archive",
+		mcp.WithDescription("Import the probe's locally archived capture data for a time range as a NEW session (source=agent, owned by the caller; prior sessions are never backfilled). The probe replays its local spool segments with original packet ids/timestamps. Probe must be online; returns the new session_id."),
+		mcp.WithString("probe_id", mcp.Required(), mcp.Description("Probe ID whose archive to import")),
+		mcp.WithNumber("from_unix", mcp.Description("Range start, unix seconds (0 = unbounded)")),
+		mcp.WithNumber("to_unix", mcp.Description("Range end, unix seconds (0 = unbounded)")),
+		mcp.WithString("project_id", mcp.Description("Optional project the new session belongs to")),
+	), capture.handleProbeImportArchive)
+
+	s.AddTool(mcp.NewTool("get_registry_addr",
+		mcp.WithDescription("Return the registry address the pipeline is currently listening on (its -registry-addr, e.g. :9091). Plugins MUST connect here by setting GT_REGISTRY_ADDR at startup; this tool removes the guesswork of reading pipeline startup logs. Use it to learn where a freshly launched plugin should register, or to confirm activate_plugin's resolved address."),
+	), capture.handleGetRegistryAddr)
+
+	s.AddTool(mcp.NewTool("get_agent_download_options",
+		mcp.WithDescription("Return the info the 'Download Agent' page needs: the server's reachable host, registry/ingest ports, and the server platform. Users in other environments use this to fill in the back-connect address when downloading a pre-configured agent binary (port + decoder plugin are baked in; no runtime params needed)."),
+	), capture.handleGetAgentDownloadOptions)
+
+	s.AddTool(mcp.NewTool("get_capabilities",
+		mcp.WithDescription("Return a self-describing catalog of all MCP tools grouped by workflow (capture / query / behavior / plugin-dev / plugin-verify / plugin-runtime / raw-debug) plus recommended call chains. Call this FIRST when unsure which tool to use or how tools relate; it replaces reading the README."),
+	), capture.handleGetCapabilities)
+
+	s.AddTool(mcp.NewTool("list_registered_plugins",
+		mcp.WithDescription("List all plugins currently registered with the pipeline (active via gRPC PluginRegistry). Different from list_plugins which scans the plugins directory for binary files."),
+	), capture.handleListRegisteredPlugins)
+
+	s.AddTool(mcp.NewTool("get_plugin_manifest",
+		mcp.WithDescription("Get the plugin.yaml manifest of a registered plugin by name. Returns the raw YAML bytes."),
+		mcp.WithString("name", mcp.Description("Plugin name (kebab-case), e.g. http or my-game-decoder")),
+	), capture.handleGetPluginManifest)
+
+	s.AddTool(mcp.NewTool("deregister_plugin",
+		mcp.WithDescription("Manually deregister a plugin from the pipeline. Use when a plugin crashed or needs to be forced-offline without restarting the pipeline."),
+		mcp.WithString("instance_id", mcp.Description("Preferred: the instance_id returned by Register")),
+		mcp.WithString("name", mcp.Description("Fallback: deregister by plugin name (matches first online instance)")),
+	), capture.handleDeregisterPlugin)
+
+	s.AddTool(mcp.NewTool("set_session_plugin",
+		mcp.WithDescription("Hot-swap the decoder plugin bound to a RUNNING capture session. Takes effect immediately (the next decoded packet uses the new plugin) without stopping capture. The target plugin must already be registered with the pipeline. Fails if the session is not running or the plugin is unknown."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Target capture session ID")),
+		mcp.WithString("plugin", mcp.Required(), mcp.Description("New decoder plugin name to bind (must be registered)")),
+	), capture.handleSetSessionPlugin)
+
+	s.AddTool(mcp.NewTool("list_interfaces",
+		mcp.WithDescription("List available pcap capture interfaces"),
+	), capture.handleListInterfaces)
+
+	s.AddTool(mcp.NewTool("list_live_sessions",
+		mcp.WithDescription("List currently active capture sessions from the pipeline"),
+	), capture.handleListLiveSessions)
+
+	// 默认 MCP surface：事件（events）、StateChange、聚合统计（aggregate stats）。
+	s.AddTool(mcp.NewTool("list_decoded_data",
+		mcp.WithDescription("List decoded protocol events from a capture session. This is the primary event query surface; results are stored in the events table and can be filtered with expr expressions."),
+		mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max rows to return")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+		mcp.WithString("filter", mcp.Description("Optional expr expression to filter events, e.g. data.entity == \"buff\" && data.hp > 5. Available fields: id, timestamp, session_id, protocol, raw_len, data.*")),
+	), capture.handleListDecodedData)
+
+	// 代理抓包专有：连接/流/帧查询（Connections 页面数据源）。
+	// 与 list_decoded_data 分离：这些工具按 conn_id 聚合，是移动代理抓包的核心入口。
+	s.AddTool(mcp.NewTool("list_connections",
+		mcp.WithDescription("List proxy capture connections aggregated by conn_id (newest first). Each row has client/server endpoints, protocol, source, start/end time, duration, event count and frame count. Requires a mobile proxy capture session."),
+		mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max rows to return")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+	), capture.handleListConnections)
+
+	s.AddTool(mcp.NewTool("get_connection_detail",
+		mcp.WithDescription("Get one proxy capture connection's detail: client/server endpoints, protocol, source, app/device, time range, duration and stream/frame/event counts. Use the conn_id from list_connections."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+		mcp.WithString("conn_id", mcp.Required(), mcp.Description("Connection ID from list_connections")),
+	), capture.handleGetConnectionDetail)
+
+	s.AddTool(mcp.NewTool("list_connection_streams",
+		mcp.WithDescription("List the streams within one connection (Stream View). Events are grouped by correlation_id; unpaired events (e.g. pushes) each form their own stream. Each stream contains its ordered decoded events with direction and msg_name."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+		mcp.WithString("conn_id", mcp.Required(), mcp.Description("Connection ID from list_connections")),
+		mcp.WithNumber("limit", mcp.DefaultNumber(200), mcp.Description("Max streams to return")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+	), capture.handleListConnectionStreams)
+
+	s.AddTool(mcp.NewTool("list_connection_frames",
+		mcp.WithDescription("List the raw reassembled frames within one connection (Frames / Raw view). Each frame has timestamp, direction, src/dst, protocol, link_type and base64 payload."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+		mcp.WithString("conn_id", mcp.Required(), mcp.Description("Connection ID from list_connections")),
+		mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max rows to return")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+	), capture.handleListConnectionFrames)
+
+	s.AddTool(mcp.NewTool("list_state_changes",
+		mcp.WithDescription("List state change projections from a capture session, with optional filtering by subject_type, subject_id, op, path, or flow_id."),
+		mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max rows to return")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+		mcp.WithString("subject_type", mcp.Description("Filter by subject type, e.g. Building")),
+		mcp.WithString("subject_id", mcp.Description("Filter by subject ID, e.g. 1001")),
+		mcp.WithString("op", mcp.Description("Filter by operation, e.g. set | delete")),
+		mcp.WithString("path", mcp.Description("Filter by changed path/field, e.g. level")),
+		mcp.WithString("flow_id", mcp.Description("Filter by flow ID")),
+	), capture.handleListStateChanges)
+
+	s.AddTool(mcp.NewTool("query_capture_table",
+		mcp.WithDescription("Read-only escape hatch for internal projection/audit tables that have no dedicated tool. Whitelisted tables: event_index (schema indexable_fields projection), plugin_debug_access (audit trail of sampled bytes), raw_packets, events, state_changes, aggregated_metrics. The table name is constrained to the allowlist (no SQL injection possible); limit/offset are parameterized. Use this to verify event_index projections were built, or to inspect plugin_debug_access audit rows."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID to query")),
+		mcp.WithString("table", mcp.Required(), mcp.Description("Whitelisted table: event_index | plugin_debug_access | raw_packets | events | state_changes | aggregated_metrics")),
+		mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max rows (clamped to 1000)")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+	), capture.handleQueryCaptureTable)
+
+	s.AddTool(mcp.NewTool("aggregate_query",
+		mcp.WithDescription("Query aggregated metrics/statistics using an expr expression over {name, window, value, group}. Metrics are precomputed by rules.yaml; the aggregatable source fields are declared per-schema in the plugin manifest (see get_capture_schema manifest.schemas[].fields[].aggregatable)."),
+		mcp.WithString("expression", mcp.Required(), mcp.Description("expr expression, e.g. name == 'http_req_count' && value > 0")),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+	), capture.handleAggregateQuery)
+
+	// 行为（behavior）与因果链（causation chain）工具。
+	s.AddTool(mcp.NewTool("begin_capture_run",
+		mcp.WithDescription("Mark the start of a user operation or behavior WITHOUT starting capture. It records a run window and returns run_id for later correlation (end_capture_run / get_run_status / trace_protocol_flow). plugin_name/device/filter/port are DESCRIPTIVE HINTS only and do NOT auto-start capture. To actually capture, call start_capture separately; if no capture is running this tool only returns a time_window_only uncertainty telling you to call start_capture first."),
+		mcp.WithString("feature_name", mcp.Required(), mcp.Description("Name of the feature/behavior being tested, e.g. 'upgrade_building'")),
+		mcp.WithString("project_path", mcp.Required(), mcp.Description("Path to the load-test project where code will be generated")),
+		mcp.WithString("plugin_name", mcp.Description("Optional descriptive hint recorded for the run window. NOT used to auto-start capture; call start_capture separately.")),
+		mcp.WithString("device", mcp.Description("Optional device identifier")),
+		mcp.WithString("filter", mcp.Description("Optional capture filter")),
+		mcp.WithNumber("port", mcp.Description("Optional descriptive hint recorded for the run window. NOT used to auto-start capture.")),
+	), capture.handleBeginCaptureRun)
+
+	s.AddTool(mcp.NewTool("end_capture_run",
+		mcp.WithDescription("Close the current behavior window. Returns summary statistics for the run. Idempotent: repeated calls return the same summary."),
+		mcp.WithString("run_id", mcp.Required(), mcp.Description("Run ID from begin_capture_run")),
+		mcp.WithString("time_to", mcp.Description("Optional upper bound of the time window (RFC3339Nano). Defaults to now. Mainly for testing.")),
+	), capture.handleEndCaptureRun)
+
+	s.AddTool(mcp.NewTool("get_run_status",
+		mcp.WithDescription("Quickly check whether a behavior run has useful data. Returns flow/message counts for fail-fast decisions."),
+		mcp.WithString("run_id", mcp.Required(), mcp.Description("Run ID to check")),
+	), capture.handleGetRunStatus)
+
+	s.AddTool(mcp.NewTool("trace_protocol_flow",
+		mcp.WithDescription("Build the chronological execution trace (causation chain) for one behavior. Stitches request/response/push/state_diff across the run window. Returns steps or file_path for large results."),
+		mcp.WithString("run_id", mcp.Required(), mcp.Description("Run ID from begin_capture_run")),
+		mcp.WithString("flow_id", mcp.Required(), mcp.Description("Flow ID to trace")),
+		mcp.WithString("feature_name", mcp.Required(), mcp.Description("Feature/behavior name for context")),
+		mcp.WithObject("noise_filter", mcp.Description("Noise filtering options"), mcp.Properties(map[string]any{
+			"drop_names":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"drop_heartbeats": map[string]any{"type": "boolean", "default": true},
+		})),
+		mcp.WithObject("entity_diff", mcp.Description("Entity diff options"), mcp.Properties(map[string]any{
+			"enabled":   map[string]any{"type": "boolean", "default": true},
+			"window_ms": map[string]any{"type": "number", "default": 500},
+		})),
+	), capture.handleTraceProtocolFlow)
+
+	// 会话级时序树（Phase 1 MVP）：整 session 的 request/response 因果树。
+	s.AddTool(mcp.NewTool("get_session_timeline",
+		mcp.WithDescription("Build the full request/response timeline tree for one capture session from TraceContext (causation_id = parent, correlation_id = conversation group). This is the 'capture once, see the whole flow' MVP view. Returns a nested tree of roots plus per-conversation aggregation."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID to build timeline for")),
+		mcp.WithNumber("limit", mcp.DefaultNumber(500), mcp.Description("Max events to load into the tree (clamped to 5000)")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset into the session's events")),
+	), capture.handleGetSessionTimeline)
+
+	s.AddTool(mcp.NewTool("get_capture_schema",
+		mcp.WithDescription("Describe available fields for decoded events, state_changes projections, aggregation metrics and current rules."),
+		mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+	), capture.handleGetCaptureSchema)
+
+	// 受限调试能力：原始包工具仅在 --enable-raw-debug 或 GT_MCP_ENABLE_RAW_DEBUG=1 时注册。
+	if capture.enableRawDebug {
+		s.AddTool(mcp.NewTool("list_raw_packets",
+			mcp.WithDescription("[PLUGIN DEBUG ONLY] List raw packets from a capture session, with optional protocol/src/dst filtering. Payload is base64-encoded. Requires --enable-raw-debug."),
+			mcp.WithNumber("limit", mcp.DefaultNumber(100), mcp.Description("Max rows to return")),
+			mcp.WithNumber("offset", mcp.DefaultNumber(0), mcp.Description("Offset")),
+			mcp.WithString("session_id", mcp.Description("Optional session ID to query; defaults to current session")),
+			mcp.WithString("protocol", mcp.Description("Filter by protocol, e.g. tcp")),
+			mcp.WithString("src", mcp.Description("Filter by source address (substring match)")),
+			mcp.WithString("dst", mcp.Description("Filter by destination address (substring match)")),
+		), capture.handleListRawPackets)
+
+		s.AddTool(mcp.NewTool("decode_raw_packets",
+			mcp.WithDescription("[PLUGIN DEBUG ONLY] Decode raw packets of an offline session using a specified plugin. Results are written into the session's events table; query them afterwards via list_decoded_data. Only stopped sessions can be decoded. Requires --enable-raw-debug."),
+			mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID to decode (must be stopped)")),
+			mcp.WithString("plugin", mcp.Required(), mcp.Description("Plugin name for decoding, e.g. http or tcp")),
+			mcp.WithString("protocol", mcp.Description("Optional: only decode packets with this protocol, e.g. tcp")),
+			mcp.WithString("src", mcp.Description("Optional: only decode packets whose source matches (substring)")),
+			mcp.WithString("dst", mcp.Description("Optional: only decode packets whose destination matches (substring)")),
+			mcp.WithNumber("limit", mcp.Description("Optional: max number of raw packets to decode, 0 means all")),
+			mcp.WithBoolean("clear_existing", mcp.Description("Optional: clear events, state_changes and event_index before writing new results, default true")),
+		), capture.handleDecodeRawPackets)
+	}
+
+	// test_plugin：隐私安全的插件测试通道。原始包仅在 gt-pipeline 进程内解码，不回传前端；
+	// 结果不落库。因此不需要 --enable-raw-debug，常驻可用。
+	s.AddTool(mcp.NewTool("test_plugin",
+		mcp.WithDescription("Test a plugin by decoding an offline session's raw packets in-process and returning sampled decoded events. Raw packet bytes are NEVER returned to the client (used only server-side for decoding); results are NOT persisted. Safe to use without --enable-raw-debug. Only stopped sessions can be tested."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID whose raw packets to test against (must be stopped)")),
+		mcp.WithString("plugin", mcp.Required(), mcp.Description("Plugin name to test, e.g. http or tcp")),
+		mcp.WithString("protocol", mcp.Description("Optional: only test packets with this protocol, e.g. tcp")),
+		mcp.WithString("src", mcp.Description("Optional: only test packets whose source matches (substring)")),
+		mcp.WithString("dst", mcp.Description("Optional: only test packets whose destination matches (substring)")),
+		mcp.WithNumber("limit", mcp.Description("Optional: max number of raw packets to test, 0 means all")),
+		mcp.WithNumber("sample_limit", mcp.Description("Optional: max number of decoded events to return as samples, default 50")),
+	), capture.handleTestPlugin)
+
+	// verify_plugin：契约+质量校验，产出 verdict 并把 artifact.state 升到 validated。
+	// 纯转发到 Runtime Plane（gt-pipeline）；MCP 零归因逻辑。
+	s.AddTool(mcp.NewTool("verify_plugin",
+		mcp.WithDescription("Verify a plugin by decoding an offline session's raw packets and checking contract violations (SDK checker, each tagged with a contract.yaml rule_id) plus gt-side quality stats (unknown ratio, entropy, correlation). Returns a verdict: pass | warn | fail, and on a non-fail verdict promotes the plugin's artifact.state to validated (with a proof). Pure forwarder to the Runtime Plane; MCP owns no attribution logic."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Stopped session whose raw packets to verify against")),
+		mcp.WithString("plugin", mcp.Required(), mcp.Description("Plugin name to verify, e.g. http or tcp")),
+		mcp.WithString("protocol", mcp.Description("Optional: only verify packets with this protocol, e.g. tcp")),
+		mcp.WithString("src", mcp.Description("Optional: only verify packets whose source matches (substring)")),
+		mcp.WithString("dst", mcp.Description("Optional: only verify packets whose destination matches (substring)")),
+		mcp.WithNumber("limit", mcp.Description("Optional: max number of raw packets to verify, 0 means all")),
+	), capture.handleVerifyPlugin)
+
+	// sample_bytes_plugin：取证取样（事实），并在 plugin_debug_access 留审计。
+	// 硬上限 20 包 / 64 字节不可突破；审计记真实返回量。纯转发到 Runtime Plane。
+	s.AddTool(mcp.NewTool("sample_bytes_plugin",
+		mcp.WithDescription("Sample the first bytes of a session's raw packets as FACTS only (hexdump, length histogram, first-byte distribution, entropy). No interpretation, no code. Every call is recorded in the plugin_debug_access audit table with the REAL returned packet/byte counts (not the requested ones). Hard cap 20 packets / 64 bytes, not bypassable via parameters. Pure forwarder to the Runtime Plane; MCP reads nothing and writes nothing."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session to sample from")),
+		mcp.WithString("plugin", mcp.Description("Optional: plugin name, recorded in the audit row only")),
+		mcp.WithNumber("limit", mcp.Description("Optional: requested packet cap (server caps at 20)")),
+		mcp.WithNumber("max_bytes", mcp.Description("Optional: requested bytes per packet (server caps at 64)")),
+	), capture.handleSampleBytesPlugin)
+
+	s.AddTool(mcp.NewTool("list_all_sessions",
+		mcp.WithDescription("List all capture sessions with their metadata (including stopped/offline sessions). Supports optional status filter: running | stopped | error | success | failed (failed maps to error)."),
+		mcp.WithString("status", mcp.Description("Optional filter: running | stopped | error | success | failed")),
+	), capture.handleListAllSessions)
+
+	s.AddTool(mcp.NewTool("delete_session",
+		mcp.WithDescription("Delete a capture session and its data"),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID to delete")),
+	), capture.handleDeleteSession)
+
+	// 轻量「项目」模型：只保存 名称 + 默认解码插件 + 默认抓包端口，供一键开始抓包复用配置（Web First · P1）。
+	s.AddTool(mcp.NewTool("create_project",
+		mcp.WithDescription("Create a lightweight capture project that remembers a name, a default decode plugin and a default capture port, so a later capture reuses them without re-entering. Keep it minimal: only these three fields, no workspace/org structures."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Project display name, e.g. Godot Game")),
+		mcp.WithString("plugin", mcp.Description("Default decode plugin name, e.g. godot_gateway. Optional.")),
+		mcp.WithNumber("port", mcp.Description("Default capture port (0 = unset). Optional.")),
+	), capture.handleCreateProject)
+
+	s.AddTool(mcp.NewTool("list_projects",
+		mcp.WithDescription("List capture projects visible to the current user (admin sees all owners' projects; normal users only see their own and projects they are a member of)."),
+	), capture.handleListProjects)
+
+	// 启动码接入：生成/列出 GT-XXXX 码，成员在目标机输入即可自动注册并回连抓包。
+	// 邀请模式：带 new_owner 时，claim 为新用户创建独立身份（而不是借用码创建者的身份）。
+	s.AddTool(mcp.NewTool("create_access_code",
+		mcp.WithDescription("Generate an access code (GT-XXXX-XXXX) bound to the current user. A member enters this code when first starting gt-agent to auto-register and connect. Optional: project_id, plugin, port, platform, server. Invite mode: set new_owner to create a fresh independent identity for that user on claim (user must not already exist)."),
+		mcp.WithString("project_id"), mcp.WithString("plugin"), mcp.WithNumber("port"),
+		mcp.WithString("platform"), mcp.WithString("server"),
+		mcp.WithString("new_owner", mcp.Description("Invite mode: user name to create on claim (letters/digits/._-)")),
+	), capture.handleCreateAccessCode)
+	s.AddTool(mcp.NewTool("list_access_codes",
+		mcp.WithDescription("List access codes visible to the current user (global admin sees all)."),
+	), capture.handleListAccessCodes)
+
+	s.AddTool(mcp.NewTool("get_project",
+		mcp.WithDescription("Get a single capture project with its metadata and recent sessions."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Project ID")),
+	), capture.handleGetProject)
+
+	s.AddTool(mcp.NewTool("update_project",
+		mcp.WithDescription("Update a capture project's name / description / game / default plugin / default port. Only explicitly supplied fields are changed. Requires project admin."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("name", mcp.Description("New project name")),
+		mcp.WithString("description", mcp.Description("New project description")),
+		mcp.WithString("game", mcp.Description("New project game title")),
+		mcp.WithString("default_plugin", mcp.Description("New default decode plugin name")),
+		mcp.WithNumber("default_port", mcp.Description("New default capture port")),
+	), capture.handleUpdateProject)
+
+	s.AddTool(mcp.NewTool("delete_project",
+		mcp.WithDescription("Delete a capture project. Requires project admin."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Project ID to delete")),
+	), capture.handleDeleteProject)
+
+	s.AddTool(mcp.NewTool("add_project_member",
+		mcp.WithDescription("Add or replace a member of a project. Requires project admin."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("user", mcp.Required(), mcp.Description("User (owner) to add as member")),
+		mcp.WithString("role", mcp.Required(), mcp.Description("Role: 'admin' or 'member'")),
+	), capture.handleAddProjectMember)
+
+	s.AddTool(mcp.NewTool("remove_project_member",
+		mcp.WithDescription("Remove a member from a project. Cannot remove the project creator. Requires project admin."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("user", mcp.Required(), mcp.Description("User (owner) to remove")),
+	), capture.handleRemoveProjectMember)
+
+	s.AddTool(mcp.NewTool("set_project_plugins",
+		mcp.WithDescription("Replace the project's associated plugin list. plugins is a JSON string array of [{\"id\",\"name\"}]. Requires project admin."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("plugins", mcp.Required(), mcp.Description("JSON string array of plugin entries")),
+	), capture.handleSetProjectPlugins)
+
+	s.AddTool(mcp.NewTool("set_project_rules",
+		mcp.WithDescription("Replace the project's associated rule list. rules is a JSON string array of [{\"id\",\"name\"}]. Requires project admin."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("rules", mcp.Required(), mcp.Description("JSON string array of rule entries")),
+	), capture.handleSetProjectRules)
+
+	s.AddTool(mcp.NewTool("list_users",
+		mcp.WithDescription("List invited users (invited identities only; env bootstrap tokens are not listed here). Token values are never returned. Global admin only."),
+	), capture.handleListUsers)
+
+	s.AddTool(mcp.NewTool("revoke_user",
+		mcp.WithDescription("Revoke an invited user: delete its identity so its token stops working immediately. Global admin only; cannot revoke yourself."),
+		mcp.WithString("owner", mcp.Required(), mcp.Description("User name to revoke")),
+	), capture.handleRevokeUser)
+
+	s.AddTool(mcp.NewTool("transfer_project_owner",
+		mcp.WithDescription("Transfer project ownership to an existing member (admin/member). Owner-only security-sensitive operation; previous owner becomes an admin member."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID")),
+		mcp.WithString("new_owner", mcp.Required(), mcp.Description("Existing project member to promote to owner")),
+	), capture.handleTransferProjectOwner)
+
+	s.AddTool(mcp.NewTool("move_session_to_project",
+		mcp.WithDescription("Move a session into a project (or clear binding with empty project_id). Requires session move permission and project membership on the target; tenant must match."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID")),
+		mcp.WithString("project_id", mcp.Description("Target project ID; empty to clear binding")),
+	), capture.handleMoveSessionToProject)
+
+	// Deprecated: 旧名别名，转发 move_session_to_project 的六步鉴权收口。
+	s.AddTool(mcp.NewTool("set_session_project",
+		mcp.WithDescription("Deprecated alias of move_session_to_project."),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID")),
+		mcp.WithString("project_id", mcp.Description("Project ID to bind; empty to clear")),
+	), capture.handleSetSessionProject)
+
+	// Script management tools removed: the Python script sandbox (save_script /
+	// list_scripts / run_script / delete_script) has been deleted. Arbitrary
+	// Python execution no longer lives in the capture control plane.
+
+	sseServer := server.NewSSEServer(s)
+	httpServer := server.NewStreamableHTTPServer(s, server.WithStateLess(true))
+
+	mux := http.NewServeMux()
+	mux.Handle("/sse", sseServer.SSEHandler())
+	mux.Handle("/message", sseServer.MessageHandler())
+	mux.Handle("/mcp", httpServer)
+	mux.HandleFunc("/events/plugins", capture.handleEventsSSE)
+	// 远程 Agent 下载：处于鉴权链内，访问者即接收会话 owner。
+	mux.HandleFunc("/download/agent", capture.handleAgentDownload)
+
+	// CORS：仅放行 -allowed-origins 中的 Origin（T12 之前是 *，任意站点都能
+	// 跨域调用 MCP 工具）。未配置任何 origin 时不返回 CORS 头，同源用法不受影响。
+	// 鉴权（B3）：GT_AUTH_TOKENS 配置了 token 时强制 Bearer 校验（auth.Middleware）；
+	// 未配置（匿名模式）时保持旧行为——直接放行、不注入身份。
+	// 身份来源组合（2026-09-05 邀请制）：env bootstrap 优先，users 表兜底
+	//（邀请 claim 创建的身份即时生效，无需重启）。
+	envResolver, err := auth.LoadFromEnv()
+	if err != nil {
+		slog.Error("load auth tokens failed", "error", err)
+		os.Exit(1)
+	}
+	resolver := auth.NewFirstResolver(envResolver, auth.NewDBResolver(capture.users.db))
+	// 自助注册开关：token 鉴权开启即默认允许（新用户免邀请获取身份）；
+	// GT_AUTH_REGISTER=off 显式关闭（封闭团队走纯邀请制）。匿名模式无意义。
+	capture.envResolver = envResolver
+	capture.openRegister = resolver.Required() && os.Getenv("GT_AUTH_REGISTER") != "off"
+	authed := buildHTTPHandler(strings.Split(*allowedOrigins, ","), resolver, mux)
+
+	// /singbox/profile 鉴权豁免：手机 sing-box 客户端扫码导入 profile 时无法携带
+	// Bearer 头（SFA 不支持自定义请求头）。该端点只输出代理监听端口/地址配置
+	// （与扫码页展示的信息一致），不含任何会话/抓包数据，故挂载在鉴权链之外。
+	root := http.NewServeMux()
+	root.HandleFunc("/singbox/profile", capture.handleSingboxProfile)
+	// 自助注册鉴权豁免：注册者本来就是"还没有身份的人"（与 /access/claim 同理）。
+	root.HandleFunc("/access/register", capture.handleRegister)
+	// 启动码 claim / setup.sh 鉴权豁免：agent 首启（还没有 token）与 `curl | bash`
+	// 一键脚本都无法携带 Bearer，两者只凭一次性+限时启动码即可工作（见 access_code.go）。
+	root.HandleFunc("/access/claim", capture.handleAccessClaim)
+	root.HandleFunc("/setup.sh", capture.handleSetupScript)
+	// Windows 一键脚本（与 /setup.sh 对称）：PowerShell  irm ... | iex 一键接入。
+	root.HandleFunc("/setup.ps1", capture.handleSetupScriptPS1)
+	// Web UI 静态资源（免鉴权）兜在 "/" 上：命中嵌入文件才返回静态，其余请求
+	// （含 /mcp 等 API 与未知路径）原样进入鉴权链，语义与集成前一致。
+	root.Handle("/", serveWebOrAPI(mustWebUIFS(), authed))
+	handler := http.Handler(root)
+
+	customServer := &http.Server{
+		Addr:    *addr,
+		Handler: handler,
+	}
+	// 用 net.Listen 以便拿到实际监听地址（:0 动态分配时回写 <workdir>/addr.mcp.json，
+	// 同机可跑多套实例）。
+	lis, err := net.Listen("tcp", *addr)
+	if err != nil {
+		slog.Error("listen", "addr", *addr, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("mcp server listening", "addr", lis.Addr().String(), "endpoints", []string{"/sse", "/message", "/mcp"}, "raw_debug_enabled", capture.enableRawDebug, "auth_enabled", resolver.Required(), "allowed_origins", *allowedOrigins)
+	config.WriteAddrFile(absWorkDir, "mcp", lis.Addr().String())
+	if err := customServer.Serve(lis); err != nil && err != http.ErrServerClosed {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
+}

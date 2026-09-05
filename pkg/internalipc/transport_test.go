@@ -33,7 +33,7 @@ func TestListenAndDialEcho(t *testing.T) {
 	}
 	defer conn.Close()
 
-	want := []byte("hello-gta")
+	want := []byte("hello-gametrace")
 	if _, err := conn.Write(want); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestDialContextTargetRoutes(t *testing.T) {
 
 	// 4) npipe: 在非 Windows 平台应返回错误（不支持）
 	if runtime.GOOS != "windows" {
-		if c, e := DialContextTarget(ctx, `npipe:\\.\pipe\gta-test`); e == nil {
+		if c, e := DialContextTarget(ctx, `npipe:\\.\pipe\gt-test`); e == nil {
 			c.Close()
 			t.Skip("npipe unexpectedly dialable on non-windows; skipping assertion")
 		}

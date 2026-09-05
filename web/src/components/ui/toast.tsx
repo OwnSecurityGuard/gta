@@ -81,7 +81,7 @@ function ToastCard({ item, onDismiss }: { item: ToastItem; onDismiss: () => void
         : "text-info";
 
   return (
-    <div className="gta-toast-in pointer-events-auto flex items-start gap-2.5 rounded-lg border border-border bg-popover px-3.5 py-3 text-popover-foreground shadow-lg">
+    <div className="gt-toast-in pointer-events-auto flex items-start gap-2.5 rounded-lg border border-border bg-popover px-3.5 py-3 text-popover-foreground shadow-lg">
       <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", tone)} />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium leading-snug">{item.title}</p>

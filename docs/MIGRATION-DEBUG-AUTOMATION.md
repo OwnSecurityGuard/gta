@@ -1,6 +1,6 @@
-# GTA 重构迁移方案：Game Telemetry → Game Debug Automation
+# GameTrace 重构迁移方案：Game Telemetry → Game Debug Automation
 
-> 本文档记录 GTA 从「AI-native Game Telemetry Platform」重构为「Game Debug Automation Platform」
+> 本文档记录 GameTrace 从「AI-native Game Telemetry Platform」重构为「Game Debug Automation Platform」
 > 的概念收缩、代码改动与迁移决策。属于**保留技术资产、重新定义产品边界**，非推倒重来。
 
 ## 1. 产品边界重定义
@@ -13,13 +13,13 @@
 | 价值主张 | 让 AI agent 做分析 | 让 AI agent 驱动调试闭环（capture once, see the whole flow） |
 
 README 顶部 tagline、Features、Architecture、Examples、Agent self-check、Roadmap 已全部重写；
-MCP 工具表由 `go run ./scripts/gen_tool_table` 从 `cmd/gta-mcp/main.go` 重新生成（40 → 37 tools）。
+MCP 工具表由 `go run ./scripts/gen_tool_table` 从 `cmd/gt-mcp/main.go` 重新生成（40 → 37 tools）。
 
 ## 2. 删除清单（Phase 0 — cut concepts）
 
 | 概念 | 处理 | 代码落点 |
 |------|------|----------|
-| **Evidence（AI 分析层）** | 删除语义证据引擎与证据图存储 | `pkg/analyze/semantic/`（10 文件全删）、`pkg/store/evidence_graph.go`（已先删）、`cmd/gta-mcp/evidence_v1_test.go` |
+| **Evidence（AI 分析层）** | 删除语义证据引擎与证据图存储 | `pkg/analyze/semantic/`（10 文件全删）、`pkg/store/evidence_graph.go`（已先删）、`cmd/gt-mcp/evidence_v1_test.go` |
 | **Semantic Relation（知识图谱语义）** | 删除 | `pkg/event/relation.go` 删除 |
 | **Strength（观察/推导强度）** | 随 Evidence 一起删除 | semantic 包整体移除 |
 | **Entity Graph** | 随 Evidence 一起删除 | semantic 包整体移除 |
@@ -61,8 +61,8 @@ MCP 工具表由 `go run ./scripts/gen_tool_table` 从 `cmd/gta-mcp/main.go` 重
 抽到独立、与 semantic 零耦合的 `pkg/state/baseline.go`，提供 `BaselineManager.Apply(ev, sessionID) ([]EnrichedStateChange, error)`。
 写入路径改为：
 
-- `cmd/gta-pipeline/capture_task.go`：`baseline.Apply(ev, t.sessionID)` 替代 `semanticEngine.Process(ev)`
-- `cmd/gta-pipeline/decode_raw.go`：同上，直接 append
+- `cmd/gt-pipeline/capture_task.go`：`baseline.Apply(ev, t.sessionID)` 替代 `semanticEngine.Process(ev)`
+- `cmd/gt-pipeline/decode_raw.go`：同上，直接 append
 
 State 层是"保留项"，与 Evidence/Rule 无关，因此不受 Phase 0 删除影响。
 
@@ -95,9 +95,9 @@ Phase 1 落地"抓一次游戏：看到完整流程"。
 
 ### 6.2 数量自动维护（auto-maintain from write pipeline）
 
-- `cmd/gta-pipeline/capture_task.go` 在 `run` 循环内用 `taskStats`（RawCount / EventCount / MetricCount /
+- `cmd/gt-pipeline/capture_task.go` 在 `run` 循环内用 `taskStats`（RawCount / EventCount / MetricCount /
   DecodeErrors 等）累计，每次 `flush` 更新 `statsSnap`（atomic，无锁）。
-- `cmd/gta-pipeline/pipeline_service.go` 的 `finalizeTask`（run 退出回调，自动结束或显式停止都触发）
+- `cmd/gt-pipeline/pipeline_service.go` 的 `finalizeTask`（run 退出回调，自动结束或显式停止都触发）
   将 `taskStats` 写入 `ControlStore.UpdateSession`。即：**会话结束后统计自洽**，无需手动维护。
 - 运行中的会话可在 `GetStatus` 通过 `task.Snapshot()` 取实时统计（增量路径已具备，按需暴露）。
 
@@ -109,7 +109,7 @@ Phase 1 落地"抓一次游戏：看到完整流程"。
     `is_push`；按 `TraceContext.CausationID` 建父子树（OpenTelemetry parent span），按 `CorrelationID`
     聚合为"对话/请求-响应分组"。
   - 输出：嵌套 `roots` 树 + `conversations` 聚合视图 + 会话上下文（plugin/status）+ uncertainties。
-  - 实现：`cmd/gta-mcp/trace_timeline.go`，含单元测试 `trace_timeline_test.go`（树构建、悬空 causation、
+  - 实现：`cmd/gt-mcp/trace_timeline.go`，含单元测试 `trace_timeline_test.go`（树构建、悬空 causation、
     时间戳稳定排序、对话聚合均覆盖，已通过）。
 - **`list_all_sessions` 增强**——新增可选 `status` 过滤：`running | stopped | error | success | failed`
   （`failed` 映射到内部 `status="error"`）。满足原计划"get_sessions（failed/success filter）"。
@@ -143,8 +143,8 @@ Contract 收缩（schema+state，SDK 侧 Task #5）✅ 已完成（2026-08-22，
 ## 9. 验证状态
 
 - `go build -tags pcap ./...` —— 通过（exit 0）
-- `go vet -tags pcap ./cmd/gta-mcp/... ./pkg/store/... ./pkg/event/...` —— 通过
-- `go test -tags pcap ./pkg/store/... ./cmd/gta-mcp/...` —— 通过（含 `TestBuildTimeline_*`）
+- `go vet -tags pcap ./cmd/gt-mcp/... ./pkg/store/... ./pkg/event/...` —— 通过
+- `go test -tags pcap ./pkg/store/... ./cmd/gt-mcp/...` —— 通过（含 `TestBuildTimeline_*`）
 - MCP 工具表重新生成：37 tools
 
 ## 10. 已知风险 / 后续

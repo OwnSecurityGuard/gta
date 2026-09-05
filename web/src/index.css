@@ -3,7 +3,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /* =========================================================================
-   GTA · 设计令牌（Design Tokens）
+   GameTrace · 设计令牌（Design Tokens）
    配色思路：偏冷的灰阶画布 + 靛蓝品牌色 + 翠绿"在线/实时"强调色，
    区别于纯中性灰的默认模板观感，呈现"专业协议分析工具"的气质。
    ========================================================================= */
@@ -152,36 +152,36 @@ body {
 /* =========================================================================
    自定义滚动条（细、圆角、hover 时显品牌色）
    ========================================================================= */
-.gta-scroll,
+.gt-scroll,
 .overflow-auto {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent) transparent;
 }
-.gta-scroll::-webkit-scrollbar,
+.gt-scroll::-webkit-scrollbar,
 .overflow-auto::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
-.gta-scroll::-webkit-scrollbar-track,
+.gt-scroll::-webkit-scrollbar-track,
 .overflow-auto::-webkit-scrollbar-track {
   background: transparent;
 }
-.gta-scroll::-webkit-scrollbar-thumb,
+.gt-scroll::-webkit-scrollbar-thumb,
 .overflow-auto::-webkit-scrollbar-thumb {
   background-color: color-mix(in srgb, var(--color-muted-foreground) 28%, transparent);
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: padding-box;
 }
-.gta-scroll::-webkit-scrollbar-thumb:hover,
+.gt-scroll::-webkit-scrollbar-thumb:hover,
 .overflow-auto::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
 }
 
 /* =========================================================================
-   表格：吸顶表头（带毛玻璃与底边界），需配合 .gta-table 使用
+   表格：吸顶表头（带毛玻璃与底边界），需配合 .gt-table 使用
    ========================================================================= */
-.gta-table thead th {
+.gt-table thead th {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -195,7 +195,7 @@ body {
 /* =========================================================================
    卡片 / 表面工具类
    ========================================================================= */
-.gta-card {
+.gt-card {
   background-color: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -203,7 +203,7 @@ body {
 }
 
 /* 品牌渐变文字 */
-.gta-gradient-text {
+.gt-gradient-text {
   background-image: linear-gradient(
     135deg,
     var(--color-primary),
@@ -217,39 +217,39 @@ body {
 /* =========================================================================
    动画（默认开启，reduced-motion 下禁用）
    ========================================================================= */
-@keyframes gta-fade-in {
+@keyframes gt-fade-in {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-@keyframes gta-pop-in {
+@keyframes gt-pop-in {
   from { opacity: 0; transform: translateY(8px) scale(0.97); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-@keyframes gta-pulse-dot {
+@keyframes gt-pulse-dot {
   0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-success) 60%, transparent); }
   70%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-success) 0%, transparent); }
   100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-success) 0%, transparent); }
 }
-@keyframes gta-shimmer {
+@keyframes gt-shimmer {
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-@keyframes gta-toast-in {
+@keyframes gt-toast-in {
   from { opacity: 0; transform: translateY(12px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-@keyframes gta-loading-slide {
+@keyframes gt-loading-slide {
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(350%); }
 }
 
-.gta-fade-in { animation: gta-fade-in 0.25s ease-out both; }
-.gta-pop-in  { animation: gta-pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.gta-toast-in { animation: gta-toast-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.gt-fade-in { animation: gt-fade-in 0.25s ease-out both; }
+.gt-pop-in  { animation: gt-pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.gt-toast-in { animation: gt-toast-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
 /* 数据刷新中的顶部进度条（keepPreviousData 期间提示后台正在拉取）。
    关键：绝对定位浮层，不占文档流空间，避免出现/消失时把表格顶动造成抖动。 */
-.gta-loading-bar {
+.gt-loading-bar {
   position: absolute;
   top: 0;
   left: 0;
@@ -260,29 +260,29 @@ body {
   z-index: 3;
   pointer-events: none;
 }
-.gta-loading-bar::after {
+.gt-loading-bar::after {
   content: "";
   display: block;
   height: 100%;
   width: 40%;
   border-radius: 9999px;
   background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
-  animation: gta-loading-slide 1.1s ease-in-out infinite;
+  animation: gt-loading-slide 1.1s ease-in-out infinite;
 }
 
 /* 在线状态脉冲点（运行时指示） */
-.gta-live-dot {
+.gt-live-dot {
   position: relative;
   display: inline-block;
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 9999px;
   background-color: var(--color-success);
-  animation: gta-pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: gt-pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* 骨架屏微光 */
-.gta-skeleton {
+.gt-skeleton {
   border-radius: var(--radius-md);
   background-image: linear-gradient(
     90deg,
@@ -291,7 +291,7 @@ body {
     color-mix(in srgb, var(--color-muted) 60%, transparent) 63%
   );
   background-size: 200% 100%;
-  animation: gta-shimmer 1.4s ease-in-out infinite;
+  animation: gt-shimmer 1.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -303,18 +303,18 @@ body {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
-  .gta-pop-in,
-  .gta-fade-in { animation: none !important; }
-  .gta-live-dot { animation: none !important; }
-  .gta-skeleton { animation: none !important; }
-  .gta-toast-in { animation: none !important; }
-  .gta-loading-bar::after { animation: none !important; }
+  .gt-pop-in,
+  .gt-fade-in { animation: none !important; }
+  .gt-live-dot { animation: none !important; }
+  .gt-skeleton { animation: none !important; }
+  .gt-toast-in { animation: none !important; }
+  .gt-loading-bar::after { animation: none !important; }
 }
 
 /* =========================================================================
    JSON 展开视图 & 语法高亮
    ========================================================================= */
-.gta-json-view {
+.gt-json-view {
   max-width: 56rem;
   overflow: auto;
   border-radius: var(--radius-md);
@@ -322,7 +322,7 @@ body {
   background-color: color-mix(in srgb, var(--color-muted) 45%, transparent);
 }
 
-.gta-json-pre {
+.gt-json-pre {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 13px;
@@ -333,20 +333,20 @@ body {
 }
 
 /* JSON 语法高亮 — 亮色（与品牌色系协调的彩虹色） */
-.gta-json-key { color: #6d28d9; font-weight: 600; }
-.gta-json-string { color: #0d9488; }
-.gta-json-number { color: #2563eb; }
-.gta-json-boolean { color: #c026d3; }
-.gta-json-null { color: #94a3b8; font-style: italic; }
-.gta-json-punct { color: #64748b; }
+.gt-json-key { color: #6d28d9; font-weight: 600; }
+.gt-json-string { color: #0d9488; }
+.gt-json-number { color: #2563eb; }
+.gt-json-boolean { color: #c026d3; }
+.gt-json-null { color: #94a3b8; font-style: italic; }
+.gt-json-punct { color: #64748b; }
 
 /* JSON 语法高亮 — 暗色 */
-.dark .gta-json-key { color: #c4b5fd; }
-.dark .gta-json-string { color: #5eead4; }
-.dark .gta-json-number { color: #93c5fd; }
-.dark .gta-json-boolean { color: #f0abfc; }
-.dark .gta-json-null { color: #64748b; font-style: italic; }
-.dark .gta-json-punct { color: #94a3b8; }
+.dark .gt-json-key { color: #c4b5fd; }
+.dark .gt-json-string { color: #5eead4; }
+.dark .gt-json-number { color: #93c5fd; }
+.dark .gt-json-boolean { color: #f0abfc; }
+.dark .gt-json-null { color: #64748b; font-style: italic; }
+.dark .gt-json-punct { color: #94a3b8; }
 
 /* 原生 select 在暗色 Windows 下的可读性兜底 */
 select {

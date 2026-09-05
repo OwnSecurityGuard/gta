@@ -1,7 +1,7 @@
 package plugin
 
 import (
-	"gta/pkg/schema"
+	"gametrace/pkg/schema"
 
 	sdk "github.com/OwnSecurityGuard/gta-plugin-sdk"
 	sdkschema "github.com/OwnSecurityGuard/gta-plugin-sdk/schema"
@@ -15,9 +15,9 @@ type (
 
 // Manifest 及其附属类型的定义已迁入 SDK（github.com/OwnSecurityGuard/gta-plugin-sdk）。
 //
-// 迁移前 gta 与 SDK 各持有一份逐字段相同的定义，两边独立演进必然漂移：
+// 迁移前 gametrace 与 SDK 各持有一份逐字段相同的定义，两边独立演进必然漂移：
 // 插件按 SDK 的结构产出 plugin.yaml，宿主按自己那份解析，字段一旦不同步就是
-// 注册期才暴露的静默错误。现在契约单向流动——SDK 定义，gta 消费。
+// 注册期才暴露的静默错误。现在契约单向流动——SDK 定义，gametrace 消费。
 //
 // 这里用类型别名而非新类型，保证 plugin.Manifest 与 sdk.Manifest 完全等价：
 // 宿主代码继续写 plugin.Manifest，插件侧传来的 sdk.Manifest 可直接赋值，无需转换。

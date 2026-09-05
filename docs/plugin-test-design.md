@@ -13,7 +13,7 @@
 | 门控 | 需 `--enable-raw-debug` | **常驻可用**（不回传原始字节，安全） |
 | 返回内容 | 仅计数（total/decoded/errors） | 计数 + **事件类型分布** + **采样解码事件** + **错误样例** |
 
-核心判断：原始包字节只在 `gta-pipeline` 进程内被 `QueryRawPackets` 读取并喂给插件 `DecodeV2`，**从未序列化回 MCP / 前端**。插件输出的是「协议语义层事件」（`data.*`），不含链路层原始字节。因此该能力是**隐私安全**的，应作为常驻功能，而非 dev 调试开关。
+核心判断：原始包字节只在 `gt-pipeline` 进程内被 `QueryRawPackets` 读取并喂给插件 `DecodeV2`，**从未序列化回 MCP / 前端**。插件输出的是「协议语义层事件」（`data.*`），不含链路层原始字节。因此该能力是**隐私安全**的，应作为常驻功能，而非 dev 调试开关。
 
 ## 2. 端到端数据流
 
@@ -22,7 +22,7 @@
    配置：目标插件 + 来源会话(offline) + 可选过滤 + 包上限
         │  test_plugin(session_id, plugin, filter, limit, sample_limit)
         ▼
-[gta-mcp]  ──gRPC──►  [gta-pipeline / CaptureControl]
+[gt-mcp]  ──gRPC──►  [gt-pipeline / CaptureControl]
                           │
                           │  ① QueryRawPackets()  ← 原始字节，仅进程内使用
                           │        │  raw bytes → 绝不外传
@@ -84,7 +84,7 @@ message TestPluginResponse {
 - 新增类型 `TestPluginRequest` / `TestPluginResult`（含 `map[string]int64` 直方图、采样切片），与 proto 对应。
 - `Server.TestPlugin` 适配：填字段 → 调引擎 → 组装 `pb.TestPluginResponse`。
 
-### 3.3 `cmd/gta-pipeline/decode_raw.go`（或新 `test_plugin.go`）
+### 3.3 `cmd/gt-pipeline/decode_raw.go`（或新 `test_plugin.go`）
 - **抽取共享解码循环**：把 `DecodeRawPackets` 中「分批读取 + `DecodeV2` + 累积」的逻辑抽成 helper（如 `decodeRawLoop(ctx, st, dispatcher, req, onEvent, onErr)`），两个入口复用，避免重复。
 - `pipelineService.TestPlugin`：
   1. 拒绝运行中的 session（与 `DecodeRawPackets` 一致，避免与 captureTask 写冲突）。
@@ -94,7 +94,7 @@ message TestPluginResponse {
   5. **不调用 `AppendEvents`/`WriteStateChanges`**（隔离测试，不污染真实数据）。
   6. 返回 `TestPluginResult`。
 
-### 3.4 `cmd/gta-mcp/main.go`
+### 3.4 `cmd/gt-mcp/main.go`
 - 新增 MCP 工具 `test_plugin`（**不**用 `--enable-raw-debug` 门控，因不回传原始字节）。
 - `handleTestPlugin`：参数 `session_id/plugin/protocol/src/dst/limit/sample_limit` → 调 `pipelineClient.TestPlugin` → 返回结构化 JSON（summary + histogram + sample_events + error_samples）。后端 `err != nil` 走 `errorResult`，避免 `successResult` 误判 `ok`。
 
@@ -136,7 +136,7 @@ message TestPluginResponse {
 - **T1** proto 增 `TestPlugin` + 重新生成。
 - **T2** `capturecontrol` 接口与 `Server` 适配。
 - **T3** 抽共享解码循环 + `pipelineService.TestPlugin`（不落库、收集采样）。
-- **T4** `gta-mcp` 暴露 `test_plugin`（非门控）。
+- **T4** `gt-mcp` 暴露 `test_plugin`（非门控）。
 - **T5** 前端类型/hook + PluginPanel 配置区与展示区 + PluginCard「测试」按钮。
 - **T6** 后端编译 `go build -tags pcap ./cmd/... ./pkg/...` + 前端 `tsc -b` / `vite build`。
 

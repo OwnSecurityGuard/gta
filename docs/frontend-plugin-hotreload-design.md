@@ -9,7 +9,7 @@
 
 ## 2. 现状盘点
 
-**后端 MCP 工具（cmd/gta-mcp/main.go 已注册）**
+**后端 MCP 工具（cmd/gt-mcp/main.go 已注册）**
 
 | 工具 | 对热更场景的作用 |
 |---|---|
@@ -115,8 +115,8 @@
 
 **后端**
 - `pkg/internalipc/proto/*.proto`(+生成) 增加 `SetSessionPlugin`
-- `cmd/gta-pipeline/*` 实现该方法
-- `cmd/gta-mcp/main.go`(+handlers) 增加 `set_session_plugin` 工具
+- `cmd/gt-pipeline/*` 实现该方法
+- `cmd/gt-mcp/main.go`(+handlers) 增加 `set_session_plugin` 工具
 
 ## 8. 风险 / 注意
 
@@ -147,7 +147,7 @@
   - `CheckOffline`：仅当 `online→offline` 翻转 → `offline`
 - `Manager.Subscribe()` 透传。
 
-### 10.2 解码侧即时重解析（cmd/gta-pipeline/capture_task.go）
+### 10.2 解码侧即时重解析（cmd/gt-pipeline/capture_task.go）
 - `run()` 中 `t.registry.Subscribe()`，`defer` 退订；`select` 新增 `case evt := <-evtCh: resolveDecoder(true)`。
 - 插件任何状态变化立即强制重解析解码器（跳过 3s 节流与 1s tick），指针未变则 `decoderAction=keep` 无副作用。
 
@@ -156,7 +156,7 @@
 - `CaptureEngine` 接口新增 `SubscribePlugins(ctx) (<-chan PluginEvent, error)`；`Server.WatchPlugins` 用 `grpc.ServerStreamingServer[pb.PluginEvent]` 转发。
 - `pipelineService.SubscribePlugins` 订阅 registry、ctx 取消即退订，并把 `plugin.PluginEvent` 映射为 `capturecontrol.PluginEvent`。
 
-### 10.4 SSE 推送（cmd/gta-mcp/main.go）
+### 10.4 SSE 推送（cmd/gt-mcp/main.go）
 - `mcpCapture` 增加事件 hub（`eventSubs` + `broadcastPluginEvent`/`subscribeEvents`）。
 - `newMCPCapture` 启动 `startPluginEventWatcher`：订阅 `pipelineClient.WatchPlugins` gRPC 流，逐条广播；断线带指数退避自动重连。
 - 新增 HTTP 路由 `mux.HandleFunc("/events/plugins", capture.handleEventsSSE)`：`text/event-stream`，事件名 `plugin`，data 为 JSON；15s 心跳保活；客户端断开即退出。

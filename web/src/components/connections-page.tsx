@@ -144,7 +144,7 @@ export function ConnectionsPage({ sessionId, onJumpToRun }: ConnectionsPageProps
 
   return (
     <div className="space-y-3 relative">
-      {isFetching && !isLoading && <div className="gta-loading-bar" aria-hidden="true" />}
+      {isFetching && !isLoading && <div className="gt-loading-bar" aria-hidden="true" />}
 
       {/* 本次抓包结果摘要：直接回答「抓到没有」。 */}
       <CaptureSummary sessionId={sessionId} connectionCount={count} />
@@ -158,7 +158,7 @@ export function ConnectionsPage({ sessionId, onJumpToRun }: ConnectionsPageProps
         <span className="text-[11px] text-muted-foreground/70">点击连接查看详情</span>
       </div>
 
-      <Table className="gta-table">
+      <Table className="gt-table">
         <TableHeader>
           <TableRow>
             <TableHead className="w-16">ID</TableHead>

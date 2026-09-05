@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/capture"
+	"gametrace/pkg/capture"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"

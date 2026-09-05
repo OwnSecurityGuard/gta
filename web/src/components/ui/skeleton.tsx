@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("gta-skeleton", className)}
+      className={cn("gt-skeleton", className)}
       {...props}
     />
   );

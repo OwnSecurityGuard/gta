@@ -100,13 +100,13 @@ export function MyCapturePage({
   const recent = [...sessions].slice(0, 6);
 
   return (
-    <div className="h-full overflow-auto gta-scroll">
+    <div className="h-full overflow-auto gt-scroll">
       <div className="mx-auto max-w-5xl space-y-8 p-6">
         {/* 欢迎语 */}
         <header>
-          <h1 className="text-xl font-semibold gta-gradient-text">我的抓包</h1>
+          <h1 className="text-xl font-semibold gt-gradient-text">我的抓包</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            从哪抓、抓什么，一次说清——后面的插件与端口配置由 GTA 帮你记住。
+            从哪抓、抓什么，一次说清——后面的插件与端口配置由 GameTrace 帮你记住。
           </p>
         </header>
 
@@ -126,7 +126,7 @@ export function MyCapturePage({
                 <Laptop className="h-6 w-6 text-primary" />
                 <p className="mt-2.5 text-sm font-medium">我的电脑</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  在我的电脑上运行 GTA 探针，接入后开始抓包
+                  在我的电脑上运行 GameTrace 探针，接入后开始抓包
                 </p>
               </button>
               <button
@@ -137,7 +137,7 @@ export function MyCapturePage({
                 <Smartphone className="h-6 w-6 text-primary" />
                 <p className="mt-2.5 text-sm font-medium">手机代理</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  手机通过代理接入 GTA，扫码即可抓包
+                  手机通过代理接入 GameTrace，扫码即可抓包
                 </p>
               </button>
             </div>
@@ -162,7 +162,7 @@ export function MyCapturePage({
                   <Server className="h-6 w-6 text-muted-foreground" />
                   <p className="mt-2.5 text-sm font-medium">服务器抓包</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    直接在 GTA 服务器网卡上抓包（面向服务端管理）
+                    直接在 GameTrace 服务器网卡上抓包（面向服务端管理）
                   </p>
                 </button>
               </div>

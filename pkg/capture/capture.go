@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // State 表示 Source 的生命周期状态。

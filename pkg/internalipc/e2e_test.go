@@ -5,9 +5,9 @@ import (
 	"net"
 	"testing"
 
-	"gta/pkg/internalipc"
-	"gta/pkg/internalipc/capturecontrol"
-	pb "gta/pkg/internalipc/proto"
+	"gametrace/pkg/internalipc"
+	"gametrace/pkg/internalipc/capturecontrol"
+	pb "gametrace/pkg/internalipc/proto"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

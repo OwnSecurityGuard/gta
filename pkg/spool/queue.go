@@ -1,4 +1,4 @@
-// Package spool 提供 gta-agent 上行链路的磁盘缓冲队列（断电续传）。
+// Package spool 提供 gt-agent 上行链路的磁盘缓冲队列（断电续传）。
 //
 // 解决的问题：agent 与 pipeline 断线时，内存里未发送的包会直接丢失；
 // agent 进程重启（崩溃 / 升级 / 断电）时同样全丢。本包把「已抓到但未确认送达」
@@ -34,7 +34,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	agentproto "gta/pkg/capture/agent/proto"
+	agentproto "gametrace/pkg/capture/agent/proto"
 )
 
 // 参数。调参入口见 Options。

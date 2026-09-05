@@ -103,7 +103,7 @@ function ExpandedHexRow({ payload }: { payload: string }) {
   }, [payload]);
 
   return (
-    <TableRow className="gta-fade-in">
+    <TableRow className="gt-fade-in">
       <TableCell colSpan={6} className="bg-muted/30 p-4">
         <pre className="text-xs font-mono whitespace-pre overflow-x-auto">
           {hex}
@@ -321,7 +321,7 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
   if (packets.length === 0) {
     return (
       <div className="space-y-3 relative">
-        {isFetching && !isLoading && <div className="gta-loading-bar" aria-hidden="true" />}
+        {isFetching && !isLoading && <div className="gt-loading-bar" aria-hidden="true" />}
         {filterBar}
         <EmptyState
           icon={<Network className="h-5 w-5" />}
@@ -340,7 +340,7 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
   return (
     <div className="space-y-3 relative">
       {/* 后台刷新指示 */}
-      {isFetching && !isLoading && <div className="gta-loading-bar" aria-hidden="true" />}
+      {isFetching && !isLoading && <div className="gt-loading-bar" aria-hidden="true" />}
 
       {/* 原始包筛选栏 */}
       {filterBar}
@@ -396,7 +396,7 @@ export function RawPacketTable({ sessionId, onDecoded }: RawPacketTableProps) {
       </div>
 
       {/* 数据表格 */}
-      <Table className="gta-table">
+      <Table className="gt-table">
         <TableHeader>
           <TableRow>
             <TableHead className="w-44">Timestamp</TableHead>

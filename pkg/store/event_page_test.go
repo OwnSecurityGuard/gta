@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // pageFixture 构造一个含 3 种类型、6 条事件的测试会话，时间严格递增。

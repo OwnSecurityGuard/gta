@@ -25,8 +25,8 @@
 | `pkg/decode/fields.go` | 修改 | 删除 V1 `ExtractedFields` 残留（若还有） |
 | `pkg/analyze/engine.go` | 修改 | 删除旧 `Process`，`ProcessV2` 改名为 `Process` |
 | `pkg/analyze/rule.go` | 修改 | `ruleEnv["event"]` 改为 `*event.EventV2` |
-| `cmd/gta-mcp/trace_handler.go` | 修改 | 消息类型改为 `*event.EventV2`，flow_id 改 string |
-| `cmd/gta-mcp/*.go` | 修改 | 所有 trace 辅助函数适配 EventV2 |
+| `cmd/gt-mcp/trace_handler.go` | 修改 | 消息类型改为 `*event.EventV2`，flow_id 改 string |
+| `cmd/gt-mcp/*.go` | 修改 | 所有 trace 辅助函数适配 EventV2 |
 | `pkg/store/eventstore.go` | 修改 | 删除 `EntitySnapshotQuery`/`EntitySnapshotRow` 等 V1 残留 |
 | `pkg/store/sqlite.go` | 修改 | 删除 `entity_snapshots` 表查询/写入 |
 | 测试文件 | 修改/删除 | 修复编译，删除 V1 测试 |
@@ -305,15 +305,15 @@ git commit -m "analyze: process EventV2 directly, remove legacy conversion"
 ### Task 7: MCP trace handler 迁移到 EventV2
 
 **Files:**
-- Modify: `cmd/gta-mcp/trace_handler.go`
-- Modify: `cmd/gta-mcp/message_utils.go`（若存在）
-- Modify: `cmd/gta-mcp/pairing.go`（若存在）
+- Modify: `cmd/gt-mcp/trace_handler.go`
+- Modify: `cmd/gt-mcp/message_utils.go`（若存在）
+- Modify: `cmd/gt-mcp/pairing.go`（若存在）
 
 - [ ] **Step 1: 读取并定位 V1 引用**
 
 Run:
 ```bash
-grep -n "event.Event\|\.JSON\|\.MsgName\|\.MsgID\|\.Direction\|flowID.*uint64\|flowID.*int64" cmd/gta-mcp/*.go
+grep -n "event.Event\|\.JSON\|\.MsgName\|\.MsgID\|\.Direction\|flowID.*uint64\|flowID.*int64" cmd/gt-mcp/*.go
 ```
 
 - [ ] **Step 2: 修改 flow_id 参数类型**
@@ -373,13 +373,13 @@ func queryFlowMessages(ctx context.Context, reader event.Reader, sessionID strin
 
 - [ ] **Step 6: 编译验证**
 
-Run: `go build ./cmd/gta-mcp/...`
+Run: `go build ./cmd/gt-mcp/...`
 Expected: 可能有错误，逐个修复
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cmd/gta-mcp/
+git add cmd/gt-mcp/
 git commit -m "mcp: migrate trace handler to EventV2"
 ```
 

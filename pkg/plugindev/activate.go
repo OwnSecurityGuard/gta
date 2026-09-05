@@ -10,13 +10,13 @@ import (
 )
 
 // activateLivenessWait is how long Activate waits after launch to confirm the
-// process didn't fatal immediately (e.g. a bad GTA_REGISTRY_ADDR). Registration
+// process didn't fatal immediately (e.g. a bad GT_REGISTRY_ADDR). Registration
 // with the runtime is confirmed separately via plugin.status, not here — this
 // is only a liveness gate so we don't report success for a process that died
 // on startup.
 const activateLivenessWait = 1500 * time.Millisecond
 
-// Activate launches the local plugin binary for Name with GTA_REGISTRY_ADDR
+// Activate launches the local plugin binary for Name with GT_REGISTRY_ADDR
 // injected, so it can register with the runtime (design §1.4: the Developer
 // Plane owns the process it launches; production uses systemd/k8s instead).
 // The spawned process deliberately outlives the gRPC call — its lifecycle is
@@ -26,7 +26,7 @@ func Activate(ctx context.Context, req *ActivateRequest) (*ActivateResponse, err
 		return nil, fmt.Errorf("name is required")
 	}
 	if req.RegistryAddr == "" {
-		return nil, fmt.Errorf("registry_addr is required (pass it or set GTA_REGISTRY_ADDR)")
+		return nil, fmt.Errorf("registry_addr is required (pass it or set GT_REGISTRY_ADDR)")
 	}
 
 	dir := filepath.Join(req.Root, req.Name)
@@ -51,7 +51,7 @@ func Activate(ctx context.Context, req *ActivateRequest) (*ActivateResponse, err
 
 	cmd := exec.Command(binary)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GTA_REGISTRY_ADDR="+req.RegistryAddr)
+	cmd.Env = append(os.Environ(), "GT_REGISTRY_ADDR="+req.RegistryAddr)
 	if logFile != nil {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile

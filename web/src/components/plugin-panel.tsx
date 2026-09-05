@@ -220,13 +220,13 @@ export function PluginPanel() {
         <h2 className="text-sm font-semibold">插件管理</h2>
         {data && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {onlineCount > 0 && <span className="gta-live-dot" />}
+            {onlineCount > 0 && <span className="gt-live-dot" />}
             {plugins.length} 个{onlineCount > 0 && ` · ${onlineCount} 在线`}
           </span>
         )}
       </div>
 
-      <div className="flex-1 overflow-auto p-3 space-y-2 gta-scroll">
+      <div className="flex-1 overflow-auto p-3 space-y-2 gt-scroll">
         {plugins.length === 0 && (
           <EmptyState
             icon={<Puzzle className="h-5 w-5" />}
@@ -736,7 +736,7 @@ function PluginDevSection({ dirPluginList }: { dirPluginList: PluginInfo[] }) {
                 <span className="font-mono text-muted-foreground">{buildResult.name}</span>
               </div>
               {buildResult.output && (
-                <pre className="max-h-40 overflow-auto gta-scroll rounded bg-muted/50 p-2 font-mono text-[11px]">
+                <pre className="max-h-40 overflow-auto gt-scroll rounded bg-muted/50 p-2 font-mono text-[11px]">
                   {buildResult.output}
                 </pre>
               )}
@@ -802,7 +802,7 @@ function PluginDevSection({ dirPluginList }: { dirPluginList: PluginInfo[] }) {
           {manifest.data?.manifest && (
             <div className="rounded-md border border-border p-3">
               <p className="mb-1 text-xs font-medium text-muted-foreground">plugin.yaml · {manifest.data.name}</p>
-              <pre className="max-h-48 overflow-auto gta-scroll rounded bg-muted/50 p-2 font-mono text-[11px]">
+              <pre className="max-h-48 overflow-auto gt-scroll rounded bg-muted/50 p-2 font-mono text-[11px]">
                 {manifest.data.manifest}
               </pre>
             </div>
@@ -875,7 +875,7 @@ function PluginCard({
   ownerBadge?: string;
 }) {
   return (
-    <div className="gta-card p-3 transition-[box-shadow,border-color] hover:shadow-md">
+    <div className="gt-card p-3 transition-[box-shadow,border-color] hover:shadow-md">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <Activity className="h-4 w-4 shrink-0 text-primary" />
@@ -894,7 +894,7 @@ function PluginCard({
           >
             {plugin.online ? (
               <>
-                <span className="gta-live-dot" />
+                <span className="gt-live-dot" />
                 在线
               </>
             ) : (

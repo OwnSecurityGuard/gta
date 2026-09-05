@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr/vm"
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 type CountAgg struct {

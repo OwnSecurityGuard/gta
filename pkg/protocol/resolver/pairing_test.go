@@ -3,7 +3,7 @@ package resolver
 import (
 	"testing"
 
-	"gta/pkg/protocol/correlation"
+	"gametrace/pkg/protocol/correlation"
 )
 
 // correlationKey 把一条消息的关联信息（规则名 + 值）在指定 flow 内定位到唯一键。

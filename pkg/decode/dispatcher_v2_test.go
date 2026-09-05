@@ -8,7 +8,7 @@ import (
 	"time"
 
 	pb "github.com/OwnSecurityGuard/gta-plugin-sdk/proto"
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

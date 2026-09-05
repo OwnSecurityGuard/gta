@@ -110,7 +110,7 @@ export function TableBrowser({ sessionId }: { sessionId: string | null }) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto gta-scroll">
+      <div className="min-h-0 flex-1 overflow-auto gt-scroll">
         {q.isLoading ? (
           <div className="space-y-2 p-4">
             {Array.from({ length: 8 }).map((_, i) => (

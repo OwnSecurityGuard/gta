@@ -1,6 +1,6 @@
 // Package capturecontrol 实现 CaptureControl gRPC server。
-// 由 gta-pipeline 嵌入使用，处理 start/stop/status/list_interfaces 控制命令。
-// 实际抓包逻辑由 gta-pipeline 的 captureEngine 提供，server 仅做 RPC 适配。
+// 由 gt-pipeline 嵌入使用，处理 start/stop/status/list_interfaces 控制命令。
+// 实际抓包逻辑由 gt-pipeline 的 captureEngine 提供，server 仅做 RPC 适配。
 package capturecontrol
 
 import (
@@ -10,12 +10,12 @@ import (
 
 	"google.golang.org/grpc"
 
-	"gta/pkg/auth"
-	"gta/pkg/capture/mobile"
-	pb "gta/pkg/internalipc/proto"
+	"gametrace/pkg/auth"
+	"gametrace/pkg/capture/mobile"
+	pb "gametrace/pkg/internalipc/proto"
 )
 
-// CaptureEngine 是 gta-pipeline 实现的抓包引擎接口。
+// CaptureEngine 是 gt-pipeline 实现的抓包引擎接口。
 // capturecontrol.Server 委托实际操作给此接口，保持 server 与引擎解耦。
 type CaptureEngine interface {
 	// StartSession 启动抓包会话。返回 capture.sqlite 的 db_path。
@@ -54,7 +54,7 @@ type CaptureEngine interface {
 	SampleBytes(ctx context.Context, req SampleBytesRequest) (SampleBytesResult, error)
 	// GetRegistryAddr 返回插件应连接的注册中心地址（即 -registry-addr 的值）。
 	GetRegistryAddr(ctx context.Context) (string, error)
-	// CreateProxyLease 为调用方创建一个常驻代理出口：独立 gta-singbox-agent 进程
+	// CreateProxyLease 为调用方创建一个常驻代理出口：独立 gt-singbox-agent 进程
 	// + 固定的手机 CONNECT 端口。端口在租约生命周期内不变，可反复在其上开停
 	// 抓包会话。身份经 withRequestOwner 注入 ctx（同 StartSession）。
 	CreateProxyLease(ctx context.Context, req CreateProxyLeaseRequest) (ProxyLease, error)
@@ -233,7 +233,7 @@ type StartSessionRequest struct {
 	// ProjectID 会话归属的项目（projects.id），可选，透传自 proto StartCaptureRequest.project_id。
 	ProjectID string
 	// PluginOwners 允许按名解析解码插件的额外 owner 集合（除会话 owner 外）。
-	// gta-mcp 依据调用者所属项目的插件归属计算；空集 = 仅会话 owner 自己的插件。
+	// gt-mcp 依据调用者所属项目的插件归属计算；空集 = 仅会话 owner 自己的插件。
 	PluginOwners []string
 	// Metadata 是会话创建时的来源标记（落 SessionMeta.Extra，JSON 存 sessions.extra 列）。
 	// 探针链路用：source=probe-archive + probe_id/probe_name/时间窗（离线导入溯源）。
@@ -520,7 +520,7 @@ func (s *Server) TestPlugin(ctx context.Context, req *pb.TestPluginRequest) (*pb
 // 两者均为空表示匿名/本地语境，不注入（engine 侧 OwnerFrom 返回 ""，行为不变）。
 //
 // 信任边界：owner/all_owners 是 RPC 请求字段，不由 gRPC 层校验——本 server
-// 假定 CaptureControl 监听在 localhost、唯一客户端是同机的 gta-mcp（管道内
+// 假定 CaptureControl 监听在 localhost、唯一客户端是同机的 gt-mcp（管道内
 // 已有 HTTP Bearer 鉴权）。任何能直接连上该端口的进程都可伪造身份；若要把
 // 监听开放到非回环地址，必须先接入与 HTTP 侧同级的 gRPC Bearer 拦截器
 // （pkg/auth.UnaryInterceptor）。
@@ -567,8 +567,8 @@ func (s *Server) GetPluginManifest(ctx context.Context, req *pb.GetPluginManifes
 }
 
 // GetRegistryAddr 处理获取注册中心地址 RPC。返回插件应连接的注册中心地址
-// （即 gta-pipeline 的 -registry-addr，如 :9091），供 gta-mcp / 插件启动时填入
-// GTA_REGISTRY_ADDR。
+// （即 gt-pipeline 的 -registry-addr，如 :9091），供 gt-mcp / 插件启动时填入
+// GT_REGISTRY_ADDR。
 func (s *Server) GetRegistryAddr(ctx context.Context, req *pb.GetRegistryAddrRequest) (*pb.GetRegistryAddrResponse, error) {
 	addr, err := s.engine.GetRegistryAddr(ctx)
 	if err != nil {

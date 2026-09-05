@@ -1,6 +1,6 @@
-/** 启动码 GTA-XXXX-XXXX：成员在目标机输入后自动注册设备并回连抓包。 */
+/** 启动码 GT-XXXX-XXXX：成员在目标机输入后自动注册设备并回连抓包。 */
 export interface AccessCode {
-  /** 启动码本体，形如 GTA-XXXX-XXXX */
+  /** 启动码本体，形如 GT-XXXX-XXXX */
   code: string;
   /** 创建者（owner）身份，匿名部署为空 */
   owner?: string;
@@ -62,7 +62,7 @@ export interface ListUsersResult {
   ok?: boolean;
   error?: string;
   users: GtaUser[];
-  /** env bootstrap（GTA_AUTH_TOKENS）身份名：不在 users 表、不可撤销，仅展示。 */
+  /** env bootstrap（GT_AUTH_TOKENS）身份名：不在 users 表、不可撤销，仅展示。 */
   bootstrap_owners?: string[];
 }
 

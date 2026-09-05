@@ -3,7 +3,7 @@ package capture
 import (
 	"net/netip"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"

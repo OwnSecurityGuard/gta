@@ -20,9 +20,9 @@ import (
 	"sync"
 	"time"
 
-	"gta/pkg/capture/agent"
-	"gta/pkg/capture/agent/proto"
-	"gta/pkg/store"
+	"gametrace/pkg/capture/agent"
+	"gametrace/pkg/capture/agent/proto"
+	"gametrace/pkg/store"
 )
 
 // ErrProbeOffline 表示目标探针当前没有活跃的控制流。

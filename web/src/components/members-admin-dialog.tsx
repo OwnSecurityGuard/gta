@@ -219,7 +219,7 @@ function AccountsSection() {
               <span className="font-mono">{owner}</span>
               <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">admin</span>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                本机配置（GTA_AUTH_TOKENS）
+                本机配置（GT_AUTH_TOKENS）
               </span>
               <span className="ml-auto text-[11px] text-muted-foreground">不可撤销</span>
             </div>

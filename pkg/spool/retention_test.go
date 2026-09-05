@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	agentproto "gta/pkg/capture/agent/proto"
+	agentproto "gametrace/pkg/capture/agent/proto"
 )
 
 // mkRawPacket 构造带指定时间戳的测试帧。

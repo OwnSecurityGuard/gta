@@ -3,7 +3,7 @@ package quality
 import (
 	"testing"
 
-	"gta/pkg/plugindev"
+	"gametrace/pkg/plugindev"
 )
 
 // highEntropy / lowEntropy 用于构造可预测的熵估计。

@@ -3,7 +3,7 @@ package analyze
 import (
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 
 	"github.com/expr-lang/expr/vm"
 )

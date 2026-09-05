@@ -17,7 +17,7 @@ import (
 func (s *RegistryServer) StartListen(addr string) (*grpc.Server, net.Listener, error) {
 	// 如果 addr 不含 \\.\pipe\ 前缀，添加它
 	if len(addr) < 10 || addr[:10] != `\\.\pipe\` {
-		addr = `\\.\pipe\gta-` + addr
+		addr = `\\.\pipe\gt-` + addr
 	}
 	lis, err := winio.ListenPipe(addr, nil)
 	if err != nil {

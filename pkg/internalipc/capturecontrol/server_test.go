@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	pb "gta/pkg/internalipc/proto"
+	pb "gametrace/pkg/internalipc/proto"
 )
 
 // fakeEngine 是测试用 CaptureEngine 桩实现。

@@ -16,11 +16,11 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"gta/pkg/auth"
-	"gta/pkg/capture/agent"
-	"gta/pkg/capture/agent/proto"
-	"gta/pkg/event"
-	"gta/pkg/store"
+	"gametrace/pkg/auth"
+	"gametrace/pkg/capture/agent"
+	"gametrace/pkg/capture/agent/proto"
+	"gametrace/pkg/event"
+	"gametrace/pkg/store"
 )
 
 // heartbeatInterval 是探针心跳周期（服务端用于断流后 30s offline 的对齐参考）。
@@ -316,13 +316,13 @@ func newProbeID() string {
 	return "prb_" + hex.EncodeToString(b[:])
 }
 
-// newProbeToken 生成探针长期凭证（明文 gta_prb_* 仅下发一次）与其 SHA-256。
+// newProbeToken 生成探针长期凭证（明文 gt_prb_* 仅下发一次）与其 SHA-256。
 func newProbeToken() (token, tokenHash string, err error) {
 	b := make([]byte, 24)
 	if _, err = rand.Read(b); err != nil {
 		return "", "", err
 	}
-	token = "gta_prb_" + hex.EncodeToString(b)
+	token = "gt_prb_" + hex.EncodeToString(b)
 	sum := sha256.Sum256([]byte(token))
 	return token, hex.EncodeToString(sum[:]), nil
 }

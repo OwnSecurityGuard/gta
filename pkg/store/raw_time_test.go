@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 func TestRawTimestamp_ZeroSentinel(t *testing.T) {

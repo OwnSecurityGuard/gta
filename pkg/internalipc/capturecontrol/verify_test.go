@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	pb "gta/pkg/internalipc/proto"
+	pb "gametrace/pkg/internalipc/proto"
 )
 
 func TestServer_Verify(t *testing.T) {

@@ -27,7 +27,7 @@ export interface ProxyLease {
   control_port: number;
   /** mobile Source gRPC 监听端口（= 当前抓包会话占用；idle 时为 0）。 */
   mobile_grpc_port: number;
-  /** gta-singbox-agent 子进程是否存活（与抓包开停无关，常驻）。 */
+  /** gt-singbox-agent 子进程是否存活（与抓包开停无关，常驻）。 */
   agent_running: boolean;
   /** agent 子进程 PID（未运行时为 0）。 */
   agent_pid: number;

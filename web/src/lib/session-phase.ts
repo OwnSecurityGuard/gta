@@ -4,7 +4,7 @@
 // 它们回答的是「进程在不在」，而用户想知道的是「我该不该再等等、还是要去动什么」。
 // 典型例子：agent 已连上但一个包都没有——生命周期上是 running，看起来"在工作"，
 // 但用户此刻最需要的是"去启动游戏"。这两件事必须由 UI 说清楚，否则用户只会
-// 觉得 GTA 坏了。
+// 觉得 GameTrace 坏了。
 //
 // 设计原则：
 //  1. 后端只报事实（连没连上、收到几个包、解析出几个事件），翻译全在这里做；
@@ -241,8 +241,8 @@ export function describeSessionPhase(input: PhaseInput): SessionPhaseView {
         guidance: {
           title: "还没有探针接入。请：",
           steps: [
-            "在目标电脑上下载并运行 GTA 探针（用上面的启动码）",
-            "确认探针与 GTA 服务端网络互通（防火墙放行 ingest 端口）",
+            "在目标电脑上下载并运行 GameTrace 探针（用上面的启动码）",
+            "确认探针与 GameTrace 服务端网络互通（防火墙放行 ingest 端口）",
             "探针连上后这里会自动变成「等待流量」，无需刷新",
           ],
         },
@@ -398,7 +398,7 @@ export function describeSessionPhase(input: PhaseInput): SessionPhaseView {
         steps,
         facts,
         guidance: {
-          title: "这通常发生在 GTA 服务重启后。",
+          title: "这通常发生在 GameTrace 服务重启后。",
           steps: [
             "已抓到的数据是完整可用的，可以直接分析",
             "要继续抓包请新建一次会话（旧会话不会被复用）",

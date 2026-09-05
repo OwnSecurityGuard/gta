@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"gta/pkg/plugindev"
+	"gametrace/pkg/plugindev"
 )
 
 // TestScaffoldSmokeBuild verifies that Scaffold renders a buildable plugin
 // skeleton and that the rendered go.mod depends only on the published SDK
 // module (no baked-in local paths) — the core invariant of the P1 plane
-// split: scaffolding must not couple to the gta source tree.
+// split: scaffolding must not couple to the gametrace source tree.
 //
 // The build step is best-effort: it is skipped when the local gta-plugin-sdk
 // checkout is unavailable (e.g. CI without the sibling repo) so the unit
@@ -74,7 +74,7 @@ func TestScaffoldSmokeBuild(t *testing.T) {
 	}
 }
 
-// repoRoot returns the gta repository root (two levels up from this package
+// repoRoot returns the gametrace repository root (two levels up from this package
 // directory, pkg/plugindev).
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -88,7 +88,7 @@ func repoRoot(t *testing.T) string {
 // findLocalSDK locates the gta-plugin-sdk checkout so the smoke build can
 // resolve it without network access. It prefers the canonical
 // E:\ai_workspace\gta-plugin-sdk (per project convention) and falls back to a
-// sibling E:\gta-plugin-sdk of the gta repo root. Returns "" if neither exists.
+// sibling E:\gta-plugin-sdk of the gametrace repo root. Returns "" if neither exists.
 func findLocalSDK(t *testing.T) string {
 	t.Helper()
 	root := repoRoot(t)

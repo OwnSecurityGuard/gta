@@ -3,8 +3,8 @@ package resolver
 import (
 	"testing"
 
-	"gta/pkg/protocol"
-	"gta/pkg/protocol/config"
+	"gametrace/pkg/protocol"
+	"gametrace/pkg/protocol/config"
 )
 
 const testYAML = `

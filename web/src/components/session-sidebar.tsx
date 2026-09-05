@@ -223,7 +223,7 @@ function SessionItem({
           <span
             className={cn(
               "inline-block h-2 w-2 rounded-full shrink-0",
-              isRunning ? "gta-live-dot" : "bg-muted-foreground/50",
+              isRunning ? "gt-live-dot" : "bg-muted-foreground/50",
             )}
           />
           <span className="text-sm font-medium truncate font-mono">
@@ -491,7 +491,7 @@ export function SessionSidebar({
         <h2 className="text-sm font-semibold">会话列表</h2>
         {data && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {runningCount > 0 && <span className="gta-live-dot" />}
+            {runningCount > 0 && <span className="gt-live-dot" />}
             {data.count} 个会话{runningCount > 0 && ` · ${runningCount} 运行`}
           </span>
         )}

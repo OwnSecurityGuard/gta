@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"gta/pkg/schema"
+	"gametrace/pkg/schema"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // 注册 "pgx" driver
 )
@@ -89,7 +89,7 @@ func OpenCaptureStoreReadOnly(driver, dsnOrPath string, schemaReg *schema.Regist
 }
 
 // ControlStoreBackend 是控制元数据存储的统一接口（SQLite / PG 双实现）。
-// 调用方（gta-pipeline / gta-mcp）统一持有该接口，不感知具体后端。
+// 调用方（gt-pipeline / gt-mcp）统一持有该接口，不感知具体后端。
 type ControlStoreBackend interface {
 	SessionStore
 	// ListSessionsForProject 列出某项目下的全部会话（无 owner 过滤；
@@ -133,7 +133,7 @@ var (
 //
 // driver=="postgres"：dsnOrPath 为共享 PG 连接串；sessions 与 plugin_debug_access
 // 落到 PG。注意：projects / access_codes 等组织-访问子系统仍使用本地 sqlite 文件
-// （见 gta-mcp/main.go 的装配逻辑），不在本次 PG 化范围内。
+// （见 gt-mcp/main.go 的装配逻辑），不在本次 PG 化范围内。
 func OpenControlStore(driver, dsnOrPath string) (ControlStoreBackend, error) {
 	if IsPostgres(driver) {
 		db, err := openPG(dsnOrPath)

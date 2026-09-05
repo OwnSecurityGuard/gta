@@ -1,5 +1,5 @@
-// Package agent 的控制面：让 gta-singbox-agent 从「一次性抓包进程」变成
-// 「常驻的手机出口」，抓包与否由外部（gta-pipeline）通过本地 HTTP 控制接口切换。
+// Package agent 的控制面：让 gt-singbox-agent 从「一次性抓包进程」变成
+// 「常驻的手机出口」，抓包与否由外部（gt-pipeline）通过本地 HTTP 控制接口切换。
 //
 // 为什么需要它：
 //
@@ -19,7 +19,7 @@
 //     且每个 capture 独占一条 gRPC 流）。
 //
 // 控制接口是本地回环 HTTP（无鉴权）：信任边界是「能登录本机并访问回环端口的
-// 进程」，与 gta-pipeline 的 -control-addr（默认全接口 :9888）相比更严格。
+// 进程」，与 gt-pipeline 的 -control-addr（默认全接口 :9888）相比更严格。
 // 若将来需要跨机器控制，应在此加 token，而不是放宽监听地址。
 package agent
 

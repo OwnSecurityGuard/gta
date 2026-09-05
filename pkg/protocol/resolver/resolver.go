@@ -10,9 +10,9 @@ package resolver
 import (
 	"fmt"
 
-	"gta/pkg/protocol"
-	"gta/pkg/protocol/config"
-	"gta/pkg/protocol/matcher"
+	"gametrace/pkg/protocol"
+	"gametrace/pkg/protocol/config"
+	"gametrace/pkg/protocol/matcher"
 )
 
 // ProtocolResolver 持有编译后的 protocol.yaml 规则，对单条 JSON 消息做语义解析。

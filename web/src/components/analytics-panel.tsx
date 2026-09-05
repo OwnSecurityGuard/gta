@@ -70,7 +70,7 @@ export function AnalyticsPanel({ sessionId }: { sessionId: string | null }) {
   }
 
   return (
-    <div className="h-full overflow-auto p-4 gta-scroll">
+    <div className="h-full overflow-auto p-4 gt-scroll">
       {!sessionId ? (
         <EmptyState
           icon={<BarChart3 className="h-5 w-5" />}

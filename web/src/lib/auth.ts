@@ -3,12 +3,12 @@
  *
  * 三个极小的可订阅 store（token / identity / authError），供
  * useSyncExternalStore 的 hook（hooks/use-auth.ts）与 mcp-client 使用：
- *  - token 持久化在 localStorage（键 gta_auth_token），无 token = 匿名模式；
- *  - identity 来自后端身份回显响应头（X-GTA-Owner / X-GTA-Admin），不持久化；
+ *  - token 持久化在 localStorage（键 gt_auth_token），无 token = 匿名模式；
+ *  - identity 来自后端身份回显响应头（X-GT-Owner / X-GT-Admin），不持久化；
  *  - authError 在收到 401 时置位，重新保存 token 即清除。
  */
 
-const TOKEN_KEY = "gta_auth_token";
+const TOKEN_KEY = "gt_auth_token";
 
 // localStorage 在隐私模式/被禁用时可能抛异常，统一吞掉降级为内存态。
 function safeGet(key: string): string | null {

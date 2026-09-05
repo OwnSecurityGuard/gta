@@ -751,8 +751,8 @@ func (d *Dispatcher) ProcessPackets(ctx context.Context, packets <-chan event.Pa
 - [ ] **Step 8: 更新 NewDispatcher 调用点**
 
 Files:
-- `cmd/gta-pipeline/capture_task.go:267`
-- `cmd/gta-pipeline/decode_raw.go:76`
+- `cmd/gt-pipeline/capture_task.go:267`
+- `cmd/gt-pipeline/decode_raw.go:76`
 - `pkg/decode/dispatcher_test.go:61,92`
 - `pkg/decode/dispatcher_v2_test.go:117,164,211,252`
 - `pkg/decode/fields_test.go:78,129`
@@ -762,7 +762,7 @@ Files:
 - [ ] **Step 9: 提交**
 
 ```bash
-git add pkg/decode/dispatcher.go cmd/gta-pipeline/ pkg/decode/*_test.go
+git add pkg/decode/dispatcher.go cmd/gt-pipeline/ pkg/decode/*_test.go
 git commit -m "decode: support 0..N results per input_id in DecodeV2"
 ```
 
@@ -1054,8 +1054,8 @@ git commit -m "store: write event_index projections"
 package store
 
 import (
-	"gta/pkg/event"
-	"gta/pkg/schema"
+	"gametrace/pkg/event"
+	"gametrace/pkg/schema"
 )
 
 func extractProjection(ev *event.EventV2, reg *schema.Registry) map[string]any {
@@ -1467,8 +1467,8 @@ git commit -m "chore: cleanup EntitySnapshot remnants"
 **Files:**
 - Modify: `pkg/plugin/manager.go`
 - Modify: `pkg/plugin/registry.go`（如存在）
-- Modify: `cmd/gta-pipeline/capture_task.go`
-- Modify: `cmd/gta-pipeline/decode_raw.go`
+- Modify: `cmd/gt-pipeline/capture_task.go`
+- Modify: `cmd/gt-pipeline/decode_raw.go`
 - Modify: `pkg/store` 构造函数调用点
 
 - [ ] **Step 1: 为 RegisteredPlugin 添加 SchemaRegistry 方法**
@@ -1523,7 +1523,7 @@ func (s *RegistryServer) FindByName(name string) (pb.DecoderClient, *schema.Regi
 
 - [ ] **Step 3: 更新调用点**
 
-在 `cmd/gta-pipeline/capture_task.go` 与 `decode_raw.go` 中：
+在 `cmd/gt-pipeline/capture_task.go` 与 `decode_raw.go` 中：
 
 ```go
 client, schemaReg, ok := pluginManager.Find(protocolHint)
@@ -1539,6 +1539,6 @@ dispatcher, err := decode.NewDispatcher(client, sessionID, logger, schemaReg)
 - [ ] **Step 5: 提交**
 
 ```bash
-git add pkg/plugin/manager.go cmd/gta-pipeline/ pkg/store/
+git add pkg/plugin/manager.go cmd/gt-pipeline/ pkg/store/
 git commit -m "plugin: expose schema registry and wire into dispatcher/store"
 ```

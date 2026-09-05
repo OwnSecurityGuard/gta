@@ -1,6 +1,6 @@
 > ⚠️ **归档文档**：此报告记录 2026-08-16 之前的 AI 能力审计结果。相关证据/模式分析工具已在 2026-08-22 重构中删除，正文保留历史参考，不反映当前代码状态。
 
-# GTA 全栈 AI 能力审计与可用性报告
+# GameTrace 全栈 AI 能力审计与可用性报告
 
 > 📌 **2026-08-16 复核更新**：以下发现已在本轮整改中解决，正文保留原始审计记录：
 > - `query_capture_table` 已实际注册（allowlist 含 `event_index` / `plugin_debug_access`），并随 README 工具表由脚本生成而可发现；
@@ -10,7 +10,7 @@
 > - `tools/hotreload` 死代码与 `docs/sdk-agents-md-patch.md` 已删除，过期设计稿移入 `docs/archive/`。
 > 其余未列条目仍为有效发现。
 
-> 审计范围：`gta`（host）、`gta-plugin-sdk`（插件 SDK）、`gta/plugins`（插件仓库）
+> 审计范围：`gametrace`（host）、`gta-plugin-sdk`（插件 SDK）、`gametrace/plugins`（插件仓库）
 > 方法：4 个并行 Explore agent 逐文件清点 + 代码↔文档交叉核对；报告中"发现路径/缺口"均带 file:line，关键项已人工抽样复核。
 > AI 视角定义：① 控制面 AI（调 MCP 工具）② 插件作者 AI（读 SDK）③ 分析 AI（读语义/证据文档）。
 > 核心问题：AI 在使用时，各个功能是否**能被注意到、被正确使用**，以及如何**确认功能完整**。
@@ -34,7 +34,7 @@
 ## 1. MCP 控制面（38 工具，全部已实现，非桩）
 
 **发现路径（唯一）**：MCP 协议 `tools/list`。`mcp-go` 把每个 `AddTool` 的 `WithDescription` + 各参数 `mcp.Description` 作为 JSON-RPC schema 返回给 AI。仓库内**无任何独立工具清单 / 目录 markdown**（已 Glob 确认）。因此 AI 实际看到的"文档"= 源码内联长描述（`main.go:2275-2548`）。
-- 端点：SSE `GET /sse` + `POST /message`（默认 `:8781`）；另挂 `/mcp` StreamableHTTP。到 gta-pipeline 的 gRPC 是 `:9888`（**非** MCP 端口，勿混）。
+- 端点：SSE `GET /sse` + `POST /message`（默认 `:8781`）；另挂 `/mcp` StreamableHTTP。到 gt-pipeline 的 gRPC 是 `:9888`（**非** MCP 端口，勿混）。
 
 **AI 使用方案（确认功能完整）**：
 - 采集组：`start_capture(port,plugin?)`→`stop_capture`→`get_session_status`；`list_interfaces`/`list_live_sessions`/`list_all_sessions`/`delete_session`。
@@ -48,7 +48,7 @@
 1. `begin_capture_run` 的 `plugin_name/device/filter/port` 是 **no-op**（`run_handlers.go:79-93`）——不会自动起抓包，AI 必须自己先 `start_capture`。按 schema 字面理解会以为传参即自动采集。
 2. `explain_plugin` 偷偷读 `Arguments["verify"]`（`dev_tools.go:389`），但 `AddTool` 只声明 `name`/`action`——AI 依赖 schema 不会知道该参数。
 
-**❌ 条件注册**：`list_raw_packets`/`decode_raw_packets` 仅 `--enable-raw-debug`（或 `GTA_MCP_ENABLE_RAW_DEBUG=1`）时注册（`main.go:2483`）。AI 默认 `tools/list` 看不到。
+**❌ 条件注册**：`list_raw_packets`/`decode_raw_packets` 仅 `--enable-raw-debug`（或 `GT_MCP_ENABLE_RAW_DEBUG=1`）时注册（`main.go:2483`）。AI 默认 `tools/list` 看不到。
 
 ## 2. 采集与会话
 
@@ -62,10 +62,10 @@
 
 ## 3. 插件生命周期（17 工具，16 真实 + 1 隐性）
 
-全部为转发层（`gta-mcp` 转发 Developer Plane `pkg/plugindev` 与 Runtime Plane `gta-pipeline`），描述详尽：
+全部为转发层（`gt-mcp` 转发 Developer Plane `pkg/plugindev` 与 Runtime Plane `gt-pipeline`），描述详尽：
 - `create_plugin`（`create_plugin.go:20`→`scaffold.go:51`）：脚手架生成，真实。
 - `build_plugin`（`dev_tools.go:19`）：编译并返回 file:line:col 诊断，真实。
-- `activate_plugin`（`dev_tools.go:59`）：启动二进制并注入 `GTA_REGISTRY_ADDR`，联合校验 registered+online+manifest，真实。
+- `activate_plugin`（`dev_tools.go:59`）：启动二进制并注入 `GT_REGISTRY_ADDR`，联合校验 registered+online+manifest，真实。
 - `deactivate_plugin`/`status_plugin`/`explain_plugin`/`verify_plugin`/`test_plugin`：均真实（`dev_tools.go`/`verify_tools.go`）。
 - `get_plugin_contract`/`get_plugin_dev_guide`/`get_plugin_manifest`/`list_plugins`/`list_registered_plugins`/`deregister_plugin`/`get_registry_addr`/`sample_bytes_plugin`：真实。
 - `set_session_plugin`（`main.go:670`）：运行中会话热切换解码器，真实。
@@ -116,13 +116,13 @@
 
 **AI 使用方案（确认 SDK 能力完整）**：读 `get_plugin_dev_guide` + `get_plugin_contract`（=contract.yaml 全文）→ 构造 fixture（回环帧 `02 00 00 00` + 以太网帧各一）→ 解码后 `list_decoded_data` 断言 `event_type`/`schema_id` 非空且 framing 正确；插件内 `event.ValueFromMap` 含 `_state_changes` → `list_state_changes` 断言投影出现。
 
-## 7. 插件仓库与脚手架（gta/plugins）
+## 7. 插件仓库与脚手架（gametrace/plugins）
 
 - **插件实况**：`plugins/` 下仅含本地未提交的解码器插件（不进入远程仓库），**不存在 `http` 插件**（已 ls 确认）。注意：这类本地插件不会提交远程，任何已提交文档/示例/工具都不得引用它们——示例一律用通用占位名。
 - **`create_plugin` 脚手架**：`pkg/plugindev/templates/create_plugin/`，真实、对 AI 引导充分（模板注释 + `get_plugin_dev_guide`）。✅
-- **`tools/hotreload/hotreload.go`**：独立 `main`，硬编码 `.\http-plugin.exe` / `E:\gta\plugins\http` / `Plugin:"http"`——**全部不存在**（真实为 `godot-gateway.exe`）。`cmd.Start()` 会 file-not-found。❌ 死代码。
-- **真实热更路径**（无 "hotreload" 名义工具）：`build_plugin` → `deactivate_plugin` → `activate_plugin`（注入 `GTA_REGISTRY_ADDR`）→ 运行会话内用 `set_session_plugin` 切解码器（不停止抓包）。
-- **`GTA_REGISTRY_ADDR`**：处理得当——插件启动必读；`activate_plugin` 注入、`get_registry_addr` 暴露。
+- **`tools/hotreload/hotreload.go`**：独立 `main`，硬编码 `.\http-plugin.exe` / `E:/gta\plugins\http` / `Plugin:"http"`——**全部不存在**（真实为 `godot-gateway.exe`）。`cmd.Start()` 会 file-not-found。❌ 死代码。
+- **真实热更路径**（无 "hotreload" 名义工具）：`build_plugin` → `deactivate_plugin` → `activate_plugin`（注入 `GT_REGISTRY_ADDR`）→ 运行会话内用 `set_session_plugin` 切解码器（不停止抓包）。
+- **`GT_REGISTRY_ADDR`**：处理得当——插件启动必读；`activate_plugin` 注入、`get_registry_addr` 暴露。
 - **`godot-gateway/go.mod`** 提交了 `replace => E:\ai_workspace\gta-plugin-sdk`（`go.mod:23`），破坏可移植构建；脚手架模板正确地省略 replace。⚠️ 不一致。
 
 **AI 使用方案（确认插件可用性）**：`list_plugins` 断言含你的解码器插件；`build_plugin(name=<your-decoder>)` 断言 0 错误；`activate_plugin(name=<your-decoder>)` 断言 `integrated:true`；`start_capture(port=8984,plugin=<your-decoder>)` → `list_decoded_data` 断言有解码事件。
@@ -132,7 +132,7 @@
 **🔴 P0 — 会直接导致写错 / 零事件 / 严重误导**
 1. `troubleshooting.md` §7.B（line 134）："capture contract passes L7 payload… do not remove Ethernet/IP/TCP headers"——**与 SSOT（payload-framing-by-link-type）正面矛盾**。这是曾导致"零事件"并被废弃的 `payload-is-l7` 旧模型死灰复燃。作者按排障文档会写出零事件解码器。
 2. `docs/plugin-domain-design.md`：文件头自标"设计稿（未实现）"，却描述一套完全不同的 13 工具 / 三平面 / `pkg/plugindev` gRPC 架构；实际 `main.go` 已实现 ~40 个 MCP 工具。AI 以此文档为入口会全盘误判可用工具面。
-3. `http` ↔ `godot-gateway` 命名漂移 + `tools/hotreload/hotreload.go` 死代码：文档/旧工具指向不存在的 `http`/`http-plugin.exe`/`E:\gta\plugins\http`，AI 照做即失败。
+3. `http` ↔ `godot-gateway` 命名漂移 + `tools/hotreload/hotreload.go` 死代码：文档/旧工具指向不存在的 `http`/`http-plugin.exe`/`E:/gta\plugins\http`，AI 照做即失败。
 
 **🟠 P1 — AI 不可发现的能力盲区**
 4. `event_index` / `projection_json`：无专用查询工具（§4）。
@@ -178,7 +178,7 @@
 
 **P0**：
 - 删除/重写 `troubleshooting.md` §7.B 矛盾段（改为"pcap 来源 payload 是完整帧，必须 ExtractL7 剥头"），并在 §1 第 5 步去掉"is payload L7"的误导性前提。✅ 已修。
-- 在 `plugin-domain-design.md` 顶部显著标注"过期设计稿，实际工具面以 `cmd/gta-mcp/main.go` 的 `AddTool` 注册为准"，并把示例中的 `http` 占位名改为通用名。✅ 已修。
+- 在 `plugin-domain-design.md` 顶部显著标注"过期设计稿，实际工具面以 `cmd/gt-mcp/main.go` 的 `AddTool` 注册为准"，并把示例中的 `http` 占位名改为通用名。✅ 已修。
 - 删除死代码中对不存在的 `http` 插件的引用：`tools/hotreload`、`tools/verify_http_plugin` 改为通用 flag 驱动（插件名/端口/目录可配），示例改用通用占位名；**不得**引用本地未提交插件。`examples/http` 是通用 HTTP 示例服务（与具体插件解耦），可保留。✅ 已修。
 
 **P1**：

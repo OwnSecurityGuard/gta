@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // 投递参数。

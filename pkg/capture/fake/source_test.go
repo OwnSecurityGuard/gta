@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/capture"
-	"gta/pkg/event"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/event"
 )
 
 func TestOpen(t *testing.T) {

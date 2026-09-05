@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 func main() {

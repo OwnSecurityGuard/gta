@@ -8,8 +8,8 @@
 // SQLiteStore 同时实现全部接口。未来替换后端时按需实现部分接口。
 //
 // 接口使用边界：
-//   - gta-pipeline 用 EventWriter + ProjectionWriter + SessionStore.Update
-//   - gta-mcp 用 EventReader + ProjectionReader + SessionStore
+//   - gt-pipeline 用 EventWriter + ProjectionWriter + SessionStore.Update
+//   - gt-mcp 用 EventReader + ProjectionReader + SessionStore
 //   - Pipeline 只写不读，MCP 只读不写（SessionStore 双向例外）
 package store
 
@@ -17,12 +17,12 @@ import (
 	"context"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // ===== 第 1 层：事件流 =====
 
-// EventWriter 由 gta-pipeline 使用，追加不可变事件。
+// EventWriter 由 gt-pipeline 使用，追加不可变事件。
 type EventWriter interface {
 	AppendRawPackets(ctx context.Context, packets []event.Packet) error
 	AppendEvents(ctx context.Context, events []*event.Event) error
@@ -30,7 +30,7 @@ type EventWriter interface {
 	Close() error
 }
 
-// EventReader 由 gta-mcp 使用，查询事件流。
+// EventReader 由 gt-mcp 使用，查询事件流。
 type EventReader interface {
 	QueryEvents(ctx context.Context, sessionID string, limit, offset int) ([]*event.Event, error)
 	// QueryEventsDesc 时间倒序版本，供展示层"最新在前"。
@@ -58,7 +58,7 @@ type EventPager interface {
 
 // ===== 第 2 层：投影 =====
 
-// ProjectionWriter 由 gta-pipeline 使用，写派生数据。
+// ProjectionWriter 由 gt-pipeline 使用，写派生数据。
 // 聚合逻辑在 Pipeline 内，Store 只负责存取。
 type ProjectionWriter interface {
 	WriteMetrics(ctx context.Context, metrics []event.Metric) error
@@ -66,7 +66,7 @@ type ProjectionWriter interface {
 	WriteEnrichedStateChanges(ctx context.Context, sessionID string, changes []EnrichedStateChange) error
 }
 
-// ProjectionReader 由 gta-mcp 使用，查询派生数据。
+// ProjectionReader 由 gt-mcp 使用，查询派生数据。
 type ProjectionReader interface {
 	QueryMetrics(ctx context.Context, q MetricQuery) ([]MetricRow, error)
 	QueryStateChanges(ctx context.Context, q StateChangeQuery) ([]StateChangeRow, error)
@@ -273,7 +273,7 @@ type SessionMeta struct {
 
 // ===== 第 4 层：连接聚合查询 =====
 
-// ConnectionQuerier 由 gta-mcp 使用，按连接聚合代理抓包数据（Connections 页面）。
+// ConnectionQuerier 由 gt-mcp 使用，按连接聚合代理抓包数据（Connections 页面）。
 // SQLiteStore 与 PGStore 均实现。
 type ConnectionQuerier interface {
 	QueryConnections(ctx context.Context, sessionID string, limit, offset int) ([]ConnectionSummary, error)
@@ -290,7 +290,7 @@ type Clearer interface {
 
 // Store 是事件存储的完整能力集合：写入（Pipeline）+ 读取（MCP）+ 连接聚合。
 // SQLiteStore 与 PGStore 均实现该接口；切换后端（sqlite/postgres）时实现该接口即可，
-// 调用方（gta-pipeline / gta-mcp）统一持有 Store，不感知具体后端。
+// 调用方（gt-pipeline / gt-mcp）统一持有 Store，不感知具体后端。
 type Store interface {
 	EventWriter
 	EventReader

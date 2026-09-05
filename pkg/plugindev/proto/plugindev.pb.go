@@ -1306,7 +1306,7 @@ func (x *ExplainResponse) GetNextAction() string {
 }
 
 // VerifyResult is the output of plugin.verify (P4): SDK contract violations,
-// gta-side quality statistics, and an overall verdict. plugin.explain (P3b)
+// gt-side quality statistics, and an overall verdict. plugin.explain (P3b)
 // consumes it to attribute decode-class failures (all-unknown / wrong framing /
 // suspected encryption / suspected missing reassembly).
 type VerifyResult struct {
@@ -1571,7 +1571,7 @@ var File_pkg_plugindev_proto_plugindev_proto protoreflect.FileDescriptor
 
 const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\n" +
-	"#pkg/plugindev/proto/plugindev.proto\x12\rgta.plugindev\"\xa1\x01\n" +
+	"#pkg/plugindev/proto/plugindev.proto\x12\x13gametrace.plugindev\"\xa1\x01\n" +
 	"\x0fScaffoldRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bprotocol\x18\x02 \x01(\tR\bprotocol\x12)\n" +
@@ -1591,9 +1591,9 @@ const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\x10DiscoveredPlugin\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06binary\x18\x02 \x01(\tR\x06binary\x12\x10\n" +
-	"\x03dir\x18\x03 \x01(\tR\x03dir\"P\n" +
-	"\x13ListPluginsResponse\x129\n" +
-	"\aplugins\x18\x01 \x03(\v2\x1f.gta.plugindev.DiscoveredPluginR\aplugins\"C\n" +
+	"\x03dir\x18\x03 \x01(\tR\x03dir\"V\n" +
+	"\x13ListPluginsResponse\x12?\n" +
+	"\aplugins\x18\x01 \x03(\v2%.gametrace.plugindev.DiscoveredPluginR\aplugins\"C\n" +
 	"\fBuildRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
 	"\vtimeout_sec\x18\x02 \x01(\x05R\n" +
@@ -1603,10 +1603,10 @@ const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\x04file\x18\x01 \x01(\tR\x04file\x12\x12\n" +
 	"\x04line\x18\x02 \x01(\x05R\x04line\x12\x10\n" +
 	"\x03col\x18\x03 \x01(\x05R\x03col\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\"j\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"p\n" +
 	"\rBuildResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x121\n" +
-	"\x06errors\x18\x02 \x03(\v2\x19.gta.plugindev.BuildErrorR\x06errors\x12\x16\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x127\n" +
+	"\x06errors\x18\x02 \x03(\v2\x1f.gametrace.plugindev.BuildErrorR\x06errors\x12\x16\n" +
 	"\x06output\x18\x03 \x01(\tR\x06output\"J\n" +
 	"\x0fActivateRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12#\n" +
@@ -1637,47 +1637,47 @@ const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\vinstance_id\x18\x03 \x01(\tR\n" +
 	"instanceId\x12\x14\n" +
 	"\x05alive\x18\x04 \x01(\bR\x05alive\x12(\n" +
-	"\x10launched_at_unix\x18\x05 \x01(\x03R\x0elaunchedAtUnix\"\xdd\x01\n" +
+	"\x10launched_at_unix\x18\x05 \x01(\x03R\x0elaunchedAtUnix\"\xe3\x01\n" +
 	"\vLastAttempt\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x17\n" +
 	"\aat_unix\x18\x03 \x01(\x03R\x06atUnix\x12\x1f\n" +
 	"\vduration_ms\x18\x04 \x01(\x03R\n" +
-	"durationMs\x121\n" +
-	"\x06errors\x18\x05 \x03(\v2\x19.gta.plugindev.BuildErrorR\x06errors\x12\x18\n" +
+	"durationMs\x127\n" +
+	"\x06errors\x18\x05 \x03(\v2\x1f.gametrace.plugindev.BuildErrorR\x06errors\x12\x18\n" +
 	"\amessage\x18\x06 \x01(\tR\amessage\x12\x1f\n" +
 	"\vexplain_ref\x18\a \x01(\tR\n" +
-	"explainRef\"\xd9\x01\n" +
+	"explainRef\"\xeb\x01\n" +
 	"\x0eStatusResponse\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x128\n" +
-	"\bartifact\x18\x02 \x01(\v2\x1c.gta.plugindev.ArtifactStateR\bartifact\x12:\n" +
-	"\vdev_process\x18\x03 \x01(\v2\x19.gta.plugindev.DevProcessR\n" +
-	"devProcess\x12=\n" +
-	"\flast_attempt\x18\x04 \x01(\v2\x1a.gta.plugindev.LastAttemptR\vlastAttempt\"q\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12>\n" +
+	"\bartifact\x18\x02 \x01(\v2\".gametrace.plugindev.ArtifactStateR\bartifact\x12@\n" +
+	"\vdev_process\x18\x03 \x01(\v2\x1f.gametrace.plugindev.DevProcessR\n" +
+	"devProcess\x12C\n" +
+	"\flast_attempt\x18\x04 \x01(\v2 .gametrace.plugindev.LastAttemptR\vlastAttempt\"w\n" +
 	"\x0eExplainRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06action\x18\x02 \x01(\tR\x06action\x123\n" +
-	"\x06verify\x18\x03 \x01(\v2\x1b.gta.plugindev.VerifyResultR\x06verify\"\x9a\x01\n" +
-	"\x0eExplainFinding\x12/\n" +
-	"\x05error\x18\x01 \x01(\v2\x19.gta.plugindev.BuildErrorR\x05error\x12\x1a\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x129\n" +
+	"\x06verify\x18\x03 \x01(\v2!.gametrace.plugindev.VerifyResultR\x06verify\"\xa0\x01\n" +
+	"\x0eExplainFinding\x125\n" +
+	"\x05error\x18\x01 \x01(\v2\x1f.gametrace.plugindev.BuildErrorR\x05error\x12\x1a\n" +
 	"\bcategory\x18\x02 \x01(\tR\bcategory\x12\x17\n" +
 	"\arule_id\x18\x03 \x01(\tR\x06ruleId\x12\x10\n" +
 	"\x03why\x18\x04 \x01(\tR\x03why\x12\x10\n" +
-	"\x03fix\x18\x05 \x01(\tR\x03fix\"\xde\x01\n" +
+	"\x03fix\x18\x05 \x01(\tR\x03fix\"\xe4\x01\n" +
 	"\x0fExplainResponse\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06action\x18\x03 \x01(\tR\x06action\x12\x17\n" +
 	"\aat_unix\x18\x04 \x01(\x03R\x06atUnix\x12\x18\n" +
-	"\asummary\x18\x05 \x01(\tR\asummary\x129\n" +
-	"\bfindings\x18\x06 \x03(\v2\x1d.gta.plugindev.ExplainFindingR\bfindings\x12\x1f\n" +
+	"\asummary\x18\x05 \x01(\tR\asummary\x12?\n" +
+	"\bfindings\x18\x06 \x03(\v2#.gametrace.plugindev.ExplainFindingR\bfindings\x12\x1f\n" +
 	"\vnext_action\x18\a \x01(\tR\n" +
-	"nextAction\"\x99\x01\n" +
-	"\fVerifyResult\x128\n" +
+	"nextAction\"\xa5\x01\n" +
+	"\fVerifyResult\x12>\n" +
 	"\n" +
-	"violations\x18\x01 \x03(\v2\x18.gta.plugindev.ViolationR\n" +
-	"violations\x125\n" +
-	"\aquality\x18\x02 \x01(\v2\x1b.gta.plugindev.QualityStatsR\aquality\x12\x18\n" +
+	"violations\x18\x01 \x03(\v2\x1e.gametrace.plugindev.ViolationR\n" +
+	"violations\x12;\n" +
+	"\aquality\x18\x02 \x01(\v2!.gametrace.plugindev.QualityStatsR\aquality\x12\x18\n" +
 	"\averdict\x18\x03 \x01(\tR\averdict\"\xbb\x01\n" +
 	"\tViolation\x12\x17\n" +
 	"\arule_id\x18\x01 \x01(\tR\x06ruleId\x12\x14\n" +
@@ -1695,16 +1695,16 @@ const file_pkg_plugindev_proto_plugindev_proto_rawDesc = "" +
 	"\x12long_packet_errors\x18\x05 \x01(\x05R\x10longPacketErrors\x12)\n" +
 	"\x10entropy_estimate\x18\x06 \x01(\x01R\x0fentropyEstimate\x124\n" +
 	"\x16schema_versioned_ratio\x18\a \x01(\x01R\x14schemaVersionedRatio\x12#\n" +
-	"\rdecode_errors\x18\b \x01(\x05R\fdecodeErrors2\xa3\x04\n" +
-	"\tPluginDev\x12K\n" +
-	"\bScaffold\x12\x1e.gta.plugindev.ScaffoldRequest\x1a\x1f.gta.plugindev.ScaffoldResponse\x12T\n" +
-	"\vListPlugins\x12!.gta.plugindev.ListPluginsRequest\x1a\".gta.plugindev.ListPluginsResponse\x12B\n" +
-	"\x05Build\x12\x1b.gta.plugindev.BuildRequest\x1a\x1c.gta.plugindev.BuildResponse\x12K\n" +
-	"\bActivate\x12\x1e.gta.plugindev.ActivateRequest\x1a\x1f.gta.plugindev.ActivateResponse\x12Q\n" +
+	"\rdecode_errors\x18\b \x01(\x05R\fdecodeErrors2\xf7\x04\n" +
+	"\tPluginDev\x12W\n" +
+	"\bScaffold\x12$.gametrace.plugindev.ScaffoldRequest\x1a%.gametrace.plugindev.ScaffoldResponse\x12`\n" +
+	"\vListPlugins\x12'.gametrace.plugindev.ListPluginsRequest\x1a(.gametrace.plugindev.ListPluginsResponse\x12N\n" +
+	"\x05Build\x12!.gametrace.plugindev.BuildRequest\x1a\".gametrace.plugindev.BuildResponse\x12W\n" +
+	"\bActivate\x12$.gametrace.plugindev.ActivateRequest\x1a%.gametrace.plugindev.ActivateResponse\x12]\n" +
 	"\n" +
-	"Deactivate\x12 .gta.plugindev.DeactivateRequest\x1a!.gta.plugindev.DeactivateResponse\x12E\n" +
-	"\x06Status\x12\x1c.gta.plugindev.StatusRequest\x1a\x1d.gta.plugindev.StatusResponse\x12H\n" +
-	"\aExplain\x12\x1d.gta.plugindev.ExplainRequest\x1a\x1e.gta.plugindev.ExplainResponseB\x19Z\x17gta/pkg/plugindev/protob\x06proto3"
+	"Deactivate\x12&.gametrace.plugindev.DeactivateRequest\x1a'.gametrace.plugindev.DeactivateResponse\x12Q\n" +
+	"\x06Status\x12\".gametrace.plugindev.StatusRequest\x1a#.gametrace.plugindev.StatusResponse\x12T\n" +
+	"\aExplain\x12#.gametrace.plugindev.ExplainRequest\x1a$.gametrace.plugindev.ExplainResponseB\x1fZ\x1dgametrace/pkg/plugindev/protob\x06proto3"
 
 var (
 	file_pkg_plugindev_proto_plugindev_proto_rawDescOnce sync.Once
@@ -1720,56 +1720,56 @@ func file_pkg_plugindev_proto_plugindev_proto_rawDescGZIP() []byte {
 
 var file_pkg_plugindev_proto_plugindev_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_pkg_plugindev_proto_plugindev_proto_goTypes = []any{
-	(*ScaffoldRequest)(nil),     // 0: gta.plugindev.ScaffoldRequest
-	(*ScaffoldResponse)(nil),    // 1: gta.plugindev.ScaffoldResponse
-	(*ListPluginsRequest)(nil),  // 2: gta.plugindev.ListPluginsRequest
-	(*DiscoveredPlugin)(nil),    // 3: gta.plugindev.DiscoveredPlugin
-	(*ListPluginsResponse)(nil), // 4: gta.plugindev.ListPluginsResponse
-	(*BuildRequest)(nil),        // 5: gta.plugindev.BuildRequest
-	(*BuildError)(nil),          // 6: gta.plugindev.BuildError
-	(*BuildResponse)(nil),       // 7: gta.plugindev.BuildResponse
-	(*ActivateRequest)(nil),     // 8: gta.plugindev.ActivateRequest
-	(*ActivateResponse)(nil),    // 9: gta.plugindev.ActivateResponse
-	(*DeactivateRequest)(nil),   // 10: gta.plugindev.DeactivateRequest
-	(*DeactivateResponse)(nil),  // 11: gta.plugindev.DeactivateResponse
-	(*StatusRequest)(nil),       // 12: gta.plugindev.StatusRequest
-	(*ArtifactState)(nil),       // 13: gta.plugindev.ArtifactState
-	(*DevProcess)(nil),          // 14: gta.plugindev.DevProcess
-	(*LastAttempt)(nil),         // 15: gta.plugindev.LastAttempt
-	(*StatusResponse)(nil),      // 16: gta.plugindev.StatusResponse
-	(*ExplainRequest)(nil),      // 17: gta.plugindev.ExplainRequest
-	(*ExplainFinding)(nil),      // 18: gta.plugindev.ExplainFinding
-	(*ExplainResponse)(nil),     // 19: gta.plugindev.ExplainResponse
-	(*VerifyResult)(nil),        // 20: gta.plugindev.VerifyResult
-	(*Violation)(nil),           // 21: gta.plugindev.Violation
-	(*QualityStats)(nil),        // 22: gta.plugindev.QualityStats
+	(*ScaffoldRequest)(nil),     // 0: gametrace.plugindev.ScaffoldRequest
+	(*ScaffoldResponse)(nil),    // 1: gametrace.plugindev.ScaffoldResponse
+	(*ListPluginsRequest)(nil),  // 2: gametrace.plugindev.ListPluginsRequest
+	(*DiscoveredPlugin)(nil),    // 3: gametrace.plugindev.DiscoveredPlugin
+	(*ListPluginsResponse)(nil), // 4: gametrace.plugindev.ListPluginsResponse
+	(*BuildRequest)(nil),        // 5: gametrace.plugindev.BuildRequest
+	(*BuildError)(nil),          // 6: gametrace.plugindev.BuildError
+	(*BuildResponse)(nil),       // 7: gametrace.plugindev.BuildResponse
+	(*ActivateRequest)(nil),     // 8: gametrace.plugindev.ActivateRequest
+	(*ActivateResponse)(nil),    // 9: gametrace.plugindev.ActivateResponse
+	(*DeactivateRequest)(nil),   // 10: gametrace.plugindev.DeactivateRequest
+	(*DeactivateResponse)(nil),  // 11: gametrace.plugindev.DeactivateResponse
+	(*StatusRequest)(nil),       // 12: gametrace.plugindev.StatusRequest
+	(*ArtifactState)(nil),       // 13: gametrace.plugindev.ArtifactState
+	(*DevProcess)(nil),          // 14: gametrace.plugindev.DevProcess
+	(*LastAttempt)(nil),         // 15: gametrace.plugindev.LastAttempt
+	(*StatusResponse)(nil),      // 16: gametrace.plugindev.StatusResponse
+	(*ExplainRequest)(nil),      // 17: gametrace.plugindev.ExplainRequest
+	(*ExplainFinding)(nil),      // 18: gametrace.plugindev.ExplainFinding
+	(*ExplainResponse)(nil),     // 19: gametrace.plugindev.ExplainResponse
+	(*VerifyResult)(nil),        // 20: gametrace.plugindev.VerifyResult
+	(*Violation)(nil),           // 21: gametrace.plugindev.Violation
+	(*QualityStats)(nil),        // 22: gametrace.plugindev.QualityStats
 }
 var file_pkg_plugindev_proto_plugindev_proto_depIdxs = []int32{
-	3,  // 0: gta.plugindev.ListPluginsResponse.plugins:type_name -> gta.plugindev.DiscoveredPlugin
-	6,  // 1: gta.plugindev.BuildResponse.errors:type_name -> gta.plugindev.BuildError
-	6,  // 2: gta.plugindev.LastAttempt.errors:type_name -> gta.plugindev.BuildError
-	13, // 3: gta.plugindev.StatusResponse.artifact:type_name -> gta.plugindev.ArtifactState
-	14, // 4: gta.plugindev.StatusResponse.dev_process:type_name -> gta.plugindev.DevProcess
-	15, // 5: gta.plugindev.StatusResponse.last_attempt:type_name -> gta.plugindev.LastAttempt
-	20, // 6: gta.plugindev.ExplainRequest.verify:type_name -> gta.plugindev.VerifyResult
-	6,  // 7: gta.plugindev.ExplainFinding.error:type_name -> gta.plugindev.BuildError
-	18, // 8: gta.plugindev.ExplainResponse.findings:type_name -> gta.plugindev.ExplainFinding
-	21, // 9: gta.plugindev.VerifyResult.violations:type_name -> gta.plugindev.Violation
-	22, // 10: gta.plugindev.VerifyResult.quality:type_name -> gta.plugindev.QualityStats
-	0,  // 11: gta.plugindev.PluginDev.Scaffold:input_type -> gta.plugindev.ScaffoldRequest
-	2,  // 12: gta.plugindev.PluginDev.ListPlugins:input_type -> gta.plugindev.ListPluginsRequest
-	5,  // 13: gta.plugindev.PluginDev.Build:input_type -> gta.plugindev.BuildRequest
-	8,  // 14: gta.plugindev.PluginDev.Activate:input_type -> gta.plugindev.ActivateRequest
-	10, // 15: gta.plugindev.PluginDev.Deactivate:input_type -> gta.plugindev.DeactivateRequest
-	12, // 16: gta.plugindev.PluginDev.Status:input_type -> gta.plugindev.StatusRequest
-	17, // 17: gta.plugindev.PluginDev.Explain:input_type -> gta.plugindev.ExplainRequest
-	1,  // 18: gta.plugindev.PluginDev.Scaffold:output_type -> gta.plugindev.ScaffoldResponse
-	4,  // 19: gta.plugindev.PluginDev.ListPlugins:output_type -> gta.plugindev.ListPluginsResponse
-	7,  // 20: gta.plugindev.PluginDev.Build:output_type -> gta.plugindev.BuildResponse
-	9,  // 21: gta.plugindev.PluginDev.Activate:output_type -> gta.plugindev.ActivateResponse
-	11, // 22: gta.plugindev.PluginDev.Deactivate:output_type -> gta.plugindev.DeactivateResponse
-	16, // 23: gta.plugindev.PluginDev.Status:output_type -> gta.plugindev.StatusResponse
-	19, // 24: gta.plugindev.PluginDev.Explain:output_type -> gta.plugindev.ExplainResponse
+	3,  // 0: gametrace.plugindev.ListPluginsResponse.plugins:type_name -> gametrace.plugindev.DiscoveredPlugin
+	6,  // 1: gametrace.plugindev.BuildResponse.errors:type_name -> gametrace.plugindev.BuildError
+	6,  // 2: gametrace.plugindev.LastAttempt.errors:type_name -> gametrace.plugindev.BuildError
+	13, // 3: gametrace.plugindev.StatusResponse.artifact:type_name -> gametrace.plugindev.ArtifactState
+	14, // 4: gametrace.plugindev.StatusResponse.dev_process:type_name -> gametrace.plugindev.DevProcess
+	15, // 5: gametrace.plugindev.StatusResponse.last_attempt:type_name -> gametrace.plugindev.LastAttempt
+	20, // 6: gametrace.plugindev.ExplainRequest.verify:type_name -> gametrace.plugindev.VerifyResult
+	6,  // 7: gametrace.plugindev.ExplainFinding.error:type_name -> gametrace.plugindev.BuildError
+	18, // 8: gametrace.plugindev.ExplainResponse.findings:type_name -> gametrace.plugindev.ExplainFinding
+	21, // 9: gametrace.plugindev.VerifyResult.violations:type_name -> gametrace.plugindev.Violation
+	22, // 10: gametrace.plugindev.VerifyResult.quality:type_name -> gametrace.plugindev.QualityStats
+	0,  // 11: gametrace.plugindev.PluginDev.Scaffold:input_type -> gametrace.plugindev.ScaffoldRequest
+	2,  // 12: gametrace.plugindev.PluginDev.ListPlugins:input_type -> gametrace.plugindev.ListPluginsRequest
+	5,  // 13: gametrace.plugindev.PluginDev.Build:input_type -> gametrace.plugindev.BuildRequest
+	8,  // 14: gametrace.plugindev.PluginDev.Activate:input_type -> gametrace.plugindev.ActivateRequest
+	10, // 15: gametrace.plugindev.PluginDev.Deactivate:input_type -> gametrace.plugindev.DeactivateRequest
+	12, // 16: gametrace.plugindev.PluginDev.Status:input_type -> gametrace.plugindev.StatusRequest
+	17, // 17: gametrace.plugindev.PluginDev.Explain:input_type -> gametrace.plugindev.ExplainRequest
+	1,  // 18: gametrace.plugindev.PluginDev.Scaffold:output_type -> gametrace.plugindev.ScaffoldResponse
+	4,  // 19: gametrace.plugindev.PluginDev.ListPlugins:output_type -> gametrace.plugindev.ListPluginsResponse
+	7,  // 20: gametrace.plugindev.PluginDev.Build:output_type -> gametrace.plugindev.BuildResponse
+	9,  // 21: gametrace.plugindev.PluginDev.Activate:output_type -> gametrace.plugindev.ActivateResponse
+	11, // 22: gametrace.plugindev.PluginDev.Deactivate:output_type -> gametrace.plugindev.DeactivateResponse
+	16, // 23: gametrace.plugindev.PluginDev.Status:output_type -> gametrace.plugindev.StatusResponse
+	19, // 24: gametrace.plugindev.PluginDev.Explain:output_type -> gametrace.plugindev.ExplainResponse
 	18, // [18:25] is the sub-list for method output_type
 	11, // [11:18] is the sub-list for method input_type
 	11, // [11:11] is the sub-list for extension type_name

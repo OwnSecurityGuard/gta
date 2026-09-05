@@ -14,7 +14,7 @@ export function useAuthToken(): string | null {
   return useSyncExternalStore(subscribeToken, getToken);
 }
 
-/** 当前身份（来自后端 X-GTA-Owner/X-GTA-Admin 响应头回显；匿名模式为 null）。 */
+/** 当前身份（来自后端 X-GT-Owner/X-GT-Admin 响应头回显；匿名模式为 null）。 */
 export function useIdentity(): Identity | null {
   return useSyncExternalStore(subscribeIdentity, getIdentity);
 }

@@ -373,8 +373,8 @@ func explainActivate(last *LastAttempt) []*ExplainFinding {
 		return []*ExplainFinding{{
 			Category: "process-crash",
 			RuleID:   "error-not-panic",
-			Why:      "进程在注册前就崩溃，常见原因是 main 发生 panic（如 GTA_REGISTRY_ADDR 解析失败、SDK 初始化错误）或未 defer recover()",
-			Fix:      "读取 <name>.dev.log 看 panic 栈；在 main 加 defer recover()；确认 GTA_REGISTRY_ADDR 可达且格式正确；重新 build_plugin 后再 activate_plugin",
+			Why:      "进程在注册前就崩溃，常见原因是 main 发生 panic（如 GT_REGISTRY_ADDR 解析失败、SDK 初始化错误）或未 defer recover()",
+			Fix:      "读取 <name>.dev.log 看 panic 栈；在 main 加 defer recover()；确认 GT_REGISTRY_ADDR 可达且格式正确；重新 build_plugin 后再 activate_plugin",
 		}}
 	case strings.Contains(m, "already active"):
 		return []*ExplainFinding{{

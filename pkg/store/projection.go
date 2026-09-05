@@ -1,8 +1,8 @@
 package store
 
 import (
-	"gta/pkg/event"
-	"gta/pkg/schema"
+	"gametrace/pkg/event"
+	"gametrace/pkg/schema"
 )
 
 // extractProjection 从 Event 按 schema 声明的 indexable_fields 提取投影值。

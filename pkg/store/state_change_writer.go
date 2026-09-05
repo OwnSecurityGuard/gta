@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 
 	"github.com/google/uuid"
 )

@@ -681,7 +681,7 @@ func (x *VerifyViolation) GetSample() string {
 	return ""
 }
 
-// VerifyQuality gta 侧语料级统计（与 plugin.explain 共享判据）。
+// VerifyQuality gametrace 侧语料级统计（与 plugin.explain 共享判据）。
 type VerifyQuality struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	TotalInputs          int64                  `protobuf:"varint,1,opt,name=total_inputs,json=totalInputs,proto3" json:"total_inputs,omitempty"`
@@ -1259,8 +1259,8 @@ func (x *PcapFileConfig) GetPath() string {
 	return ""
 }
 
-// MobileSourceConfig 启动移动代理抓包（gta-singbox-agent 推送）。
-// 监听地址形如 "127.0.0.1:9090"（tcp）或 "unix:///tmp/gta-mobile.sock"（unix）。
+// MobileSourceConfig 启动移动代理抓包（gt-singbox-agent 推送）。
+// 监听地址形如 "127.0.0.1:9090"（tcp）或 "unix:///tmp/gt-mobile.sock"（unix）。
 type MobileSourceConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ListenAddr    string                 `protobuf:"bytes,1,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"` // gRPC 服务监听地址，agent 连这里
@@ -1316,18 +1316,18 @@ type StartCaptureRequest struct {
 	//	*StartCaptureRequest_File
 	//	*StartCaptureRequest_Mobile
 	Source isStartCaptureRequest_Source `protobuf_oneof:"source"`
-	// agent 为 true 时本会话订阅 agent capture source（gta-agent 经 AgentIngest
+	// agent 为 true 时本会话订阅 agent capture source（gt-agent 经 AgentIngest
 	// 按 session_id 推送原始帧）。可与 oneof source 组合（同时抓网卡等）；
 	// 单独为 true 且无 oneof source 时表示纯 agent 会话。
 	Agent bool `protobuf:"varint,7,opt,name=agent,proto3" json:"agent,omitempty"`
-	// 调用方身份（gta-mcp 从 HTTP auth ctx 提取后透传，见 ListPluginsRequest）。
+	// 调用方身份（gt-mcp 从 HTTP auth ctx 提取后透传，见 ListPluginsRequest）。
 	// pipeline 用它记录会话归属（ControlStore SessionMeta.Owner / captureTask.owner）。
 	Owner     string `protobuf:"bytes,8,opt,name=owner,proto3" json:"owner,omitempty"`
 	AllOwners bool   `protobuf:"varint,9,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`
-	// 会话归属的项目（projects.id），可选。gta-mcp 从 HTTP 入参透传。
+	// 会话归属的项目（projects.id），可选。gt-mcp 从 HTTP 入参透传。
 	ProjectId string `protobuf:"bytes,10,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	// plugin_owners 是允许按名解析解码插件的额外 owner 集合（除会话 owner 外）。
-	// gta-mcp 依据"调用者所属项目的插件条目归属"计算；用于项目成员共用项目插件。
+	// gt-mcp 依据"调用者所属项目的插件条目归属"计算；用于项目成员共用项目插件。
 	PluginOwners  []string `protobuf:"bytes,11,rep,name=plugin_owners,json=pluginOwners,proto3" json:"plugin_owners,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2130,7 +2130,7 @@ func (x *CaptureSessionSummary) GetStartedAtUnix() int64 {
 }
 
 // ListPluginsRequest 列出已注册插件。owner/all_owners 来自调用方身份
-// （gta-mcp 从 HTTP auth ctx 提取后透传）：非 admin 只见自己的 + 匿名注册的
+// （gt-mcp 从 HTTP auth ctx 提取后透传）：非 admin 只见自己的 + 匿名注册的
 // 插件；all_owners=true（admin）见全部；两者均空 = 匿名/本地语境（只见匿名插件）。
 type ListPluginsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2846,8 +2846,8 @@ func (*GetRegistryAddrRequest) Descriptor() ([]byte, []int) {
 }
 
 // GetRegistryAddrResponse 返回插件应连接的注册中心地址。
-// registry_addr 即 gta-pipeline 的 -registry-addr（如 :9091），插件启动时必须
-// 将其填入 GTA_REGISTRY_ADDR 才能向运行时注册。空字符串表示 pipeline 未配置注册中心。
+// registry_addr 即 gt-pipeline 的 -registry-addr（如 :9091），插件启动时必须
+// 将其填入 GT_REGISTRY_ADDR 才能向运行时注册。空字符串表示 pipeline 未配置注册中心。
 type GetRegistryAddrResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RegistryAddr  string                 `protobuf:"bytes,1,opt,name=registry_addr,json=registryAddr,proto3" json:"registry_addr,omitempty"`
@@ -2894,7 +2894,7 @@ func (x *GetRegistryAddrResponse) GetRegistryAddr() string {
 
 // CreateProxyLeaseRequest 创建代理出口。plugin/include_hosts/include_ports
 // 为该租约私有（不影响其他租约）；device 是设备标签；owner/all_owners 由
-// gta-mcp 从 auth ctx 透传（同 StartCaptureRequest），pipeline 记录归属。
+// gt-mcp 从 auth ctx 透传（同 StartCaptureRequest），pipeline 记录归属。
 type CreateProxyLeaseRequest struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	Plugin       string                 `protobuf:"bytes,1,opt,name=plugin,proto3" json:"plugin,omitempty"`                                         // 租约会话绑定的解码插件（空=仅原始包）
@@ -2902,8 +2902,8 @@ type CreateProxyLeaseRequest struct {
 	IncludePorts []int32                `protobuf:"varint,3,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"` // 连接筛选：目标端口（空=不筛选）
 	Device       string                 `protobuf:"bytes,4,opt,name=device,proto3" json:"device,omitempty"`                                         // 设备标签，如 "alice-phone"（可选）
 	ProjectId    string                 `protobuf:"bytes,5,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`                  // 归属项目（可选）
-	Owner        string                 `protobuf:"bytes,6,opt,name=owner,proto3" json:"owner,omitempty"`                                           // gta-mcp 透传的调用方属主
-	AllOwners    bool                   `protobuf:"varint,7,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`                 // gta-mcp 透传（admin）
+	Owner        string                 `protobuf:"bytes,6,opt,name=owner,proto3" json:"owner,omitempty"`                                           // gt-mcp 透传的调用方属主
+	AllOwners    bool                   `protobuf:"varint,7,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`                 // gt-mcp 透传（admin）
 	// no_auto_start 为 true 时只创建常驻出口、不立即开始抓包（等
 	// StartLeaseCapture）。默认 false = 创建后立刻开始抓包（保持既有行为）。
 	// 取反命名是 proto3 默认值所限：bool 只能是 false，无法表达"默认 true"。
@@ -3624,8 +3624,8 @@ type StartLeaseCaptureRequest struct {
 	Plugin        string                 `protobuf:"bytes,2,opt,name=plugin,proto3" json:"plugin,omitempty"`                                         // 可选覆盖：本次抓包绑定的解码插件
 	IncludeHosts  []string               `protobuf:"bytes,3,rep,name=include_hosts,json=includeHosts,proto3" json:"include_hosts,omitempty"`         // 可选覆盖：连接筛选（目标主机）
 	IncludePorts  []int32                `protobuf:"varint,4,rep,packed,name=include_ports,json=includePorts,proto3" json:"include_ports,omitempty"` // 可选覆盖：连接筛选（目标端口）
-	Owner         string                 `protobuf:"bytes,5,opt,name=owner,proto3" json:"owner,omitempty"`                                           // gta-mcp 透传的调用方属主
-	AllOwners     bool                   `protobuf:"varint,6,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`                 // gta-mcp 透传（admin）
+	Owner         string                 `protobuf:"bytes,5,opt,name=owner,proto3" json:"owner,omitempty"`                                           // gt-mcp 透传的调用方属主
+	AllOwners     bool                   `protobuf:"varint,6,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"`                 // gt-mcp 透传（admin）
 	PluginOwners  []string               `protobuf:"bytes,7,rep,name=plugin_owners,json=pluginOwners,proto3" json:"plugin_owners,omitempty"`         // 允许的额外插件 owner 集合（语义同 StartCaptureRequest）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4183,7 +4183,7 @@ func (x *ProbeInfo) GetCreatedAt() string {
 
 type ListProbesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Owner         string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`                           // gta-mcp 透传
+	Owner         string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`                           // gt-mcp 透传
 	AllOwners     bool                   `protobuf:"varint,2,opt,name=all_owners,json=allOwners,proto3" json:"all_owners,omitempty"` // admin 全量
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4492,7 +4492,7 @@ func (x *ProbeStartCaptureRequest) GetPluginOwners() []string {
 type ProbeStartCaptureResponse struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// db_path 是新会话 capture.sqlite 的绝对路径（gta-mcp 写本地 metadata.json 用）。
+	// db_path 是新会话 capture.sqlite 的绝对路径（gt-mcp 写本地 metadata.json 用）。
 	DbPath        string `protobuf:"bytes,2,opt,name=db_path,json=dbPath,proto3" json:"db_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5448,7 +5448,7 @@ var File_pkg_internalipc_proto_internal_proto protoreflect.FileDescriptor
 
 const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\n" +
-	"$pkg/internalipc/proto/internal.proto\x12\x0fgta.internalipc\"\xcd\x01\n" +
+	"$pkg/internalipc/proto/internal.proto\x12\x15gametrace.internalipc\"\xcd\x01\n" +
 	"\x17DecodeRawPacketsRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -5481,14 +5481,14 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\rraw_packet_id\x18\x01 \x01(\tR\vrawPacketId\x12\x10\n" +
 	"\x03src\x18\x02 \x01(\tR\x03src\x12\x10\n" +
 	"\x03dst\x18\x03 \x01(\tR\x03dst\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\x9b\x03\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\xad\x03\n" +
 	"\x12TestPluginResponse\x12\x1b\n" +
 	"\ttotal_raw\x18\x01 \x01(\x03R\btotalRaw\x12\x18\n" +
 	"\adecoded\x18\x02 \x01(\x03R\adecoded\x12#\n" +
-	"\rdecode_errors\x18\x03 \x01(\x03R\fdecodeErrors\x12]\n" +
-	"\x0etype_histogram\x18\x04 \x03(\v26.gta.internalipc.TestPluginResponse.TypeHistogramEntryR\rtypeHistogram\x12C\n" +
-	"\rsample_events\x18\x05 \x03(\v2\x1e.gta.internalipc.TestEventLiteR\fsampleEvents\x12C\n" +
-	"\rerror_samples\x18\x06 \x03(\v2\x1e.gta.internalipc.TestErrorLiteR\ferrorSamples\x1a@\n" +
+	"\rdecode_errors\x18\x03 \x01(\x03R\fdecodeErrors\x12c\n" +
+	"\x0etype_histogram\x18\x04 \x03(\v2<.gametrace.internalipc.TestPluginResponse.TypeHistogramEntryR\rtypeHistogram\x12I\n" +
+	"\rsample_events\x18\x05 \x03(\v2$.gametrace.internalipc.TestEventLiteR\fsampleEvents\x12I\n" +
+	"\rerror_samples\x18\x06 \x03(\v2$.gametrace.internalipc.TestErrorLiteR\ferrorSamples\x1a@\n" +
 	"\x12TypeHistogramEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"\x9c\x01\n" +
@@ -5516,13 +5516,13 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x12long_packet_errors\x18\x05 \x01(\x03R\x10longPacketErrors\x12)\n" +
 	"\x10entropy_estimate\x18\x06 \x01(\x01R\x0fentropyEstimate\x124\n" +
 	"\x16schema_versioned_ratio\x18\a \x01(\x01R\x14schemaVersionedRatio\x12#\n" +
-	"\rdecode_errors\x18\b \x01(\x03R\fdecodeErrors\"\x82\x02\n" +
+	"\rdecode_errors\x18\b \x01(\x03R\fdecodeErrors\"\x8e\x02\n" +
 	"\x0eVerifyResponse\x12\x18\n" +
-	"\averdict\x18\x01 \x01(\tR\averdict\x12@\n" +
+	"\averdict\x18\x01 \x01(\tR\averdict\x12F\n" +
 	"\n" +
-	"violations\x18\x02 \x03(\v2 .gta.internalipc.VerifyViolationR\n" +
-	"violations\x128\n" +
-	"\aquality\x18\x03 \x01(\v2\x1e.gta.internalipc.VerifyQualityR\aquality\x12\"\n" +
+	"violations\x18\x02 \x03(\v2&.gametrace.internalipc.VerifyViolationR\n" +
+	"violations\x12>\n" +
+	"\aquality\x18\x03 \x01(\v2$.gametrace.internalipc.VerifyQualityR\aquality\x12\"\n" +
 	"\rverify_run_id\x18\x04 \x01(\tR\vverifyRunId\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x05 \x01(\tR\tsessionId\x12\x17\n" +
@@ -5541,17 +5541,17 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x03hex\x18\x05 \x01(\tR\x03hex\x12\x18\n" +
 	"\aentropy\x18\x06 \x01(\x01R\aentropy\x12\x1d\n" +
 	"\n" +
-	"first_byte\x18\a \x01(\x05R\tfirstByte\"\xb6\x05\n" +
+	"first_byte\x18\a \x01(\x05R\tfirstByte\"\xc8\x05\n" +
 	"\x13SampleBytesResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12+\n" +
 	"\x11requested_packets\x18\x02 \x01(\x03R\x10requestedPackets\x12)\n" +
 	"\x10returned_packets\x18\x03 \x01(\x03R\x0freturnedPackets\x12%\n" +
 	"\x0ereturned_bytes\x18\x04 \x01(\x03R\rreturnedBytes\x12\x1c\n" +
-	"\ttruncated\x18\x05 \x01(\bR\ttruncated\x128\n" +
-	"\apackets\x18\x06 \x03(\v2\x1e.gta.internalipc.SampledPacketR\apackets\x12d\n" +
-	"\x10length_histogram\x18\a \x03(\v29.gta.internalipc.SampleBytesResponse.LengthHistogramEntryR\x0flengthHistogram\x12w\n" +
-	"\x17first_byte_distribution\x18\b \x03(\v2?.gta.internalipc.SampleBytesResponse.FirstByteDistributionEntryR\x15firstByteDistribution\x12!\n" +
+	"\ttruncated\x18\x05 \x01(\bR\ttruncated\x12>\n" +
+	"\apackets\x18\x06 \x03(\v2$.gametrace.internalipc.SampledPacketR\apackets\x12j\n" +
+	"\x10length_histogram\x18\a \x03(\v2?.gametrace.internalipc.SampleBytesResponse.LengthHistogramEntryR\x0flengthHistogram\x12}\n" +
+	"\x17first_byte_distribution\x18\b \x03(\v2E.gametrace.internalipc.SampleBytesResponse.FirstByteDistributionEntryR\x15firstByteDistribution\x12!\n" +
 	"\fmean_entropy\x18\t \x01(\x01R\vmeanEntropy\x12\x19\n" +
 	"\baudit_id\x18\n" +
 	" \x01(\x03R\aauditId\x1aB\n" +
@@ -5570,15 +5570,15 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"5\n" +
 	"\x12MobileSourceConfig\x12\x1f\n" +
 	"\vlisten_addr\x18\x01 \x01(\tR\n" +
-	"listenAddr\"\xa6\x03\n" +
+	"listenAddr\"\xb8\x03\n" +
 	"\x13StartCaptureRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
 	"\x06plugin\x18\x02 \x01(\tR\x06plugin\x12\x12\n" +
-	"\x04port\x18\x03 \x01(\x05R\x04port\x125\n" +
-	"\x04live\x18\x04 \x01(\v2\x1f.gta.internalipc.PcapLiveConfigH\x00R\x04live\x125\n" +
-	"\x04file\x18\x05 \x01(\v2\x1f.gta.internalipc.PcapFileConfigH\x00R\x04file\x12=\n" +
-	"\x06mobile\x18\x06 \x01(\v2#.gta.internalipc.MobileSourceConfigH\x00R\x06mobile\x12\x14\n" +
+	"\x04port\x18\x03 \x01(\x05R\x04port\x12;\n" +
+	"\x04live\x18\x04 \x01(\v2%.gametrace.internalipc.PcapLiveConfigH\x00R\x04live\x12;\n" +
+	"\x04file\x18\x05 \x01(\v2%.gametrace.internalipc.PcapFileConfigH\x00R\x04file\x12C\n" +
+	"\x06mobile\x18\x06 \x01(\v2).gametrace.internalipc.MobileSourceConfigH\x00R\x06mobile\x12\x14\n" +
 	"\x05agent\x18\a \x01(\bR\x05agent\x12\x14\n" +
 	"\x05owner\x18\b \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
@@ -5631,9 +5631,9 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x15ListInterfacesRequest\".\n" +
 	"\x16ListInterfacesResponse\x12\x14\n" +
 	"\x05names\x18\x01 \x03(\tR\x05names\"\x1c\n" +
-	"\x1aListCaptureSessionsRequest\"a\n" +
-	"\x1bListCaptureSessionsResponse\x12B\n" +
-	"\bsessions\x18\x01 \x03(\v2&.gta.internalipc.CaptureSessionSummaryR\bsessions\"\xfc\x01\n" +
+	"\x1aListCaptureSessionsRequest\"g\n" +
+	"\x1bListCaptureSessionsResponse\x12H\n" +
+	"\bsessions\x18\x01 \x03(\v2,.gametrace.internalipc.CaptureSessionSummaryR\bsessions\"\xfc\x01\n" +
 	"\x15CaptureSessionSummary\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
@@ -5661,9 +5661,9 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"socketPath\x12\x16\n" +
 	"\x06online\x18\a \x01(\bR\x06online\x12.\n" +
 	"\x13last_heartbeat_unix\x18\b \x01(\x03R\x11lastHeartbeatUnix\x12\x14\n" +
-	"\x05owner\x18\t \x01(\tR\x05owner\"O\n" +
-	"\x13ListPluginsResponse\x128\n" +
-	"\aplugins\x18\x01 \x03(\v2\x1e.gta.internalipc.PluginSummaryR\aplugins\"c\n" +
+	"\x05owner\x18\t \x01(\tR\x05owner\"U\n" +
+	"\x13ListPluginsResponse\x12>\n" +
+	"\aplugins\x18\x01 \x03(\v2$.gametrace.internalipc.PluginSummaryR\aplugins\"c\n" +
 	"\x18GetPluginManifestRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
@@ -5748,22 +5748,22 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\rcapture_count\x18\x16 \x01(\x05R\fcaptureCount\x12/\n" +
 	"\x14last_capture_at_unix\x18\x17 \x01(\x03R\x11lastCaptureAtUnix\x12\x1f\n" +
 	"\vsticky_port\x18\x18 \x01(\bR\n" +
-	"stickyPort\"R\n" +
-	"\x18CreateProxyLeaseResponse\x126\n" +
-	"\x05lease\x18\x01 \x01(\v2 .gta.internalipc.ProxyLeaseStateR\x05lease\"M\n" +
+	"stickyPort\"X\n" +
+	"\x18CreateProxyLeaseResponse\x12<\n" +
+	"\x05lease\x18\x01 \x01(\v2&.gametrace.internalipc.ProxyLeaseStateR\x05lease\"M\n" +
 	"\x16ListProxyLeasesRequest\x12\x14\n" +
 	"\x05owner\x18\x01 \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
-	"all_owners\x18\x02 \x01(\bR\tallOwners\"S\n" +
-	"\x17ListProxyLeasesResponse\x128\n" +
-	"\x06leases\x18\x01 \x03(\v2 .gta.internalipc.ProxyLeaseStateR\x06leases\"f\n" +
+	"all_owners\x18\x02 \x01(\bR\tallOwners\"Y\n" +
+	"\x17ListProxyLeasesResponse\x12>\n" +
+	"\x06leases\x18\x01 \x03(\v2&.gametrace.internalipc.ProxyLeaseStateR\x06leases\"f\n" +
 	"\x14GetProxyLeaseRequest\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\tR\aleaseId\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
-	"all_owners\x18\x03 \x01(\bR\tallOwners\"O\n" +
-	"\x15GetProxyLeaseResponse\x126\n" +
-	"\x05lease\x18\x01 \x01(\v2 .gta.internalipc.ProxyLeaseStateR\x05lease\"j\n" +
+	"all_owners\x18\x03 \x01(\bR\tallOwners\"U\n" +
+	"\x15GetProxyLeaseResponse\x12<\n" +
+	"\x05lease\x18\x01 \x01(\v2&.gametrace.internalipc.ProxyLeaseStateR\x05lease\"j\n" +
 	"\x18ReleaseProxyLeaseRequest\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\tR\aleaseId\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
@@ -5782,13 +5782,13 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x05owner\x18\x05 \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
 	"all_owners\x18\x06 \x01(\bR\tallOwners\x12#\n" +
-	"\rplugin_owners\x18\a \x03(\tR\fpluginOwners\"\x9c\x01\n" +
+	"\rplugin_owners\x18\a \x03(\tR\fpluginOwners\"\xa2\x01\n" +
 	"\x19StartLeaseCaptureResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\x126\n" +
-	"\x05lease\x18\x04 \x01(\v2 .gta.internalipc.ProxyLeaseStateR\x05lease\"i\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12<\n" +
+	"\x05lease\x18\x04 \x01(\v2&.gametrace.internalipc.ProxyLeaseStateR\x05lease\"i\n" +
 	"\x17StopLeaseCaptureRequest\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\tR\aleaseId\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
@@ -5838,16 +5838,16 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x11ListProbesRequest\x12\x14\n" +
 	"\x05owner\x18\x01 \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
-	"all_owners\x18\x02 \x01(\bR\tallOwners\"H\n" +
-	"\x12ListProbesResponse\x122\n" +
-	"\x06probes\x18\x01 \x03(\v2\x1a.gta.internalipc.ProbeInfoR\x06probes\"a\n" +
+	"all_owners\x18\x02 \x01(\bR\tallOwners\"N\n" +
+	"\x12ListProbesResponse\x128\n" +
+	"\x06probes\x18\x01 \x03(\v2 .gametrace.internalipc.ProbeInfoR\x06probes\"a\n" +
 	"\x0fGetProbeRequest\x12\x19\n" +
 	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
-	"all_owners\x18\x03 \x01(\bR\tallOwners\"D\n" +
-	"\x10GetProbeResponse\x120\n" +
-	"\x05probe\x18\x01 \x01(\v2\x1a.gta.internalipc.ProbeInfoR\x05probe\"\x88\x02\n" +
+	"all_owners\x18\x03 \x01(\bR\tallOwners\"J\n" +
+	"\x10GetProbeResponse\x126\n" +
+	"\x05probe\x18\x01 \x01(\v2 .gametrace.internalipc.ProbeInfoR\x05probe\"\x88\x02\n" +
 	"\x18ProbeStartCaptureRequest\x12\x19\n" +
 	"\bprobe_id\x18\x01 \x01(\tR\aprobeId\x12\x14\n" +
 	"\x05ports\x18\x02 \x03(\x05R\x05ports\x12\x14\n" +
@@ -5918,9 +5918,9 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x05owner\x18\x04 \x01(\tR\x05owner\x12\x1d\n" +
 	"\n" +
 	"all_owners\x18\x05 \x01(\bR\tallOwners\x12\x18\n" +
-	"\arefresh\x18\x06 \x01(\bR\arefresh\"\x7f\n" +
-	"\x18ProbeListArchiveResponse\x12D\n" +
-	"\bsegments\x18\x01 \x03(\v2(.gta.internalipc.ProbeArchiveSegmentMetaR\bsegments\x12\x1d\n" +
+	"\arefresh\x18\x06 \x01(\bR\arefresh\"\x85\x01\n" +
+	"\x18ProbeListArchiveResponse\x12J\n" +
+	"\bsegments\x18\x01 \x03(\v2..gametrace.internalipc.ProbeArchiveSegmentMetaR\bsegments\x12\x1d\n" +
 	"\n" +
 	"from_cache\x18\x02 \x01(\bR\tfromCache\"\xc0\x01\n" +
 	"\x19ProbeImportArchiveRequest\x12\x19\n" +
@@ -5935,41 +5935,41 @@ const file_pkg_internalipc_proto_internal_proto_rawDesc = "" +
 	"\x1aProbeImportArchiveResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
-	"\adb_path\x18\x02 \x01(\tR\x06dbPath2\x8f\x18\n" +
-	"\x0eCaptureControl\x12[\n" +
-	"\fStartCapture\x12$.gta.internalipc.StartCaptureRequest\x1a%.gta.internalipc.StartCaptureResponse\x12X\n" +
-	"\vStopCapture\x12#.gta.internalipc.StopCaptureRequest\x1a$.gta.internalipc.StopCaptureResponse\x12g\n" +
-	"\x10GetCaptureStatus\x12(.gta.internalipc.GetCaptureStatusRequest\x1a).gta.internalipc.GetCaptureStatusResponse\x12p\n" +
-	"\x13ListCaptureSessions\x12+.gta.internalipc.ListCaptureSessionsRequest\x1a,.gta.internalipc.ListCaptureSessionsResponse\x12a\n" +
-	"\x0eListInterfaces\x12&.gta.internalipc.ListInterfacesRequest\x1a'.gta.internalipc.ListInterfacesResponse\x12g\n" +
-	"\x10DecodeRawPackets\x12(.gta.internalipc.DecodeRawPacketsRequest\x1a).gta.internalipc.DecodeRawPacketsResponse\x12X\n" +
-	"\vListPlugins\x12#.gta.internalipc.ListPluginsRequest\x1a$.gta.internalipc.ListPluginsResponse\x12j\n" +
-	"\x11GetPluginManifest\x12).gta.internalipc.GetPluginManifestRequest\x1a*.gta.internalipc.GetPluginManifestResponse\x12g\n" +
-	"\x10DeregisterPlugin\x12(.gta.internalipc.DeregisterPluginRequest\x1a).gta.internalipc.DeregisterPluginResponse\x12g\n" +
-	"\x10SetSessionPlugin\x12(.gta.internalipc.SetSessionPluginRequest\x1a).gta.internalipc.SetSessionPluginResponse\x12T\n" +
-	"\fWatchPlugins\x12$.gta.internalipc.WatchPluginsRequest\x1a\x1c.gta.internalipc.PluginEvent0\x01\x12U\n" +
+	"\adb_path\x18\x02 \x01(\tR\x06dbPath2\x83\x1b\n" +
+	"\x0eCaptureControl\x12g\n" +
+	"\fStartCapture\x12*.gametrace.internalipc.StartCaptureRequest\x1a+.gametrace.internalipc.StartCaptureResponse\x12d\n" +
+	"\vStopCapture\x12).gametrace.internalipc.StopCaptureRequest\x1a*.gametrace.internalipc.StopCaptureResponse\x12s\n" +
+	"\x10GetCaptureStatus\x12..gametrace.internalipc.GetCaptureStatusRequest\x1a/.gametrace.internalipc.GetCaptureStatusResponse\x12|\n" +
+	"\x13ListCaptureSessions\x121.gametrace.internalipc.ListCaptureSessionsRequest\x1a2.gametrace.internalipc.ListCaptureSessionsResponse\x12m\n" +
+	"\x0eListInterfaces\x12,.gametrace.internalipc.ListInterfacesRequest\x1a-.gametrace.internalipc.ListInterfacesResponse\x12s\n" +
+	"\x10DecodeRawPackets\x12..gametrace.internalipc.DecodeRawPacketsRequest\x1a/.gametrace.internalipc.DecodeRawPacketsResponse\x12d\n" +
+	"\vListPlugins\x12).gametrace.internalipc.ListPluginsRequest\x1a*.gametrace.internalipc.ListPluginsResponse\x12v\n" +
+	"\x11GetPluginManifest\x12/.gametrace.internalipc.GetPluginManifestRequest\x1a0.gametrace.internalipc.GetPluginManifestResponse\x12s\n" +
+	"\x10DeregisterPlugin\x12..gametrace.internalipc.DeregisterPluginRequest\x1a/.gametrace.internalipc.DeregisterPluginResponse\x12s\n" +
+	"\x10SetSessionPlugin\x12..gametrace.internalipc.SetSessionPluginRequest\x1a/.gametrace.internalipc.SetSessionPluginResponse\x12`\n" +
+	"\fWatchPlugins\x12*.gametrace.internalipc.WatchPluginsRequest\x1a\".gametrace.internalipc.PluginEvent0\x01\x12a\n" +
 	"\n" +
-	"TestPlugin\x12\".gta.internalipc.TestPluginRequest\x1a#.gta.internalipc.TestPluginResponse\x12I\n" +
-	"\x06Verify\x12\x1e.gta.internalipc.VerifyRequest\x1a\x1f.gta.internalipc.VerifyResponse\x12X\n" +
-	"\vSampleBytes\x12#.gta.internalipc.SampleBytesRequest\x1a$.gta.internalipc.SampleBytesResponse\x12d\n" +
-	"\x0fGetRegistryAddr\x12'.gta.internalipc.GetRegistryAddrRequest\x1a(.gta.internalipc.GetRegistryAddrResponse\x12g\n" +
-	"\x10CreateProxyLease\x12(.gta.internalipc.CreateProxyLeaseRequest\x1a).gta.internalipc.CreateProxyLeaseResponse\x12d\n" +
-	"\x0fListProxyLeases\x12'.gta.internalipc.ListProxyLeasesRequest\x1a(.gta.internalipc.ListProxyLeasesResponse\x12^\n" +
-	"\rGetProxyLease\x12%.gta.internalipc.GetProxyLeaseRequest\x1a&.gta.internalipc.GetProxyLeaseResponse\x12j\n" +
-	"\x11ReleaseProxyLease\x12).gta.internalipc.ReleaseProxyLeaseRequest\x1a*.gta.internalipc.ReleaseProxyLeaseResponse\x12U\n" +
+	"TestPlugin\x12(.gametrace.internalipc.TestPluginRequest\x1a).gametrace.internalipc.TestPluginResponse\x12U\n" +
+	"\x06Verify\x12$.gametrace.internalipc.VerifyRequest\x1a%.gametrace.internalipc.VerifyResponse\x12d\n" +
+	"\vSampleBytes\x12).gametrace.internalipc.SampleBytesRequest\x1a*.gametrace.internalipc.SampleBytesResponse\x12p\n" +
+	"\x0fGetRegistryAddr\x12-.gametrace.internalipc.GetRegistryAddrRequest\x1a..gametrace.internalipc.GetRegistryAddrResponse\x12s\n" +
+	"\x10CreateProxyLease\x12..gametrace.internalipc.CreateProxyLeaseRequest\x1a/.gametrace.internalipc.CreateProxyLeaseResponse\x12p\n" +
+	"\x0fListProxyLeases\x12-.gametrace.internalipc.ListProxyLeasesRequest\x1a..gametrace.internalipc.ListProxyLeasesResponse\x12j\n" +
+	"\rGetProxyLease\x12+.gametrace.internalipc.GetProxyLeaseRequest\x1a,.gametrace.internalipc.GetProxyLeaseResponse\x12v\n" +
+	"\x11ReleaseProxyLease\x12/.gametrace.internalipc.ReleaseProxyLeaseRequest\x1a0.gametrace.internalipc.ReleaseProxyLeaseResponse\x12a\n" +
 	"\n" +
-	"ListProbes\x12\".gta.internalipc.ListProbesRequest\x1a#.gta.internalipc.ListProbesResponse\x12O\n" +
-	"\bGetProbe\x12 .gta.internalipc.GetProbeRequest\x1a!.gta.internalipc.GetProbeResponse\x12j\n" +
-	"\x11ProbeStartCapture\x12).gta.internalipc.ProbeStartCaptureRequest\x1a*.gta.internalipc.ProbeStartCaptureResponse\x12g\n" +
-	"\x10ProbeStopCapture\x12(.gta.internalipc.ProbeStopCaptureRequest\x1a).gta.internalipc.ProbeStopCaptureResponse\x12j\n" +
-	"\x11ProbeUpdateFilter\x12).gta.internalipc.ProbeUpdateFilterRequest\x1a*.gta.internalipc.ProbeUpdateFilterResponse\x12j\n" +
-	"\x11ProbeRetryCapture\x12).gta.internalipc.ProbeRetryCaptureRequest\x1a*.gta.internalipc.ProbeRetryCaptureResponse\x12X\n" +
-	"\vProbeRename\x12#.gta.internalipc.ProbeRenameRequest\x1a$.gta.internalipc.ProbeRenameResponse\x12X\n" +
-	"\vProbeRevoke\x12#.gta.internalipc.ProbeRevokeRequest\x1a$.gta.internalipc.ProbeRevokeResponse\x12g\n" +
-	"\x10ProbeListArchive\x12(.gta.internalipc.ProbeListArchiveRequest\x1a).gta.internalipc.ProbeListArchiveResponse\x12m\n" +
-	"\x12ProbeImportArchive\x12*.gta.internalipc.ProbeImportArchiveRequest\x1a+.gta.internalipc.ProbeImportArchiveResponse\x12j\n" +
-	"\x11StartLeaseCapture\x12).gta.internalipc.StartLeaseCaptureRequest\x1a*.gta.internalipc.StartLeaseCaptureResponse\x12g\n" +
-	"\x10StopLeaseCapture\x12(.gta.internalipc.StopLeaseCaptureRequest\x1a).gta.internalipc.StopLeaseCaptureResponseB\x1bZ\x19gta/pkg/internalipc/protob\x06proto3"
+	"ListProbes\x12(.gametrace.internalipc.ListProbesRequest\x1a).gametrace.internalipc.ListProbesResponse\x12[\n" +
+	"\bGetProbe\x12&.gametrace.internalipc.GetProbeRequest\x1a'.gametrace.internalipc.GetProbeResponse\x12v\n" +
+	"\x11ProbeStartCapture\x12/.gametrace.internalipc.ProbeStartCaptureRequest\x1a0.gametrace.internalipc.ProbeStartCaptureResponse\x12s\n" +
+	"\x10ProbeStopCapture\x12..gametrace.internalipc.ProbeStopCaptureRequest\x1a/.gametrace.internalipc.ProbeStopCaptureResponse\x12v\n" +
+	"\x11ProbeUpdateFilter\x12/.gametrace.internalipc.ProbeUpdateFilterRequest\x1a0.gametrace.internalipc.ProbeUpdateFilterResponse\x12v\n" +
+	"\x11ProbeRetryCapture\x12/.gametrace.internalipc.ProbeRetryCaptureRequest\x1a0.gametrace.internalipc.ProbeRetryCaptureResponse\x12d\n" +
+	"\vProbeRename\x12).gametrace.internalipc.ProbeRenameRequest\x1a*.gametrace.internalipc.ProbeRenameResponse\x12d\n" +
+	"\vProbeRevoke\x12).gametrace.internalipc.ProbeRevokeRequest\x1a*.gametrace.internalipc.ProbeRevokeResponse\x12s\n" +
+	"\x10ProbeListArchive\x12..gametrace.internalipc.ProbeListArchiveRequest\x1a/.gametrace.internalipc.ProbeListArchiveResponse\x12y\n" +
+	"\x12ProbeImportArchive\x120.gametrace.internalipc.ProbeImportArchiveRequest\x1a1.gametrace.internalipc.ProbeImportArchiveResponse\x12v\n" +
+	"\x11StartLeaseCapture\x12/.gametrace.internalipc.StartLeaseCaptureRequest\x1a0.gametrace.internalipc.StartLeaseCaptureResponse\x12s\n" +
+	"\x10StopLeaseCapture\x12..gametrace.internalipc.StopLeaseCaptureRequest\x1a/.gametrace.internalipc.StopLeaseCaptureResponseB!Z\x1fgametrace/pkg/internalipc/protob\x06proto3"
 
 var (
 	file_pkg_internalipc_proto_internal_proto_rawDescOnce sync.Once
@@ -5985,168 +5985,168 @@ func file_pkg_internalipc_proto_internal_proto_rawDescGZIP() []byte {
 
 var file_pkg_internalipc_proto_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 78)
 var file_pkg_internalipc_proto_internal_proto_goTypes = []any{
-	(*DecodeRawPacketsRequest)(nil),     // 0: gta.internalipc.DecodeRawPacketsRequest
-	(*DecodeRawPacketsResponse)(nil),    // 1: gta.internalipc.DecodeRawPacketsResponse
-	(*TestPluginRequest)(nil),           // 2: gta.internalipc.TestPluginRequest
-	(*TestEventLite)(nil),               // 3: gta.internalipc.TestEventLite
-	(*TestErrorLite)(nil),               // 4: gta.internalipc.TestErrorLite
-	(*TestPluginResponse)(nil),          // 5: gta.internalipc.TestPluginResponse
-	(*VerifyRequest)(nil),               // 6: gta.internalipc.VerifyRequest
-	(*VerifyViolation)(nil),             // 7: gta.internalipc.VerifyViolation
-	(*VerifyQuality)(nil),               // 8: gta.internalipc.VerifyQuality
-	(*VerifyResponse)(nil),              // 9: gta.internalipc.VerifyResponse
-	(*SampleBytesRequest)(nil),          // 10: gta.internalipc.SampleBytesRequest
-	(*SampledPacket)(nil),               // 11: gta.internalipc.SampledPacket
-	(*SampleBytesResponse)(nil),         // 12: gta.internalipc.SampleBytesResponse
-	(*PcapLiveConfig)(nil),              // 13: gta.internalipc.PcapLiveConfig
-	(*PcapFileConfig)(nil),              // 14: gta.internalipc.PcapFileConfig
-	(*MobileSourceConfig)(nil),          // 15: gta.internalipc.MobileSourceConfig
-	(*StartCaptureRequest)(nil),         // 16: gta.internalipc.StartCaptureRequest
-	(*StartCaptureResponse)(nil),        // 17: gta.internalipc.StartCaptureResponse
-	(*StopCaptureRequest)(nil),          // 18: gta.internalipc.StopCaptureRequest
-	(*StopCaptureResponse)(nil),         // 19: gta.internalipc.StopCaptureResponse
-	(*GetCaptureStatusRequest)(nil),     // 20: gta.internalipc.GetCaptureStatusRequest
-	(*GetCaptureStatusResponse)(nil),    // 21: gta.internalipc.GetCaptureStatusResponse
-	(*ListInterfacesRequest)(nil),       // 22: gta.internalipc.ListInterfacesRequest
-	(*ListInterfacesResponse)(nil),      // 23: gta.internalipc.ListInterfacesResponse
-	(*ListCaptureSessionsRequest)(nil),  // 24: gta.internalipc.ListCaptureSessionsRequest
-	(*ListCaptureSessionsResponse)(nil), // 25: gta.internalipc.ListCaptureSessionsResponse
-	(*CaptureSessionSummary)(nil),       // 26: gta.internalipc.CaptureSessionSummary
-	(*ListPluginsRequest)(nil),          // 27: gta.internalipc.ListPluginsRequest
-	(*PluginSummary)(nil),               // 28: gta.internalipc.PluginSummary
-	(*ListPluginsResponse)(nil),         // 29: gta.internalipc.ListPluginsResponse
-	(*GetPluginManifestRequest)(nil),    // 30: gta.internalipc.GetPluginManifestRequest
-	(*GetPluginManifestResponse)(nil),   // 31: gta.internalipc.GetPluginManifestResponse
-	(*DeregisterPluginRequest)(nil),     // 32: gta.internalipc.DeregisterPluginRequest
-	(*DeregisterPluginResponse)(nil),    // 33: gta.internalipc.DeregisterPluginResponse
-	(*SetSessionPluginRequest)(nil),     // 34: gta.internalipc.SetSessionPluginRequest
-	(*SetSessionPluginResponse)(nil),    // 35: gta.internalipc.SetSessionPluginResponse
-	(*WatchPluginsRequest)(nil),         // 36: gta.internalipc.WatchPluginsRequest
-	(*PluginEvent)(nil),                 // 37: gta.internalipc.PluginEvent
-	(*GetRegistryAddrRequest)(nil),      // 38: gta.internalipc.GetRegistryAddrRequest
-	(*GetRegistryAddrResponse)(nil),     // 39: gta.internalipc.GetRegistryAddrResponse
-	(*CreateProxyLeaseRequest)(nil),     // 40: gta.internalipc.CreateProxyLeaseRequest
-	(*ProxyLeaseState)(nil),             // 41: gta.internalipc.ProxyLeaseState
-	(*CreateProxyLeaseResponse)(nil),    // 42: gta.internalipc.CreateProxyLeaseResponse
-	(*ListProxyLeasesRequest)(nil),      // 43: gta.internalipc.ListProxyLeasesRequest
-	(*ListProxyLeasesResponse)(nil),     // 44: gta.internalipc.ListProxyLeasesResponse
-	(*GetProxyLeaseRequest)(nil),        // 45: gta.internalipc.GetProxyLeaseRequest
-	(*GetProxyLeaseResponse)(nil),       // 46: gta.internalipc.GetProxyLeaseResponse
-	(*ReleaseProxyLeaseRequest)(nil),    // 47: gta.internalipc.ReleaseProxyLeaseRequest
-	(*ReleaseProxyLeaseResponse)(nil),   // 48: gta.internalipc.ReleaseProxyLeaseResponse
-	(*StartLeaseCaptureRequest)(nil),    // 49: gta.internalipc.StartLeaseCaptureRequest
-	(*StartLeaseCaptureResponse)(nil),   // 50: gta.internalipc.StartLeaseCaptureResponse
-	(*StopLeaseCaptureRequest)(nil),     // 51: gta.internalipc.StopLeaseCaptureRequest
-	(*StopLeaseCaptureResponse)(nil),    // 52: gta.internalipc.StopLeaseCaptureResponse
-	(*ProbeInfo)(nil),                   // 53: gta.internalipc.ProbeInfo
-	(*ListProbesRequest)(nil),           // 54: gta.internalipc.ListProbesRequest
-	(*ListProbesResponse)(nil),          // 55: gta.internalipc.ListProbesResponse
-	(*GetProbeRequest)(nil),             // 56: gta.internalipc.GetProbeRequest
-	(*GetProbeResponse)(nil),            // 57: gta.internalipc.GetProbeResponse
-	(*ProbeStartCaptureRequest)(nil),    // 58: gta.internalipc.ProbeStartCaptureRequest
-	(*ProbeStartCaptureResponse)(nil),   // 59: gta.internalipc.ProbeStartCaptureResponse
-	(*ProbeStopCaptureRequest)(nil),     // 60: gta.internalipc.ProbeStopCaptureRequest
-	(*ProbeStopCaptureResponse)(nil),    // 61: gta.internalipc.ProbeStopCaptureResponse
-	(*ProbeUpdateFilterRequest)(nil),    // 62: gta.internalipc.ProbeUpdateFilterRequest
-	(*ProbeUpdateFilterResponse)(nil),   // 63: gta.internalipc.ProbeUpdateFilterResponse
-	(*ProbeRetryCaptureRequest)(nil),    // 64: gta.internalipc.ProbeRetryCaptureRequest
-	(*ProbeRetryCaptureResponse)(nil),   // 65: gta.internalipc.ProbeRetryCaptureResponse
-	(*ProbeRenameRequest)(nil),          // 66: gta.internalipc.ProbeRenameRequest
-	(*ProbeRenameResponse)(nil),         // 67: gta.internalipc.ProbeRenameResponse
-	(*ProbeRevokeRequest)(nil),          // 68: gta.internalipc.ProbeRevokeRequest
-	(*ProbeRevokeResponse)(nil),         // 69: gta.internalipc.ProbeRevokeResponse
-	(*ProbeArchiveSegmentMeta)(nil),     // 70: gta.internalipc.ProbeArchiveSegmentMeta
-	(*ProbeListArchiveRequest)(nil),     // 71: gta.internalipc.ProbeListArchiveRequest
-	(*ProbeListArchiveResponse)(nil),    // 72: gta.internalipc.ProbeListArchiveResponse
-	(*ProbeImportArchiveRequest)(nil),   // 73: gta.internalipc.ProbeImportArchiveRequest
-	(*ProbeImportArchiveResponse)(nil),  // 74: gta.internalipc.ProbeImportArchiveResponse
-	nil,                                 // 75: gta.internalipc.TestPluginResponse.TypeHistogramEntry
-	nil,                                 // 76: gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	nil,                                 // 77: gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	(*DecodeRawPacketsRequest)(nil),     // 0: gametrace.internalipc.DecodeRawPacketsRequest
+	(*DecodeRawPacketsResponse)(nil),    // 1: gametrace.internalipc.DecodeRawPacketsResponse
+	(*TestPluginRequest)(nil),           // 2: gametrace.internalipc.TestPluginRequest
+	(*TestEventLite)(nil),               // 3: gametrace.internalipc.TestEventLite
+	(*TestErrorLite)(nil),               // 4: gametrace.internalipc.TestErrorLite
+	(*TestPluginResponse)(nil),          // 5: gametrace.internalipc.TestPluginResponse
+	(*VerifyRequest)(nil),               // 6: gametrace.internalipc.VerifyRequest
+	(*VerifyViolation)(nil),             // 7: gametrace.internalipc.VerifyViolation
+	(*VerifyQuality)(nil),               // 8: gametrace.internalipc.VerifyQuality
+	(*VerifyResponse)(nil),              // 9: gametrace.internalipc.VerifyResponse
+	(*SampleBytesRequest)(nil),          // 10: gametrace.internalipc.SampleBytesRequest
+	(*SampledPacket)(nil),               // 11: gametrace.internalipc.SampledPacket
+	(*SampleBytesResponse)(nil),         // 12: gametrace.internalipc.SampleBytesResponse
+	(*PcapLiveConfig)(nil),              // 13: gametrace.internalipc.PcapLiveConfig
+	(*PcapFileConfig)(nil),              // 14: gametrace.internalipc.PcapFileConfig
+	(*MobileSourceConfig)(nil),          // 15: gametrace.internalipc.MobileSourceConfig
+	(*StartCaptureRequest)(nil),         // 16: gametrace.internalipc.StartCaptureRequest
+	(*StartCaptureResponse)(nil),        // 17: gametrace.internalipc.StartCaptureResponse
+	(*StopCaptureRequest)(nil),          // 18: gametrace.internalipc.StopCaptureRequest
+	(*StopCaptureResponse)(nil),         // 19: gametrace.internalipc.StopCaptureResponse
+	(*GetCaptureStatusRequest)(nil),     // 20: gametrace.internalipc.GetCaptureStatusRequest
+	(*GetCaptureStatusResponse)(nil),    // 21: gametrace.internalipc.GetCaptureStatusResponse
+	(*ListInterfacesRequest)(nil),       // 22: gametrace.internalipc.ListInterfacesRequest
+	(*ListInterfacesResponse)(nil),      // 23: gametrace.internalipc.ListInterfacesResponse
+	(*ListCaptureSessionsRequest)(nil),  // 24: gametrace.internalipc.ListCaptureSessionsRequest
+	(*ListCaptureSessionsResponse)(nil), // 25: gametrace.internalipc.ListCaptureSessionsResponse
+	(*CaptureSessionSummary)(nil),       // 26: gametrace.internalipc.CaptureSessionSummary
+	(*ListPluginsRequest)(nil),          // 27: gametrace.internalipc.ListPluginsRequest
+	(*PluginSummary)(nil),               // 28: gametrace.internalipc.PluginSummary
+	(*ListPluginsResponse)(nil),         // 29: gametrace.internalipc.ListPluginsResponse
+	(*GetPluginManifestRequest)(nil),    // 30: gametrace.internalipc.GetPluginManifestRequest
+	(*GetPluginManifestResponse)(nil),   // 31: gametrace.internalipc.GetPluginManifestResponse
+	(*DeregisterPluginRequest)(nil),     // 32: gametrace.internalipc.DeregisterPluginRequest
+	(*DeregisterPluginResponse)(nil),    // 33: gametrace.internalipc.DeregisterPluginResponse
+	(*SetSessionPluginRequest)(nil),     // 34: gametrace.internalipc.SetSessionPluginRequest
+	(*SetSessionPluginResponse)(nil),    // 35: gametrace.internalipc.SetSessionPluginResponse
+	(*WatchPluginsRequest)(nil),         // 36: gametrace.internalipc.WatchPluginsRequest
+	(*PluginEvent)(nil),                 // 37: gametrace.internalipc.PluginEvent
+	(*GetRegistryAddrRequest)(nil),      // 38: gametrace.internalipc.GetRegistryAddrRequest
+	(*GetRegistryAddrResponse)(nil),     // 39: gametrace.internalipc.GetRegistryAddrResponse
+	(*CreateProxyLeaseRequest)(nil),     // 40: gametrace.internalipc.CreateProxyLeaseRequest
+	(*ProxyLeaseState)(nil),             // 41: gametrace.internalipc.ProxyLeaseState
+	(*CreateProxyLeaseResponse)(nil),    // 42: gametrace.internalipc.CreateProxyLeaseResponse
+	(*ListProxyLeasesRequest)(nil),      // 43: gametrace.internalipc.ListProxyLeasesRequest
+	(*ListProxyLeasesResponse)(nil),     // 44: gametrace.internalipc.ListProxyLeasesResponse
+	(*GetProxyLeaseRequest)(nil),        // 45: gametrace.internalipc.GetProxyLeaseRequest
+	(*GetProxyLeaseResponse)(nil),       // 46: gametrace.internalipc.GetProxyLeaseResponse
+	(*ReleaseProxyLeaseRequest)(nil),    // 47: gametrace.internalipc.ReleaseProxyLeaseRequest
+	(*ReleaseProxyLeaseResponse)(nil),   // 48: gametrace.internalipc.ReleaseProxyLeaseResponse
+	(*StartLeaseCaptureRequest)(nil),    // 49: gametrace.internalipc.StartLeaseCaptureRequest
+	(*StartLeaseCaptureResponse)(nil),   // 50: gametrace.internalipc.StartLeaseCaptureResponse
+	(*StopLeaseCaptureRequest)(nil),     // 51: gametrace.internalipc.StopLeaseCaptureRequest
+	(*StopLeaseCaptureResponse)(nil),    // 52: gametrace.internalipc.StopLeaseCaptureResponse
+	(*ProbeInfo)(nil),                   // 53: gametrace.internalipc.ProbeInfo
+	(*ListProbesRequest)(nil),           // 54: gametrace.internalipc.ListProbesRequest
+	(*ListProbesResponse)(nil),          // 55: gametrace.internalipc.ListProbesResponse
+	(*GetProbeRequest)(nil),             // 56: gametrace.internalipc.GetProbeRequest
+	(*GetProbeResponse)(nil),            // 57: gametrace.internalipc.GetProbeResponse
+	(*ProbeStartCaptureRequest)(nil),    // 58: gametrace.internalipc.ProbeStartCaptureRequest
+	(*ProbeStartCaptureResponse)(nil),   // 59: gametrace.internalipc.ProbeStartCaptureResponse
+	(*ProbeStopCaptureRequest)(nil),     // 60: gametrace.internalipc.ProbeStopCaptureRequest
+	(*ProbeStopCaptureResponse)(nil),    // 61: gametrace.internalipc.ProbeStopCaptureResponse
+	(*ProbeUpdateFilterRequest)(nil),    // 62: gametrace.internalipc.ProbeUpdateFilterRequest
+	(*ProbeUpdateFilterResponse)(nil),   // 63: gametrace.internalipc.ProbeUpdateFilterResponse
+	(*ProbeRetryCaptureRequest)(nil),    // 64: gametrace.internalipc.ProbeRetryCaptureRequest
+	(*ProbeRetryCaptureResponse)(nil),   // 65: gametrace.internalipc.ProbeRetryCaptureResponse
+	(*ProbeRenameRequest)(nil),          // 66: gametrace.internalipc.ProbeRenameRequest
+	(*ProbeRenameResponse)(nil),         // 67: gametrace.internalipc.ProbeRenameResponse
+	(*ProbeRevokeRequest)(nil),          // 68: gametrace.internalipc.ProbeRevokeRequest
+	(*ProbeRevokeResponse)(nil),         // 69: gametrace.internalipc.ProbeRevokeResponse
+	(*ProbeArchiveSegmentMeta)(nil),     // 70: gametrace.internalipc.ProbeArchiveSegmentMeta
+	(*ProbeListArchiveRequest)(nil),     // 71: gametrace.internalipc.ProbeListArchiveRequest
+	(*ProbeListArchiveResponse)(nil),    // 72: gametrace.internalipc.ProbeListArchiveResponse
+	(*ProbeImportArchiveRequest)(nil),   // 73: gametrace.internalipc.ProbeImportArchiveRequest
+	(*ProbeImportArchiveResponse)(nil),  // 74: gametrace.internalipc.ProbeImportArchiveResponse
+	nil,                                 // 75: gametrace.internalipc.TestPluginResponse.TypeHistogramEntry
+	nil,                                 // 76: gametrace.internalipc.SampleBytesResponse.LengthHistogramEntry
+	nil,                                 // 77: gametrace.internalipc.SampleBytesResponse.FirstByteDistributionEntry
 }
 var file_pkg_internalipc_proto_internal_proto_depIdxs = []int32{
-	75, // 0: gta.internalipc.TestPluginResponse.type_histogram:type_name -> gta.internalipc.TestPluginResponse.TypeHistogramEntry
-	3,  // 1: gta.internalipc.TestPluginResponse.sample_events:type_name -> gta.internalipc.TestEventLite
-	4,  // 2: gta.internalipc.TestPluginResponse.error_samples:type_name -> gta.internalipc.TestErrorLite
-	7,  // 3: gta.internalipc.VerifyResponse.violations:type_name -> gta.internalipc.VerifyViolation
-	8,  // 4: gta.internalipc.VerifyResponse.quality:type_name -> gta.internalipc.VerifyQuality
-	11, // 5: gta.internalipc.SampleBytesResponse.packets:type_name -> gta.internalipc.SampledPacket
-	76, // 6: gta.internalipc.SampleBytesResponse.length_histogram:type_name -> gta.internalipc.SampleBytesResponse.LengthHistogramEntry
-	77, // 7: gta.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gta.internalipc.SampleBytesResponse.FirstByteDistributionEntry
-	13, // 8: gta.internalipc.StartCaptureRequest.live:type_name -> gta.internalipc.PcapLiveConfig
-	14, // 9: gta.internalipc.StartCaptureRequest.file:type_name -> gta.internalipc.PcapFileConfig
-	15, // 10: gta.internalipc.StartCaptureRequest.mobile:type_name -> gta.internalipc.MobileSourceConfig
-	26, // 11: gta.internalipc.ListCaptureSessionsResponse.sessions:type_name -> gta.internalipc.CaptureSessionSummary
-	28, // 12: gta.internalipc.ListPluginsResponse.plugins:type_name -> gta.internalipc.PluginSummary
-	41, // 13: gta.internalipc.CreateProxyLeaseResponse.lease:type_name -> gta.internalipc.ProxyLeaseState
-	41, // 14: gta.internalipc.ListProxyLeasesResponse.leases:type_name -> gta.internalipc.ProxyLeaseState
-	41, // 15: gta.internalipc.GetProxyLeaseResponse.lease:type_name -> gta.internalipc.ProxyLeaseState
-	41, // 16: gta.internalipc.StartLeaseCaptureResponse.lease:type_name -> gta.internalipc.ProxyLeaseState
-	53, // 17: gta.internalipc.ListProbesResponse.probes:type_name -> gta.internalipc.ProbeInfo
-	53, // 18: gta.internalipc.GetProbeResponse.probe:type_name -> gta.internalipc.ProbeInfo
-	70, // 19: gta.internalipc.ProbeListArchiveResponse.segments:type_name -> gta.internalipc.ProbeArchiveSegmentMeta
-	16, // 20: gta.internalipc.CaptureControl.StartCapture:input_type -> gta.internalipc.StartCaptureRequest
-	18, // 21: gta.internalipc.CaptureControl.StopCapture:input_type -> gta.internalipc.StopCaptureRequest
-	20, // 22: gta.internalipc.CaptureControl.GetCaptureStatus:input_type -> gta.internalipc.GetCaptureStatusRequest
-	24, // 23: gta.internalipc.CaptureControl.ListCaptureSessions:input_type -> gta.internalipc.ListCaptureSessionsRequest
-	22, // 24: gta.internalipc.CaptureControl.ListInterfaces:input_type -> gta.internalipc.ListInterfacesRequest
-	0,  // 25: gta.internalipc.CaptureControl.DecodeRawPackets:input_type -> gta.internalipc.DecodeRawPacketsRequest
-	27, // 26: gta.internalipc.CaptureControl.ListPlugins:input_type -> gta.internalipc.ListPluginsRequest
-	30, // 27: gta.internalipc.CaptureControl.GetPluginManifest:input_type -> gta.internalipc.GetPluginManifestRequest
-	32, // 28: gta.internalipc.CaptureControl.DeregisterPlugin:input_type -> gta.internalipc.DeregisterPluginRequest
-	34, // 29: gta.internalipc.CaptureControl.SetSessionPlugin:input_type -> gta.internalipc.SetSessionPluginRequest
-	36, // 30: gta.internalipc.CaptureControl.WatchPlugins:input_type -> gta.internalipc.WatchPluginsRequest
-	2,  // 31: gta.internalipc.CaptureControl.TestPlugin:input_type -> gta.internalipc.TestPluginRequest
-	6,  // 32: gta.internalipc.CaptureControl.Verify:input_type -> gta.internalipc.VerifyRequest
-	10, // 33: gta.internalipc.CaptureControl.SampleBytes:input_type -> gta.internalipc.SampleBytesRequest
-	38, // 34: gta.internalipc.CaptureControl.GetRegistryAddr:input_type -> gta.internalipc.GetRegistryAddrRequest
-	40, // 35: gta.internalipc.CaptureControl.CreateProxyLease:input_type -> gta.internalipc.CreateProxyLeaseRequest
-	43, // 36: gta.internalipc.CaptureControl.ListProxyLeases:input_type -> gta.internalipc.ListProxyLeasesRequest
-	45, // 37: gta.internalipc.CaptureControl.GetProxyLease:input_type -> gta.internalipc.GetProxyLeaseRequest
-	47, // 38: gta.internalipc.CaptureControl.ReleaseProxyLease:input_type -> gta.internalipc.ReleaseProxyLeaseRequest
-	54, // 39: gta.internalipc.CaptureControl.ListProbes:input_type -> gta.internalipc.ListProbesRequest
-	56, // 40: gta.internalipc.CaptureControl.GetProbe:input_type -> gta.internalipc.GetProbeRequest
-	58, // 41: gta.internalipc.CaptureControl.ProbeStartCapture:input_type -> gta.internalipc.ProbeStartCaptureRequest
-	60, // 42: gta.internalipc.CaptureControl.ProbeStopCapture:input_type -> gta.internalipc.ProbeStopCaptureRequest
-	62, // 43: gta.internalipc.CaptureControl.ProbeUpdateFilter:input_type -> gta.internalipc.ProbeUpdateFilterRequest
-	64, // 44: gta.internalipc.CaptureControl.ProbeRetryCapture:input_type -> gta.internalipc.ProbeRetryCaptureRequest
-	66, // 45: gta.internalipc.CaptureControl.ProbeRename:input_type -> gta.internalipc.ProbeRenameRequest
-	68, // 46: gta.internalipc.CaptureControl.ProbeRevoke:input_type -> gta.internalipc.ProbeRevokeRequest
-	71, // 47: gta.internalipc.CaptureControl.ProbeListArchive:input_type -> gta.internalipc.ProbeListArchiveRequest
-	73, // 48: gta.internalipc.CaptureControl.ProbeImportArchive:input_type -> gta.internalipc.ProbeImportArchiveRequest
-	49, // 49: gta.internalipc.CaptureControl.StartLeaseCapture:input_type -> gta.internalipc.StartLeaseCaptureRequest
-	51, // 50: gta.internalipc.CaptureControl.StopLeaseCapture:input_type -> gta.internalipc.StopLeaseCaptureRequest
-	17, // 51: gta.internalipc.CaptureControl.StartCapture:output_type -> gta.internalipc.StartCaptureResponse
-	19, // 52: gta.internalipc.CaptureControl.StopCapture:output_type -> gta.internalipc.StopCaptureResponse
-	21, // 53: gta.internalipc.CaptureControl.GetCaptureStatus:output_type -> gta.internalipc.GetCaptureStatusResponse
-	25, // 54: gta.internalipc.CaptureControl.ListCaptureSessions:output_type -> gta.internalipc.ListCaptureSessionsResponse
-	23, // 55: gta.internalipc.CaptureControl.ListInterfaces:output_type -> gta.internalipc.ListInterfacesResponse
-	1,  // 56: gta.internalipc.CaptureControl.DecodeRawPackets:output_type -> gta.internalipc.DecodeRawPacketsResponse
-	29, // 57: gta.internalipc.CaptureControl.ListPlugins:output_type -> gta.internalipc.ListPluginsResponse
-	31, // 58: gta.internalipc.CaptureControl.GetPluginManifest:output_type -> gta.internalipc.GetPluginManifestResponse
-	33, // 59: gta.internalipc.CaptureControl.DeregisterPlugin:output_type -> gta.internalipc.DeregisterPluginResponse
-	35, // 60: gta.internalipc.CaptureControl.SetSessionPlugin:output_type -> gta.internalipc.SetSessionPluginResponse
-	37, // 61: gta.internalipc.CaptureControl.WatchPlugins:output_type -> gta.internalipc.PluginEvent
-	5,  // 62: gta.internalipc.CaptureControl.TestPlugin:output_type -> gta.internalipc.TestPluginResponse
-	9,  // 63: gta.internalipc.CaptureControl.Verify:output_type -> gta.internalipc.VerifyResponse
-	12, // 64: gta.internalipc.CaptureControl.SampleBytes:output_type -> gta.internalipc.SampleBytesResponse
-	39, // 65: gta.internalipc.CaptureControl.GetRegistryAddr:output_type -> gta.internalipc.GetRegistryAddrResponse
-	42, // 66: gta.internalipc.CaptureControl.CreateProxyLease:output_type -> gta.internalipc.CreateProxyLeaseResponse
-	44, // 67: gta.internalipc.CaptureControl.ListProxyLeases:output_type -> gta.internalipc.ListProxyLeasesResponse
-	46, // 68: gta.internalipc.CaptureControl.GetProxyLease:output_type -> gta.internalipc.GetProxyLeaseResponse
-	48, // 69: gta.internalipc.CaptureControl.ReleaseProxyLease:output_type -> gta.internalipc.ReleaseProxyLeaseResponse
-	55, // 70: gta.internalipc.CaptureControl.ListProbes:output_type -> gta.internalipc.ListProbesResponse
-	57, // 71: gta.internalipc.CaptureControl.GetProbe:output_type -> gta.internalipc.GetProbeResponse
-	59, // 72: gta.internalipc.CaptureControl.ProbeStartCapture:output_type -> gta.internalipc.ProbeStartCaptureResponse
-	61, // 73: gta.internalipc.CaptureControl.ProbeStopCapture:output_type -> gta.internalipc.ProbeStopCaptureResponse
-	63, // 74: gta.internalipc.CaptureControl.ProbeUpdateFilter:output_type -> gta.internalipc.ProbeUpdateFilterResponse
-	65, // 75: gta.internalipc.CaptureControl.ProbeRetryCapture:output_type -> gta.internalipc.ProbeRetryCaptureResponse
-	67, // 76: gta.internalipc.CaptureControl.ProbeRename:output_type -> gta.internalipc.ProbeRenameResponse
-	69, // 77: gta.internalipc.CaptureControl.ProbeRevoke:output_type -> gta.internalipc.ProbeRevokeResponse
-	72, // 78: gta.internalipc.CaptureControl.ProbeListArchive:output_type -> gta.internalipc.ProbeListArchiveResponse
-	74, // 79: gta.internalipc.CaptureControl.ProbeImportArchive:output_type -> gta.internalipc.ProbeImportArchiveResponse
-	50, // 80: gta.internalipc.CaptureControl.StartLeaseCapture:output_type -> gta.internalipc.StartLeaseCaptureResponse
-	52, // 81: gta.internalipc.CaptureControl.StopLeaseCapture:output_type -> gta.internalipc.StopLeaseCaptureResponse
+	75, // 0: gametrace.internalipc.TestPluginResponse.type_histogram:type_name -> gametrace.internalipc.TestPluginResponse.TypeHistogramEntry
+	3,  // 1: gametrace.internalipc.TestPluginResponse.sample_events:type_name -> gametrace.internalipc.TestEventLite
+	4,  // 2: gametrace.internalipc.TestPluginResponse.error_samples:type_name -> gametrace.internalipc.TestErrorLite
+	7,  // 3: gametrace.internalipc.VerifyResponse.violations:type_name -> gametrace.internalipc.VerifyViolation
+	8,  // 4: gametrace.internalipc.VerifyResponse.quality:type_name -> gametrace.internalipc.VerifyQuality
+	11, // 5: gametrace.internalipc.SampleBytesResponse.packets:type_name -> gametrace.internalipc.SampledPacket
+	76, // 6: gametrace.internalipc.SampleBytesResponse.length_histogram:type_name -> gametrace.internalipc.SampleBytesResponse.LengthHistogramEntry
+	77, // 7: gametrace.internalipc.SampleBytesResponse.first_byte_distribution:type_name -> gametrace.internalipc.SampleBytesResponse.FirstByteDistributionEntry
+	13, // 8: gametrace.internalipc.StartCaptureRequest.live:type_name -> gametrace.internalipc.PcapLiveConfig
+	14, // 9: gametrace.internalipc.StartCaptureRequest.file:type_name -> gametrace.internalipc.PcapFileConfig
+	15, // 10: gametrace.internalipc.StartCaptureRequest.mobile:type_name -> gametrace.internalipc.MobileSourceConfig
+	26, // 11: gametrace.internalipc.ListCaptureSessionsResponse.sessions:type_name -> gametrace.internalipc.CaptureSessionSummary
+	28, // 12: gametrace.internalipc.ListPluginsResponse.plugins:type_name -> gametrace.internalipc.PluginSummary
+	41, // 13: gametrace.internalipc.CreateProxyLeaseResponse.lease:type_name -> gametrace.internalipc.ProxyLeaseState
+	41, // 14: gametrace.internalipc.ListProxyLeasesResponse.leases:type_name -> gametrace.internalipc.ProxyLeaseState
+	41, // 15: gametrace.internalipc.GetProxyLeaseResponse.lease:type_name -> gametrace.internalipc.ProxyLeaseState
+	41, // 16: gametrace.internalipc.StartLeaseCaptureResponse.lease:type_name -> gametrace.internalipc.ProxyLeaseState
+	53, // 17: gametrace.internalipc.ListProbesResponse.probes:type_name -> gametrace.internalipc.ProbeInfo
+	53, // 18: gametrace.internalipc.GetProbeResponse.probe:type_name -> gametrace.internalipc.ProbeInfo
+	70, // 19: gametrace.internalipc.ProbeListArchiveResponse.segments:type_name -> gametrace.internalipc.ProbeArchiveSegmentMeta
+	16, // 20: gametrace.internalipc.CaptureControl.StartCapture:input_type -> gametrace.internalipc.StartCaptureRequest
+	18, // 21: gametrace.internalipc.CaptureControl.StopCapture:input_type -> gametrace.internalipc.StopCaptureRequest
+	20, // 22: gametrace.internalipc.CaptureControl.GetCaptureStatus:input_type -> gametrace.internalipc.GetCaptureStatusRequest
+	24, // 23: gametrace.internalipc.CaptureControl.ListCaptureSessions:input_type -> gametrace.internalipc.ListCaptureSessionsRequest
+	22, // 24: gametrace.internalipc.CaptureControl.ListInterfaces:input_type -> gametrace.internalipc.ListInterfacesRequest
+	0,  // 25: gametrace.internalipc.CaptureControl.DecodeRawPackets:input_type -> gametrace.internalipc.DecodeRawPacketsRequest
+	27, // 26: gametrace.internalipc.CaptureControl.ListPlugins:input_type -> gametrace.internalipc.ListPluginsRequest
+	30, // 27: gametrace.internalipc.CaptureControl.GetPluginManifest:input_type -> gametrace.internalipc.GetPluginManifestRequest
+	32, // 28: gametrace.internalipc.CaptureControl.DeregisterPlugin:input_type -> gametrace.internalipc.DeregisterPluginRequest
+	34, // 29: gametrace.internalipc.CaptureControl.SetSessionPlugin:input_type -> gametrace.internalipc.SetSessionPluginRequest
+	36, // 30: gametrace.internalipc.CaptureControl.WatchPlugins:input_type -> gametrace.internalipc.WatchPluginsRequest
+	2,  // 31: gametrace.internalipc.CaptureControl.TestPlugin:input_type -> gametrace.internalipc.TestPluginRequest
+	6,  // 32: gametrace.internalipc.CaptureControl.Verify:input_type -> gametrace.internalipc.VerifyRequest
+	10, // 33: gametrace.internalipc.CaptureControl.SampleBytes:input_type -> gametrace.internalipc.SampleBytesRequest
+	38, // 34: gametrace.internalipc.CaptureControl.GetRegistryAddr:input_type -> gametrace.internalipc.GetRegistryAddrRequest
+	40, // 35: gametrace.internalipc.CaptureControl.CreateProxyLease:input_type -> gametrace.internalipc.CreateProxyLeaseRequest
+	43, // 36: gametrace.internalipc.CaptureControl.ListProxyLeases:input_type -> gametrace.internalipc.ListProxyLeasesRequest
+	45, // 37: gametrace.internalipc.CaptureControl.GetProxyLease:input_type -> gametrace.internalipc.GetProxyLeaseRequest
+	47, // 38: gametrace.internalipc.CaptureControl.ReleaseProxyLease:input_type -> gametrace.internalipc.ReleaseProxyLeaseRequest
+	54, // 39: gametrace.internalipc.CaptureControl.ListProbes:input_type -> gametrace.internalipc.ListProbesRequest
+	56, // 40: gametrace.internalipc.CaptureControl.GetProbe:input_type -> gametrace.internalipc.GetProbeRequest
+	58, // 41: gametrace.internalipc.CaptureControl.ProbeStartCapture:input_type -> gametrace.internalipc.ProbeStartCaptureRequest
+	60, // 42: gametrace.internalipc.CaptureControl.ProbeStopCapture:input_type -> gametrace.internalipc.ProbeStopCaptureRequest
+	62, // 43: gametrace.internalipc.CaptureControl.ProbeUpdateFilter:input_type -> gametrace.internalipc.ProbeUpdateFilterRequest
+	64, // 44: gametrace.internalipc.CaptureControl.ProbeRetryCapture:input_type -> gametrace.internalipc.ProbeRetryCaptureRequest
+	66, // 45: gametrace.internalipc.CaptureControl.ProbeRename:input_type -> gametrace.internalipc.ProbeRenameRequest
+	68, // 46: gametrace.internalipc.CaptureControl.ProbeRevoke:input_type -> gametrace.internalipc.ProbeRevokeRequest
+	71, // 47: gametrace.internalipc.CaptureControl.ProbeListArchive:input_type -> gametrace.internalipc.ProbeListArchiveRequest
+	73, // 48: gametrace.internalipc.CaptureControl.ProbeImportArchive:input_type -> gametrace.internalipc.ProbeImportArchiveRequest
+	49, // 49: gametrace.internalipc.CaptureControl.StartLeaseCapture:input_type -> gametrace.internalipc.StartLeaseCaptureRequest
+	51, // 50: gametrace.internalipc.CaptureControl.StopLeaseCapture:input_type -> gametrace.internalipc.StopLeaseCaptureRequest
+	17, // 51: gametrace.internalipc.CaptureControl.StartCapture:output_type -> gametrace.internalipc.StartCaptureResponse
+	19, // 52: gametrace.internalipc.CaptureControl.StopCapture:output_type -> gametrace.internalipc.StopCaptureResponse
+	21, // 53: gametrace.internalipc.CaptureControl.GetCaptureStatus:output_type -> gametrace.internalipc.GetCaptureStatusResponse
+	25, // 54: gametrace.internalipc.CaptureControl.ListCaptureSessions:output_type -> gametrace.internalipc.ListCaptureSessionsResponse
+	23, // 55: gametrace.internalipc.CaptureControl.ListInterfaces:output_type -> gametrace.internalipc.ListInterfacesResponse
+	1,  // 56: gametrace.internalipc.CaptureControl.DecodeRawPackets:output_type -> gametrace.internalipc.DecodeRawPacketsResponse
+	29, // 57: gametrace.internalipc.CaptureControl.ListPlugins:output_type -> gametrace.internalipc.ListPluginsResponse
+	31, // 58: gametrace.internalipc.CaptureControl.GetPluginManifest:output_type -> gametrace.internalipc.GetPluginManifestResponse
+	33, // 59: gametrace.internalipc.CaptureControl.DeregisterPlugin:output_type -> gametrace.internalipc.DeregisterPluginResponse
+	35, // 60: gametrace.internalipc.CaptureControl.SetSessionPlugin:output_type -> gametrace.internalipc.SetSessionPluginResponse
+	37, // 61: gametrace.internalipc.CaptureControl.WatchPlugins:output_type -> gametrace.internalipc.PluginEvent
+	5,  // 62: gametrace.internalipc.CaptureControl.TestPlugin:output_type -> gametrace.internalipc.TestPluginResponse
+	9,  // 63: gametrace.internalipc.CaptureControl.Verify:output_type -> gametrace.internalipc.VerifyResponse
+	12, // 64: gametrace.internalipc.CaptureControl.SampleBytes:output_type -> gametrace.internalipc.SampleBytesResponse
+	39, // 65: gametrace.internalipc.CaptureControl.GetRegistryAddr:output_type -> gametrace.internalipc.GetRegistryAddrResponse
+	42, // 66: gametrace.internalipc.CaptureControl.CreateProxyLease:output_type -> gametrace.internalipc.CreateProxyLeaseResponse
+	44, // 67: gametrace.internalipc.CaptureControl.ListProxyLeases:output_type -> gametrace.internalipc.ListProxyLeasesResponse
+	46, // 68: gametrace.internalipc.CaptureControl.GetProxyLease:output_type -> gametrace.internalipc.GetProxyLeaseResponse
+	48, // 69: gametrace.internalipc.CaptureControl.ReleaseProxyLease:output_type -> gametrace.internalipc.ReleaseProxyLeaseResponse
+	55, // 70: gametrace.internalipc.CaptureControl.ListProbes:output_type -> gametrace.internalipc.ListProbesResponse
+	57, // 71: gametrace.internalipc.CaptureControl.GetProbe:output_type -> gametrace.internalipc.GetProbeResponse
+	59, // 72: gametrace.internalipc.CaptureControl.ProbeStartCapture:output_type -> gametrace.internalipc.ProbeStartCaptureResponse
+	61, // 73: gametrace.internalipc.CaptureControl.ProbeStopCapture:output_type -> gametrace.internalipc.ProbeStopCaptureResponse
+	63, // 74: gametrace.internalipc.CaptureControl.ProbeUpdateFilter:output_type -> gametrace.internalipc.ProbeUpdateFilterResponse
+	65, // 75: gametrace.internalipc.CaptureControl.ProbeRetryCapture:output_type -> gametrace.internalipc.ProbeRetryCaptureResponse
+	67, // 76: gametrace.internalipc.CaptureControl.ProbeRename:output_type -> gametrace.internalipc.ProbeRenameResponse
+	69, // 77: gametrace.internalipc.CaptureControl.ProbeRevoke:output_type -> gametrace.internalipc.ProbeRevokeResponse
+	72, // 78: gametrace.internalipc.CaptureControl.ProbeListArchive:output_type -> gametrace.internalipc.ProbeListArchiveResponse
+	74, // 79: gametrace.internalipc.CaptureControl.ProbeImportArchive:output_type -> gametrace.internalipc.ProbeImportArchiveResponse
+	50, // 80: gametrace.internalipc.CaptureControl.StartLeaseCapture:output_type -> gametrace.internalipc.StartLeaseCaptureResponse
+	52, // 81: gametrace.internalipc.CaptureControl.StopLeaseCapture:output_type -> gametrace.internalipc.StopLeaseCaptureResponse
 	51, // [51:82] is the sub-list for method output_type
 	20, // [20:51] is the sub-list for method input_type
 	20, // [20:20] is the sub-list for extension type_name

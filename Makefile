@@ -15,8 +15,8 @@ GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 # 注入 pkg/version 的包级变量（见 pkg/version/version.go）。
 LDFLAGS := -s -w \
-	-X gta/pkg/version.Version=$(VERSION) \
-	-X gta/pkg/version.Commit=$(GIT_COMMIT)
+	-X gametrace/pkg/version.Version=$(VERSION) \
+	-X gametrace/pkg/version.Commit=$(GIT_COMMIT)
 
 # ============================================================================
 # 交叉编译矩阵（T14 release 产物）
@@ -24,7 +24,7 @@ LDFLAGS := -s -w \
 # 说明：pcap 采集层是 cgo 依赖（github.com/google/gopacket/pcap），交叉编译
 # 无法携带目标平台的 libpcap，因此 release 矩阵统一 CGO_ENABLED=0，且**不带**
 # -tags pcap：
-#   - cmd/gta-agent 与 cmd/gta-pipeline 的实时抓包（gopacket/pcap、pcaplive）
+#   - cmd/gt-agent 与 cmd/gt-pipeline 的实时抓包（gopacket/pcap、pcaplive）
 #     均按 pcap / !pcap 构建标签门控，无标签构建可编译，运行时给出明确错误；
 #   - pcap 文件源（pcapgo，纯 Go）与 agent 推流（gRPC）不受影响；
 #   - 需要"能本机抓包"的服务端产物用 Docker 镜像（见 Dockerfile，带 libpcap）。
@@ -32,13 +32,13 @@ LDFLAGS := -s -w \
 # 本 target 只用 POSIX sh 语法（$$ 转义 + for/if），无 GNU make 扩展。
 # ============================================================================
 RELEASE_PLATFORMS := windows/amd64 linux/amd64 linux/arm64 darwin/arm64
-RELEASE_CMDS := gta-pipeline gta-mcp gta-agent
+RELEASE_CMDS := gt-pipeline gt-mcp gt-agent
 
 
-# 只生成 gta 自有的进程间控制面 proto。
+# 只生成 gametrace 自有的进程间控制面 proto。
 # 插件线上契约（plugin.proto）已迁入 SDK 仓库，在那边 make proto 生成——
 # 两侧各生成一份会在 protobuf 全局注册表里撞同一个文件路径并 panic。
-# 这里覆盖两个 gta 自有协议：internalipc（抓包控制面）与 plugindev（开发平面
+# 这里覆盖两个 gametrace 自有协议：internalipc（抓包控制面）与 plugindev（开发平面
 # 控制面，P1 平面拆分引入）。
 proto:
 	protoc --go_out=. --go_opt=paths=source_relative \
@@ -58,19 +58,19 @@ test:
 	go test -tags $(TAGS) ./...
 
 build-mcp:
-	go build -tags $(TAGS) -ldflags '$(LDFLAGS)' -o bin/gta-mcp.exe ./cmd/gta-mcp
+	go build -tags $(TAGS) -ldflags '$(LDFLAGS)' -o bin/gt-mcp.exe ./cmd/gt-mcp
 
 build-pipeline:
-	go build -tags $(TAGS) -ldflags '$(LDFLAGS)' -o bin/gta-pipeline.exe ./cmd/gta-pipeline
+	go build -tags $(TAGS) -ldflags '$(LDFLAGS)' -o bin/gt-pipeline.exe ./cmd/gt-pipeline
 
-# Developer Plane 独立二进制。默认由 gta-mcp 内嵌（dialPluginDev 在
-# GTA_PLUGINDEV_ADDR 为空时起进程内实例），只有需要物理隔离开发平面时才用它。
+# Developer Plane 独立二进制。默认由 gt-mcp 内嵌（dialPluginDev 在
+# GT_PLUGINDEV_ADDR 为空时起进程内实例），只有需要物理隔离开发平面时才用它。
 build-plugin-dev:
-	go build -tags $(TAGS) -o bin/gta-plugin-dev.exe ./cmd/gta-plugin-dev
+	go build -tags $(TAGS) -o bin/gt-plugin-dev.exe ./cmd/gt-plugin-dev
 
-# 移动端流量入口（sing-box 侧 → GTA）：TCP 中继 + gRPC 推送连接级数据。
+# 移动端流量入口（sing-box 侧 → GameTrace）：TCP 中继 + gRPC 推送连接级数据。
 build-agent:
-	go build -tags $(TAGS) -o bin/gta-singbox-agent.exe ./cmd/gta-singbox-agent
+	go build -tags $(TAGS) -o bin/gt-singbox-agent.exe ./cmd/gt-singbox-agent
 
 # ============================================================================
 # 多平台下载 agent 预置矩阵（T-Web First） -> build/agents/
@@ -79,7 +79,7 @@ build-agent:
 # （cgo），无法像 release-matrix 那样 CGO_ENABLED=0 纯交叉。这份预置只需
 # 在各自平台/具备交叉 CC 的 runner 上构建一次并随镜像/发布带上：
 #   - windows/amd64、linux/amd64 为 P0 必选；arm64 为 P1 增量；
-#   - 产物是「通用」gta-agent（不带 embedded 标签），下载时由服务端把
+#   - 产物是「通用」gt-agent（不带 embedded 标签），下载时由服务端把
 #     config.embedded.json 作为 sidecar 打进 zip，运行时从 exe 同目录读取；
 #   - 缺平台的产物未提供时，后端 get_agent_download_options 会如实标记
 #     该平台不可下载（不会像旧方案那样回落到服务端本机平台）。
@@ -92,9 +92,9 @@ build-agents:
 	for platform in $(AGENT_PLATFORMS); do \
 		os=$${platform%/*}; arch=$${platform#*/}; \
 		ext=""; if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
-		echo "==> GOOS=$$os GOARCH=$$arch -tags pcap go build ./cmd/gta-agent"; \
+		echo "==> GOOS=$$os GOARCH=$$arch -tags pcap go build ./cmd/gt-agent"; \
 		GOOS=$$os GOARCH=$$arch go build -tags pcap \
-			-o build/agents/gta-agent-$$os-$$arch$$ext ./cmd/gta-agent; \
+			-o build/agents/gt-agent-$$os-$$arch$$ext ./cmd/gt-agent; \
 	done; \
 	ls -la build/agents/
 
@@ -105,33 +105,33 @@ build-examples:
 	go build -tags $(TAGS) -o bin/http-client.exe ./examples/http/client
 
 run-mcp:
-	go run -tags $(TAGS) ./cmd/gta-mcp
+	go run -tags $(TAGS) ./cmd/gt-mcp
 
 run-pipeline:
-	go run -tags $(TAGS) ./cmd/gta-pipeline
+	go run -tags $(TAGS) ./cmd/gt-pipeline
 
 run-plugin-dev:
-	go run -tags $(TAGS) ./cmd/gta-plugin-dev
+	go run -tags $(TAGS) ./cmd/gt-plugin-dev
 
-# 重新生成 README 中的 MCP 工具目录（与 cmd/gta-mcp/main.go 对齐）。
+# 重新生成 README 中的 MCP 工具目录（与 cmd/gt-mcp/main.go 对齐）。
 docs:
 	go run ./scripts/gen_tool_table
 
-# web-build：构建前端并把产物同步进 gta-mcp 的 embed 目录（cmd/gta-mcp/webui/）。
+# web-build：构建前端并把产物同步进 gt-mcp 的 embed 目录（cmd/gt-mcp/webui/）。
 # vite 产物照常出在 web/dist（vite.config.ts 不改，避免 outDir 清空误删 tracked
 # 文件）；这里先清空 webui 旧产物再复制（保留 .gitkeep），重复构建不会积累
-# 陈旧 hash 产物。此后 go build ./cmd/gta-mcp 即内嵌最新前端。
+# 陈旧 hash 产物。此后 go build ./cmd/gt-mcp 即内嵌最新前端。
 # 跑过一次后，未重新 web-build 也不会破坏构建：embed 里的旧产物照常可用。
 web-build:
 	cd web && npm ci && npm run build
-	rm -rf cmd/gta-mcp/webui/assets
-	rm -f cmd/gta-mcp/webui/index.html
-	cp -r web/dist/. cmd/gta-mcp/webui/
+	rm -rf cmd/gt-mcp/webui/assets
+	rm -f cmd/gt-mcp/webui/index.html
+	cp -r web/dist/. cmd/gt-mcp/webui/
 
 # release-matrix：交叉编译全平台 release 产物到 bin/release/（T14）。
 # CI release job 在 tag push（v*）时调用；本地可用 make release-matrix 验证。
 # 版本注入见文件头部说明：make release-matrix VERSION=v0.5.0 GIT_COMMIT=abc
-# 前置依赖 web-build：release 的 gta-mcp 产物内嵌最新前端（需要本机 node）。
+# 前置依赖 web-build：release 的 gt-mcp 产物内嵌最新前端（需要本机 node）。
 release-matrix: web-build
 	set -e; \
 	mkdir -p bin/release; \

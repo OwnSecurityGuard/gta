@@ -1,8 +1,8 @@
-// Package auth 提供 GTA 从「个人单机」走向「团队共享」所需的最小身份机制：
+// Package auth 提供 GameTrace 从「个人单机」走向「团队共享」所需的最小身份机制：
 // 静态 token → owner（用户名）。
 //
 // 设计要点：
-//   - 匿名模式是回归底线。GTA_AUTH_TOKENS 为空时放行所有请求，身份统一为 "local"，
+//   - 匿名模式是回归底线。GT_AUTH_TOKENS 为空时放行所有请求，身份统一为 "local"，
 //     现有单机用法不会因引入鉴权而跑不起来。
 //   - 本包只做「识别身份」，不做授权决策（谁能看到什么），授权留给后续任务按 owner 实现。
 //   - 不做 token 签发/轮换/持久化：团队规模下静态配置足够，复杂的会引入运维成本。
@@ -15,17 +15,17 @@ import (
 	"strings"
 )
 
-// EnvTokens 是 token 表的环境变量名，格式 "alice=gta_xxx,bob=gta_yyy"。
-const EnvTokens = "GTA_AUTH_TOKENS"
+// EnvTokens 是 token 表的环境变量名，格式 "alice=gt_xxx,bob=gt_yyy"。
+const EnvTokens = "GT_AUTH_TOKENS"
 
 // AnonymousOwner 是匿名模式下的统一 owner。
 // 之所以叫 local 而不是 anonymous：它会成为插件命名空间与会话归属的一部分，
 // 单机用户看到 "local/my-plugin" 比 "anonymous/my-plugin" 更符合直觉。
 const AnonymousOwner = "local"
 
-// adminSuffix 是 token 后缀形式的 admin 标记，写作 "alice=gta_xxx:admin"。
+// adminSuffix 是 token 后缀形式的 admin 标记，写作 "alice=gt_xxx:admin"。
 //
-// 选它而不是另开一份 GTA_AUTH_ADMINS 环境变量，是因为：
+// 选它而不是另开一份 GT_AUTH_ADMINS 环境变量，是因为：
 //   - owner 与权限写在一处，不会漏配（漏配 admin 的表现是莫名其妙的 403，极难排障）；
 //   - 团队规模下 admin 只有个位数，再引入一份 env 属于过早设计。
 const adminSuffix = "admin"
@@ -37,7 +37,7 @@ type Principal struct {
 	// Tenant 是调用者所属租户。当前 token 格式不带组织信息，恒为空串
 	//（鉴权层归一为 authz.DefaultTenant）；字段先行，多租户实体后补。
 	Tenant string
-	// ProbeID 是探针长期凭证（gta_prb_*）解析出的探针 id；普通用户 token 为空。
+	// ProbeID 是探针长期凭证（gt_prb_*）解析出的探针 id；普通用户 token 为空。
 	// 探针凭它连接控制通道与推流，服务端据此做 assigned-probe 校验。
 	ProbeID string
 }
@@ -120,7 +120,7 @@ func (r *StaticResolver) Resolve(token string) (*Principal, bool) {
 	return &Principal{Owner: p.Owner, IsAdmin: p.IsAdmin}, true
 }
 
-// LoadFromEnv 从 GTA_AUTH_TOKENS 载入 token 表。
+// LoadFromEnv 从 GT_AUTH_TOKENS 载入 token 表。
 // 变量缺失或为空是合法状态（匿名模式），返回可用的 resolver 而不是错误。
 func LoadFromEnv() (*StaticResolver, error) {
 	r, err := ParseTokens(os.Getenv(EnvTokens))
@@ -177,7 +177,7 @@ func ParseTokens(spec string) (*StaticResolver, error) {
 
 // parseBearer 从 Authorization 的值里取出 token。
 // scheme 大小写不敏感（RFC 7235 规定）。没有 scheme 前缀时按裸 token 处理，
-// 因为命令行里 -H "authorization: gta_xxx" 是很常见的写法，多容忍一种不增加复杂度。
+// 因为命令行里 -H "authorization: gt_xxx" 是很常见的写法，多容忍一种不增加复杂度。
 func parseBearer(value string) (string, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {

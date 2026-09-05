@@ -133,7 +133,7 @@ export function RunsPanel({
   const statusData = status.data as RunStatusResult | undefined;
 
   return (
-    <div className="h-full overflow-auto p-4 gta-scroll space-y-5">
+    <div className="h-full overflow-auto p-4 gt-scroll space-y-5">
       <EmptyState
         icon={<Flag className="h-5 w-5" />}
         title="行为窗口（Runs）"
@@ -224,7 +224,7 @@ export function RunsPanel({
           {status.isLoading ? (
             <Skeleton className="h-24 w-full rounded-lg" />
           ) : statusData ? (
-            <div className="gta-card space-y-1 p-3">
+            <div className="gt-card space-y-1 p-3">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs">{runId}</span>
                 <span className={`rounded-full border px-2 py-0.5 text-[11px] ${statusTone(statusData.status)}`}>
@@ -273,7 +273,7 @@ export function RunsPanel({
               ) : (
                 <ol className="space-y-2">
                   {traceResult.steps.map((s, i) => (
-                    <li key={s.step_id} className="gta-card p-3">
+                    <li key={s.step_id} className="gt-card p-3">
                       <div className="flex items-center gap-2 text-xs">
                         <span className="rounded bg-muted px-1.5 py-0.5 font-mono">#{i + 1}</span>
                         <span className="font-medium">{s.request.name}</span>

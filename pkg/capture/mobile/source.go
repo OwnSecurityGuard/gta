@@ -15,10 +15,10 @@ import (
 
 	"google.golang.org/grpc"
 
-	"gta/pkg/capture"
-	"gta/pkg/capture/internal/base"
-	"gta/pkg/capture/mobile/proto"
-	"gta/pkg/event"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/capture/internal/base"
+	"gametrace/pkg/capture/mobile/proto"
+	"gametrace/pkg/event"
 )
 
 func init() {
@@ -57,7 +57,7 @@ type connState struct {
 
 // mobileSource 是移动代理抓包源：
 //
-//	gta-singbox-agent ── gRPC Push(stream AgentEvent) ──▶ 本 Source
+//	gt-singbox-agent ── gRPC Push(stream AgentEvent) ──▶ 本 Source
 //
 // Source 内部做：
 //  1. 按 conn_id 维护连接元数据；

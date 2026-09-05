@@ -65,12 +65,12 @@ afterEach(() => {
 
 describe("callTool", () => {
   it("有 token 时请求带 Authorization: Bearer", async () => {
-    setToken("gta_aaa");
+    setToken("gt_aaa");
     await mcpClient.callTool("list_all_sessions");
     const header = (fetchCalls[0]!.init.headers as Record<string, string>)[
       "Authorization"
     ];
-    expect(header).toBe("Bearer gta_aaa");
+    expect(header).toBe("Bearer gt_aaa");
   });
 
   it("无 token 时不带 Authorization 头（匿名模式零变化）", async () => {
@@ -91,12 +91,12 @@ describe("callTool", () => {
   });
 
   it("保存新 token 后旧凭证的迟到 401 不再置位横幅", async () => {
-    setToken("gta_old");
+    setToken("gt_old");
     let resolveFetch!: (v: unknown) => void;
     vi.stubGlobal("fetch", (_url: unknown, _init: unknown) =>
       new Promise((resolve) => { resolveFetch = resolve; }));
     const pending = mcpClient.callTool("list_all_sessions");
-    setToken("gta_new"); // 请求在途时用户保存了新 token
+    setToken("gt_new"); // 请求在途时用户保存了新 token
     resolveFetch(jsonResponse({}, 401));
     await expect(pending).rejects.toBeInstanceOf(AuthError);
     expect(getAuthError()).toBe(false);
@@ -104,19 +104,19 @@ describe("callTool", () => {
 
   it("从响应头同步身份回显", async () => {
     vi.stubGlobal("fetch", async () =>
-      rpcOk({ ok: true }, { "X-GTA-Owner": "bob", "X-GTA-Admin": "true" }),
+      rpcOk({ ok: true }, { "X-GT-Owner": "bob", "X-GT-Admin": "true" }),
     );
     await mcpClient.callTool("list_all_sessions");
     expect(getIdentity()).toEqual({ owner: "bob", isAdmin: true });
   });
 
-  it("响应头只有 X-GTA-Owner 无 X-GTA-Admin → isAdmin 为 false", async () => {
-    vi.stubGlobal("fetch", async () => rpcOk({ ok: true }, { "X-GTA-Owner": "bob" }));
+  it("响应头只有 X-GT-Owner 无 X-GT-Admin → isAdmin 为 false", async () => {
+    vi.stubGlobal("fetch", async () => rpcOk({ ok: true }, { "X-GT-Owner": "bob" }));
     await mcpClient.callTool("list_all_sessions");
     expect(getIdentity()).toEqual({ owner: "bob", isAdmin: false });
   });
 
-  it("成功响应无 X-GTA-Owner 时清掉旧身份", async () => {
+  it("成功响应无 X-GT-Owner 时清掉旧身份", async () => {
     setIdentity({ owner: "old", isAdmin: false });
     await mcpClient.callTool("list_all_sessions"); // 默认桩不带任何回显头
     expect(getIdentity()).toBeNull();
@@ -146,12 +146,12 @@ describe("callTool", () => {
 
 describe("initialize", () => {
   it("有 token 时请求带 Authorization: Bearer", async () => {
-    setToken("gta_aaa");
+    setToken("gt_aaa");
     await mcpClient.initialize();
     const header = (fetchCalls[0]!.init.headers as Record<string, string>)[
       "Authorization"
     ];
-    expect(header).toBe("Bearer gta_aaa");
+    expect(header).toBe("Bearer gt_aaa");
   });
 
   it("HTTP 401 抛 AuthError 并置位全局 401 状态", async () => {

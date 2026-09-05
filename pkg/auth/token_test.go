@@ -15,7 +15,7 @@ func TestParseTokens_EmptyMeansAnonymous(t *testing.T) {
 	if r.Required() {
 		t.Fatal("空配置应处于匿名模式，Required() 必须为 false")
 	}
-	for _, tok := range []string{"", "gta_whatever", "Bearer gta_whatever"} {
+	for _, tok := range []string{"", "gt_whatever", "Bearer gt_whatever"} {
 		p, ok := r.Resolve(tok)
 		if !ok {
 			t.Fatalf("匿名模式下任意凭证都应放行，token=%q 被拒", tok)
@@ -29,14 +29,14 @@ func TestParseTokens_EmptyMeansAnonymous(t *testing.T) {
 // TestParseTokens_ResolvesOwner 验证核心能力：token → owner 映射。
 func TestParseTokens_ResolvesOwner(t *testing.T) {
 	t.Parallel()
-	r, err := ParseTokens("alice=gta_aaa,bob=gta_bbb")
+	r, err := ParseTokens("alice=gt_aaa,bob=gt_bbb")
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
 	}
 	if !r.Required() {
 		t.Fatal("配置了 token 后 Required() 必须为 true")
 	}
-	p, ok := r.Resolve("gta_aaa")
+	p, ok := r.Resolve("gt_aaa")
 	if !ok {
 		t.Fatal("正确的 token 应解析成功")
 	}
@@ -46,7 +46,7 @@ func TestParseTokens_ResolvesOwner(t *testing.T) {
 	if p.IsAdmin {
 		t.Fatal("未带 :admin 后缀的 token 不应是 admin")
 	}
-	if p, ok := r.Resolve("gta_bbb"); !ok || p.Owner != "bob" {
+	if p, ok := r.Resolve("gt_bbb"); !ok || p.Owner != "bob" {
 		t.Fatalf("bob 的 token 解析异常: %+v ok=%v", p, ok)
 	}
 }
@@ -54,11 +54,11 @@ func TestParseTokens_ResolvesOwner(t *testing.T) {
 // TestParseTokens_RejectsUnknown 验证错误 token 不会凑巧命中。
 func TestParseTokens_RejectsUnknown(t *testing.T) {
 	t.Parallel()
-	r, err := ParseTokens("alice=gta_aaa")
+	r, err := ParseTokens("alice=gt_aaa")
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
 	}
-	for _, tok := range []string{"", "gta_bbb", "GTA_AAA", "gta_aaa ", "Bearer gta_aaa"} {
+	for _, tok := range []string{"", "gt_bbb", "GT_AAA", "gt_aaa ", "Bearer gt_aaa"} {
 		if _, ok := r.Resolve(tok); ok {
 			t.Fatalf("token %q 不应解析成功", tok)
 		}
@@ -68,11 +68,11 @@ func TestParseTokens_RejectsUnknown(t *testing.T) {
 // TestParseTokens_AdminSuffix 验证 "owner=token:admin" 语法。
 func TestParseTokens_AdminSuffix(t *testing.T) {
 	t.Parallel()
-	r, err := ParseTokens("alice=gta_aaa:admin,bob=gta_bbb")
+	r, err := ParseTokens("alice=gt_aaa:admin,bob=gt_bbb")
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
 	}
-	p, ok := r.Resolve("gta_aaa")
+	p, ok := r.Resolve("gt_aaa")
 	if !ok {
 		t.Fatal("admin 的 token 应解析成功")
 	}
@@ -82,7 +82,7 @@ func TestParseTokens_AdminSuffix(t *testing.T) {
 	if p.Owner != "alice" {
 		t.Fatalf("owner 应为 alice，实际 %q", p.Owner)
 	}
-	if p2, _ := r.Resolve("gta_bbb"); p2.IsAdmin {
+	if p2, _ := r.Resolve("gt_bbb"); p2.IsAdmin {
 		t.Fatal("bob 不应是 admin")
 	}
 }
@@ -96,12 +96,12 @@ func TestParseTokens_InvalidFormats(t *testing.T) {
 		in   string
 	}{
 		{"缺等号", "alice"},
-		{"空 owner", "=gta_aaa"},
+		{"空 owner", "=gt_aaa"},
 		{"空 token", "alice="},
-		{"重复 owner", "alice=gta_aaa,alice=gta_bbb"},
-		{"重复 token", "alice=gta_aaa,bob=gta_aaa"},
-		{"未知的冒号后缀", "alice=gta_aaa:root"},
-		{"空 owner 带 admin", "=gta_aaa:admin"},
+		{"重复 owner", "alice=gt_aaa,alice=gt_bbb"},
+		{"重复 token", "alice=gt_aaa,bob=gt_aaa"},
+		{"未知的冒号后缀", "alice=gt_aaa:root"},
+		{"空 owner 带 admin", "=gt_aaa:admin"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -117,14 +117,14 @@ func TestParseTokens_InvalidFormats(t *testing.T) {
 // TestParseTokens_ToleratesWhitespace 验证配置里的空格不会破坏解析（人工编辑 env 时很常见）。
 func TestParseTokens_ToleratesWhitespace(t *testing.T) {
 	t.Parallel()
-	r, err := ParseTokens(" alice = gta_aaa , bob=gta_bbb ")
+	r, err := ParseTokens(" alice = gt_aaa , bob=gt_bbb ")
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
 	}
-	if p, ok := r.Resolve("gta_aaa"); !ok || p.Owner != "alice" {
+	if p, ok := r.Resolve("gt_aaa"); !ok || p.Owner != "alice" {
 		t.Fatalf("alice 解析异常: %+v ok=%v", p, ok)
 	}
-	if p, ok := r.Resolve("gta_bbb"); !ok || p.Owner != "bob" {
+	if p, ok := r.Resolve("gt_bbb"); !ok || p.Owner != "bob" {
 		t.Fatalf("bob 解析异常: %+v ok=%v", p, ok)
 	}
 }
@@ -157,15 +157,15 @@ func TestLoadFromEnv(t *testing.T) {
 	})
 
 	t.Run("正常解析", func(t *testing.T) {
-		t.Setenv(EnvTokens, "alice=gta_aaa,bob=gta_bbb:admin")
+		t.Setenv(EnvTokens, "alice=gt_aaa,bob=gt_bbb:admin")
 		r, err := LoadFromEnv()
 		if err != nil {
 			t.Fatalf("解析失败: %v", err)
 		}
-		if p, ok := r.Resolve("gta_aaa"); !ok || p.Owner != "alice" || p.IsAdmin {
+		if p, ok := r.Resolve("gt_aaa"); !ok || p.Owner != "alice" || p.IsAdmin {
 			t.Fatalf("alice 解析异常: %+v ok=%v", p, ok)
 		}
-		if p, ok := r.Resolve("gta_bbb"); !ok || p.Owner != "bob" || !p.IsAdmin {
+		if p, ok := r.Resolve("gt_bbb"); !ok || p.Owner != "bob" || !p.IsAdmin {
 			t.Fatalf("bob 解析异常: %+v ok=%v", p, ok)
 		}
 	})

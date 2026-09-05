@@ -10,7 +10,7 @@ import (
 
 // simFramePrefixLen 是模拟游戏协议自身的长度前缀字节数（4 字节大端）。
 // 注意：这只是模拟客户端/服务端的协议行为（真实游戏协议同样带自己的分帧，
-// 由解码插件处理）；GTA 平台对字节流不做任何分帧假设。
+// 由解码插件处理）；GameTrace 平台对字节流不做任何分帧假设。
 const simFramePrefixLen = 4
 
 // WriteFrame 按长度前缀协议写入一帧：4 字节大端长度 + payload。

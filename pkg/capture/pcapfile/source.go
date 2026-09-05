@@ -9,9 +9,9 @@ import (
 	"os"
 	"time"
 
-	"gta/pkg/capture"
-	"gta/pkg/capture/internal/base"
-	"gta/pkg/event"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/capture/internal/base"
+	"gametrace/pkg/event"
 
 	"github.com/google/gopacket/pcapgo"
 )

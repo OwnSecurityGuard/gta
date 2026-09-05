@@ -19,11 +19,11 @@
 - Modify `pkg/store/session_store.go` — `sessions` 表加 `project_id` 列 + 迁移 + CRUD 透传。
 - Modify `pkg/store/eventstore.go` — `SessionMeta` 加 `ProjectID` 字段。
 - Modify `pkg/internalipc/proto/internal.proto` → 再生成 `pkg/internalipc/proto/internal.pb.go` — `StartCaptureRequest` 加 `project_id = 10`。
-- Modify `cmd/gta-pipeline/pipeline_service.go` — `StartSession` 透传 `ProjectID` 到 `SessionMeta`。
-- Redirect `cmd/gta-mcp/project.go` — 从 JSON `projectStore` 改为 SQLite `projectStore`（projects 表 + members/plugins/rules JSON 列）。
-- Modify `cmd/gta-mcp/main.go` — `handleStartCapture` 读 `project_id` 并透传；注册新 project 工具；`mcpCapture.projects` 改为 SQLite 存储。
-- New `cmd/gta-mcp/project_store.go` — SQLite《projects》表定义、迁移、CRUD、成员判定。
-- New test `cmd/gta-mcp/project_store_test.go`、`gta-mcp/project_membership_test.go`。
+- Modify `cmd/gt-pipeline/pipeline_service.go` — `StartSession` 透传 `ProjectID` 到 `SessionMeta`。
+- Redirect `cmd/gt-mcp/project.go` — 从 JSON `projectStore` 改为 SQLite `projectStore`（projects 表 + members/plugins/rules JSON 列）。
+- Modify `cmd/gt-mcp/main.go` — `handleStartCapture` 读 `project_id` 并透传；注册新 project 工具；`mcpCapture.projects` 改为 SQLite 存储。
+- New `cmd/gt-mcp/project_store.go` — SQLite《projects》表定义、迁移、CRUD、成员判定。
+- New test `cmd/gt-mcp/project_store_test.go`、`gt-mcp/project_membership_test.go`。
 
 **前端（web/）**
 - Modify `web/src/types/project.ts` — 扩充 `ProjectInfo`（description/game/members/plugins/rules/created_by/status），新增 `ProjectMember`、`ProjectPlugin`、`ProjectRule`、`ProjectDetail`。
@@ -223,15 +223,15 @@ git commit -m "feat(store): add sessions.project_id column with migration & CRUD
 **Files:**
 - Modify: `pkg/internalipc/proto/internal.proto:210-227`
 - Regenerate: `pkg/internalipc/proto/internal.pb.go`、`pkg/internalipc/proto/internal_grpc.pb.go`
-- Modify: `cmd/gta-pipeline/pipeline_service.go`
-- Modify: `cmd/gta-mcp/main.go` (`handleStartCapture`)
+- Modify: `cmd/gt-pipeline/pipeline_service.go`
+- Modify: `cmd/gt-mcp/main.go` (`handleStartCapture`)
 
 - [ ] **Step 1: proto 加字段**
 
 在 `StartCaptureRequest`（第 226 行 `bool all_owners = 9;` 后）追加：
 
 ```proto
-  // 会话归属的项目（projects.id），可选。gta-mcp 从 HTTP 入参透传。
+  // 会话归属的项目（projects.id），可选。gt-mcp 从 HTTP 入参透传。
   string project_id = 10;
 ```
 
@@ -248,12 +248,12 @@ Expected: 重新生成 `internal.pb.go` 等，`StartCaptureRequest` 暴露 `GetP
 		ProjectID:        req.GetProjectId(),
 ```
 
-Run: `go build ./cmd/gta-pipeline`
+Run: `go build ./cmd/gt-pipeline`
 Expected: 通过（`req.GetProjectId()` 由第 2 步生成）。
 
 - [ ] **Step 4: MCP 透传入参**
 
-在 `cmd/gta-mcp/main.go` `handleStartCapture`（第 460 行）读取可选的 `project_id` 并设置 grpcReq：
+在 `cmd/gt-mcp/main.go` `handleStartCapture`（第 460 行）读取可选的 `project_id` 并设置 grpcReq：
 
 ```go
 	projectID := req.GetString("project_id", "")
@@ -272,7 +272,7 @@ Expected: 全仓编译通过。
 - [ ] **Step 6: Commit**
 
 ```bash
-git add pkg/internalipc/proto/internal.proto pkg/internalipc/proto/internal.pb.go pkg/internalipc/proto/internal_grpc.pb.go cmd/gta-pipeline/pipeline_service.go cmd/gta-mcp/main.go
+git add pkg/internalipc/proto/internal.proto pkg/internalipc/proto/internal.pb.go pkg/internalipc/proto/internal_grpc.pb.go cmd/gt-pipeline/pipeline_service.go cmd/gt-mcp/main.go
 git commit -m "feat: thread project_id through start_capture to session record"
 ```
 
@@ -281,8 +281,8 @@ git commit -m "feat: thread project_id through start_capture to session record"
 ## Task 4: SQLite `projects` 表与项目存储迁移
 
 **Files:**
-- New: `cmd/gta-mcp/project_store.go`
-- New: `cmd/gta-mcp/project_store_test.go`
+- New: `cmd/gt-mcp/project_store.go`
+- New: `cmd/gt-mcp/project_store_test.go`
 
 - [ ] **Step 1: 定义数据结构与表**
 
@@ -544,7 +544,7 @@ func TestProjectMembershipVisibility(t *testing.T) {
 
 - [ ] **Step 4: 运行测试使其失败**
 
-Run: `go test ./cmd/gta-mcp -run TestProjectMembershipVisibility -v`
+Run: `go test ./cmd/gt-mcp -run TestProjectMembershipVisibility -v`
 Expected: 编译失败（`projectStore` 尚无 `Init/ListVisible/CanManage`）或 FAIL。
 
 - [ ] **Step 5: 实现通过测试（补上 `Init/ListVisible/CanManage`，并修正 ListVisible 单一查询）**
@@ -554,7 +554,7 @@ Expected: 编译失败（`projectStore` 尚无 `Init/ListVisible/CanManage`）�
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cmd/gta-mcp/project_store.go cmd/gta-mcp/project_store_test.go
+git add cmd/gt-mcp/project_store.go cmd/gt-mcp/project_store_test.go
 git commit -m "feat(mcp): SQLite project store with membership visibility"
 ```
 
@@ -563,9 +563,9 @@ git commit -m "feat(mcp): SQLite project store with membership visibility"
 ## Task 5: 重写 MCP 项目工具（成员/插件/规则/归属）
 
 **Files:**
-- Modify: `cmd/gta-mcp/project.go`（重写为 SQLite 数据源 + 扩充工具处理）
-- Modify: `cmd/gta-mcp/main.go`（装配 `newProjectStoreDB(controlStore.DB())`、注册新增工具）
-- New: `cmd/gta-mcp/project_membership_test.go`
+- Modify: `cmd/gt-mcp/project.go`（重写为 SQLite 数据源 + 扩充工具处理）
+- Modify: `cmd/gt-mcp/main.go`（装配 `newProjectStoreDB(controlStore.DB())`、注册新增工具）
+- New: `cmd/gt-mcp/project_membership_test.go`
 
 说明：将 `project.go` 中所有 `m.projects` 操作改为走 SQLite projectStore；`ownerScope` 保留。
 
@@ -669,13 +669,13 @@ func (cs *ControlStore) SetSessionProject(ctx context.Context, sessionID, projec
 
 - [ ] **Step 5: 编译 + 全量测试**
 
-Run: `go build ./... && go test ./cmd/gta-mcp ./pkg/store`
+Run: `go build ./... && go test ./cmd/gt-mcp ./pkg/store`
 Expected: 全部通过。
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cmd/gta-mcp/project.go cmd/gta-mcp/project_membership_test.go cmd/gta-mcp/main.go pkg/store/session_store.go
+git add cmd/gt-mcp/project.go cmd/gt-mcp/project_membership_test.go cmd/gt-mcp/main.go pkg/store/session_store.go
 git commit -m "feat(mcp): project member/plugin/rule management + session-to-project binding"
 ```
 

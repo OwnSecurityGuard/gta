@@ -52,15 +52,15 @@ const TABS: { id: ViewTab; label: string }[] = [...PRIMARY_TABS, ...ADVANCED_TAB
 /** 品牌标识：广播/信号图标，呼应"游戏调试自动化"。 */
 function BrandMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 36 36" className={className} role="img" aria-label="GTA 标识">
-      <rect width="36" height="36" rx="9" fill="url(#gta-brand-grad)" />
+    <svg viewBox="0 0 36 36" className={className} role="img" aria-label="GameTrace 标识">
+      <rect width="36" height="36" rx="9" fill="url(#gt-brand-grad)" />
       <g fill="none" stroke="white" strokeWidth="2" strokeLinecap="round">
         <path d="M11 21a7.5 7.5 0 0 1 14 0" />
         <path d="M14.5 24.5a3.5 3.5 0 0 1 7 0" />
       </g>
       <circle cx="18" cy="28.5" r="2" fill="white" />
       <defs>
-        <linearGradient id="gta-brand-grad" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id="gt-brand-grad" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#4f46e5" />
           <stop offset="1" stopColor="#0284c7" />
         </linearGradient>
@@ -95,7 +95,7 @@ export default function App() {
   const [membersOpen, setMembersOpen] = useState(false);
   const [probesOpen, setProbesOpen] = useState(false);
   const [isDark, setIsDark] = useState(() => {
-    const stored = localStorage.getItem("gta-theme");
+    const stored = localStorage.getItem("gt-theme");
     if (stored) return stored === "dark";
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
@@ -161,7 +161,7 @@ export default function App() {
   // 同步暗色模式到 DOM 和 localStorage
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDark);
-    localStorage.setItem("gta-theme", isDark ? "dark" : "light");
+    localStorage.setItem("gt-theme", isDark ? "dark" : "light");
   }, [isDark]);
 
   // 若原始包调试未开启，避免停留在 raw Tab
@@ -265,7 +265,7 @@ export default function App() {
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-3.5">
           <BrandMark className="h-9 w-9 shrink-0" />
           <div className="min-w-0">
-            <p className="text-sm font-semibold leading-tight gta-gradient-text">GTA</p>
+            <p className="text-sm font-semibold leading-tight gt-gradient-text">GameTrace</p>
             <p className="truncate text-[11px] leading-tight text-muted-foreground">
               Game Debug Automation
             </p>
@@ -401,7 +401,7 @@ export default function App() {
                 className="hidden items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground lg:inline-flex"
                 title={selectedSessionId}
               >
-                <span className="gta-live-dot" />
+                <span className="gt-live-dot" />
                 <span className="max-w-[160px] truncate font-mono">{selectedSessionId}</span>
               </span>
             )}
@@ -558,12 +558,12 @@ export default function App() {
             />
           )}
           {activeTab === "decoded" && (
-            <div className="h-full overflow-auto p-4 gta-scroll">
+            <div className="h-full overflow-auto p-4 gt-scroll">
               <EventTable sessionId={selectedSessionId} filter={filter} />
             </div>
           )}
           {activeTab === "connections" && (
-            <div className="h-full overflow-auto p-4 gta-scroll">
+            <div className="h-full overflow-auto p-4 gt-scroll">
               <ConnectionsPage sessionId={selectedSessionId} onJumpToRun={handleJumpToRun} />
             </div>
           )}
@@ -588,7 +588,7 @@ export default function App() {
           )}
           {activeTab === "plugins" && <PluginPanel />}
           {activeTab === "raw" && (
-            <div className="h-full overflow-auto p-4 gta-scroll">
+            <div className="h-full overflow-auto p-4 gt-scroll">
               <RawPacketTable
                 sessionId={selectedSessionId}
                 onDecoded={() => setActiveTab("decoded")}

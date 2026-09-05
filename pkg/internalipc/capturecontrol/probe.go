@@ -2,7 +2,7 @@ package capturecontrol
 
 // probe.go 是 CaptureControl 的探针管理 RPC（docs/plans/2026-09-05 §6/§8）。
 //
-// 信任边界与 owner/all_owners 语义同 ListPlugins：gta-mcp 从 HTTP auth ctx
+// 信任边界与 owner/all_owners 语义同 ListPlugins：gt-mcp 从 HTTP auth ctx
 // 透传调用方身份，本层只做「creator 轴」过滤与校验（探针是个人资源，
 // 仅注册者本人可见可用；all_owners=true 仅 admin 透传）。
 // 实际控制逻辑全部委托 pkg/probe.Manager（desired-state 模型）。
@@ -13,9 +13,9 @@ import (
 	"fmt"
 	"time"
 
-	pb "gta/pkg/internalipc/proto"
-	"gta/pkg/probe"
-	"gta/pkg/store"
+	pb "gametrace/pkg/internalipc/proto"
+	"gametrace/pkg/probe"
+	"gametrace/pkg/store"
 )
 
 // ProbeAdmin 是探针管理面需要的最小接口（pkg/probe.Manager 满足它）。

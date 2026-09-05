@@ -78,10 +78,10 @@ CREATE TABLE IF NOT EXISTS event_index (
 CREATE TABLE IF NOT EXISTS aggregated_metrics (
     session_id TEXT NOT NULL,
     name       TEXT,
-    window     BIGINT NOT NULL,
+    "window"   BIGINT NOT NULL,
     group_json TEXT,
     value      DOUBLE PRECISION,
-    PRIMARY KEY (session_id, name, window, group_json)
+    PRIMARY KEY (session_id, name, "window", group_json)
 );`
 
 // pgEventIndexes 事件表索引（CREATE INDEX IF NOT EXISTS 在 PG 同样幂等）。

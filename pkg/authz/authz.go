@@ -1,4 +1,4 @@
-// Package authz 是 GTA 的轻量鉴权策略层。
+// Package authz 是 GameTrace 的轻量鉴权策略层。
 //
 // 设计约束（2026-09-05 方案，docs/superpowers/plans/2026-09-05-tenant-project-authz.md）：
 //   - 只放纯策略（Decide），不做 IO、不 import 任何存储包 —— 规则 100% 表驱动可单测；

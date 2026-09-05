@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/capture"
-	"gta/pkg/capture/mobile"
-	"gta/pkg/event"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/capture/mobile"
+	"gametrace/pkg/event"
 )
 
 // pktCollector 后台收集一个 source 的全部 packet，供断言"收到了什么/没收到什么"。

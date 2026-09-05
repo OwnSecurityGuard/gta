@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 
 	"github.com/expr-lang/expr"
 )

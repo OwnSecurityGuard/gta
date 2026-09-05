@@ -1745,12 +1745,12 @@ var File_pkg_capture_agent_proto_agent_proto protoreflect.FileDescriptor
 
 const file_pkg_capture_agent_proto_agent_proto_rawDesc = "" +
 	"\n" +
-	"#pkg/capture/agent/proto/agent.proto\x12\tgta.agent\"r\n" +
+	"#pkg/capture/agent/proto/agent.proto\x12\x0fgametrace.agent\"x\n" +
 	"\vPacketBatch\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
-	"\x05iface\x18\x02 \x01(\tR\x05iface\x12.\n" +
-	"\apackets\x18\x03 \x03(\v2\x14.gta.agent.RawPacketR\apackets\"\xaa\x02\n" +
+	"\x05iface\x18\x02 \x01(\tR\x05iface\x124\n" +
+	"\apackets\x18\x03 \x03(\v2\x1a.gametrace.agent.RawPacketR\apackets\"\xb0\x02\n" +
 	"\tRawPacket\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x12\x1b\n" +
@@ -1758,8 +1758,8 @@ const file_pkg_capture_agent_proto_agent_proto_rawDesc = "" +
 	"\x03raw\x18\x04 \x01(\fR\x03raw\x12\x10\n" +
 	"\x03src\x18\x05 \x01(\tR\x03src\x12\x10\n" +
 	"\x03dst\x18\x06 \x01(\tR\x03dst\x12\x1a\n" +
-	"\bprotocol\x18\a \x01(\tR\bprotocol\x12>\n" +
-	"\bmetadata\x18\b \x03(\v2\".gta.agent.RawPacket.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bprotocol\x18\a \x01(\tR\bprotocol\x12D\n" +
+	"\bmetadata\x18\b \x03(\v2(.gametrace.agent.RawPacket.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x91\x01\n" +
@@ -1808,11 +1808,11 @@ const file_pkg_capture_agent_proto_agent_proto_rawDesc = "" +
 	"\voldest_unix\x18\x03 \x01(\x03R\n" +
 	"oldestUnix\x12\x1f\n" +
 	"\vnewest_unix\x18\x04 \x01(\x03R\n" +
-	"newestUnix\"\xb2\x01\n" +
-	"\x0eProbeHeartbeat\x127\n" +
-	"\acapture\x18\x01 \x01(\v2\x1d.gta.agent.ProbeCaptureStatusR\acapture\x12.\n" +
-	"\x04data\x18\x02 \x01(\v2\x1a.gta.agent.ProbeDataStatusR\x04data\x127\n" +
-	"\aarchive\x18\x03 \x01(\v2\x1d.gta.agent.ProbeArchiveStatusR\aarchive\"E\n" +
+	"newestUnix\"\xc4\x01\n" +
+	"\x0eProbeHeartbeat\x12=\n" +
+	"\acapture\x18\x01 \x01(\v2#.gametrace.agent.ProbeCaptureStatusR\acapture\x124\n" +
+	"\x04data\x18\x02 \x01(\v2 .gametrace.agent.ProbeDataStatusR\x04data\x12=\n" +
+	"\aarchive\x18\x03 \x01(\v2#.gametrace.agent.ProbeArchiveStatusR\aarchive\"E\n" +
 	"\rCommandResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
@@ -1824,14 +1824,14 @@ const file_pkg_capture_agent_proto_agent_proto_rawDesc = "" +
 	"\tlast_unix\x18\x03 \x01(\x03R\blastUnix\x12\x18\n" +
 	"\apackets\x18\x04 \x01(\x04R\apackets\x12\x14\n" +
 	"\x05bytes\x18\x05 \x01(\x04R\x05bytes\x12\x1b\n" +
-	"\tlink_type\x18\x06 \x01(\rR\blinkType\"Q\n" +
-	"\x14ArchiveSegmentsReply\x129\n" +
-	"\bsegments\x18\x01 \x03(\v2\x1d.gta.agent.ArchiveSegmentInfoR\bsegments\"\x85\x02\n" +
-	"\fControlEvent\x12-\n" +
-	"\x05hello\x18\x01 \x01(\v2\x15.gta.agent.ProbeHelloH\x00R\x05hello\x129\n" +
-	"\theartbeat\x18\x02 \x01(\v2\x19.gta.agent.ProbeHeartbeatH\x00R\theartbeat\x122\n" +
-	"\x06result\x18\x03 \x01(\v2\x18.gta.agent.CommandResultH\x00R\x06result\x12L\n" +
-	"\x10archive_segments\x18\x04 \x01(\v2\x1f.gta.agent.ArchiveSegmentsReplyH\x00R\x0farchiveSegmentsB\t\n" +
+	"\tlink_type\x18\x06 \x01(\rR\blinkType\"W\n" +
+	"\x14ArchiveSegmentsReply\x12?\n" +
+	"\bsegments\x18\x01 \x03(\v2#.gametrace.agent.ArchiveSegmentInfoR\bsegments\"\x9d\x02\n" +
+	"\fControlEvent\x123\n" +
+	"\x05hello\x18\x01 \x01(\v2\x1b.gametrace.agent.ProbeHelloH\x00R\x05hello\x12?\n" +
+	"\theartbeat\x18\x02 \x01(\v2\x1f.gametrace.agent.ProbeHeartbeatH\x00R\theartbeat\x128\n" +
+	"\x06result\x18\x03 \x01(\v2\x1e.gametrace.agent.CommandResultH\x00R\x06result\x12R\n" +
+	"\x10archive_segments\x18\x04 \x01(\v2%.gametrace.agent.ArchiveSegmentsReplyH\x00R\x0farchiveSegmentsB\t\n" +
 	"\apayload\"\xb6\x01\n" +
 	"\rAssignCapture\x12\x1d\n" +
 	"\n" +
@@ -1846,9 +1846,9 @@ const file_pkg_capture_agent_proto_agent_proto_rawDesc = "" +
 	"\fUpdateFilter\x12\x14\n" +
 	"\x05ports\x18\x01 \x03(\x05R\x05ports\x12\x14\n" +
 	"\x05hosts\x18\x02 \x03(\tR\x05hosts\x12\x10\n" +
-	"\x03bpf\x18\x03 \x01(\tR\x03bpf\"t\n" +
-	"\tSetConfig\x12/\n" +
-	"\x03kvs\x18\x01 \x03(\v2\x1d.gta.agent.SetConfig.KvsEntryR\x03kvs\x1a6\n" +
+	"\x03bpf\x18\x03 \x01(\tR\x03bpf\"z\n" +
+	"\tSetConfig\x125\n" +
+	"\x03kvs\x18\x01 \x03(\v2#.gametrace.agent.SetConfig.KvsEntryR\x03kvs\x1a6\n" +
 	"\bKvsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"D\n" +
@@ -1860,31 +1860,31 @@ const file_pkg_capture_agent_proto_agent_proto_rawDesc = "" +
 	"\tfrom_unix\x18\x02 \x01(\x03R\bfromUnix\x12\x17\n" +
 	"\ato_unix\x18\x03 \x01(\x03R\x06toUnix\"\n" +
 	"\n" +
-	"\bRetryCmd\"\x9c\x03\n" +
+	"\bRetryCmd\"\xc6\x03\n" +
 	"\aCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x122\n" +
-	"\x06assign\x18\x02 \x01(\v2\x18.gta.agent.AssignCaptureH\x00R\x06assign\x12/\n" +
-	"\x04stop\x18\x03 \x01(\v2\x19.gta.agent.StopCaptureCmdH\x00R\x04stop\x121\n" +
-	"\x06filter\x18\x04 \x01(\v2\x17.gta.agent.UpdateFilterH\x00R\x06filter\x12.\n" +
-	"\x06config\x18\x05 \x01(\v2\x14.gta.agent.SetConfigH\x00R\x06config\x12>\n" +
-	"\rarchive_query\x18\x06 \x01(\v2\x17.gta.agent.ArchiveQueryH\x00R\farchiveQuery\x12A\n" +
-	"\x0earchive_upload\x18\a \x01(\v2\x18.gta.agent.ArchiveUploadH\x00R\rarchiveUpload\x12+\n" +
-	"\x05retry\x18\b \x01(\v2\x13.gta.agent.RetryCmdH\x00R\x05retryB\t\n" +
-	"\apayload\"\x90\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x128\n" +
+	"\x06assign\x18\x02 \x01(\v2\x1e.gametrace.agent.AssignCaptureH\x00R\x06assign\x125\n" +
+	"\x04stop\x18\x03 \x01(\v2\x1f.gametrace.agent.StopCaptureCmdH\x00R\x04stop\x127\n" +
+	"\x06filter\x18\x04 \x01(\v2\x1d.gametrace.agent.UpdateFilterH\x00R\x06filter\x124\n" +
+	"\x06config\x18\x05 \x01(\v2\x1a.gametrace.agent.SetConfigH\x00R\x06config\x12D\n" +
+	"\rarchive_query\x18\x06 \x01(\v2\x1d.gametrace.agent.ArchiveQueryH\x00R\farchiveQuery\x12G\n" +
+	"\x0earchive_upload\x18\a \x01(\v2\x1e.gametrace.agent.ArchiveUploadH\x00R\rarchiveUpload\x121\n" +
+	"\x05retry\x18\b \x01(\v2\x19.gametrace.agent.RetryCmdH\x00R\x05retryB\t\n" +
+	"\apayload\"\x96\x01\n" +
 	"\fArchiveChunk\x12*\n" +
 	"\x11target_session_id\x18\x01 \x01(\tR\x0ftargetSessionId\x12\x10\n" +
-	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12,\n" +
-	"\x06packet\x18\x03 \x01(\v2\x14.gta.agent.RawPacketR\x06packet\x12\x14\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\x122\n" +
+	"\x06packet\x18\x03 \x01(\v2\x1a.gametrace.agent.RawPacketR\x06packet\x12\x14\n" +
 	"\x05final\x18\x04 \x01(\bR\x05final\"F\n" +
 	"\x10UploadArchiveAck\x12\x18\n" +
 	"\apackets\x18\x01 \x01(\x04R\apackets\x12\x18\n" +
-	"\adropped\x18\x02 \x01(\x04R\adropped2C\n" +
-	"\vAgentIngest\x124\n" +
-	"\x04Push\x12\x16.gta.agent.PacketBatch\x1a\x12.gta.agent.PushAck(\x012\xe2\x01\n" +
-	"\fAgentControl\x12M\n" +
-	"\rRegisterProbe\x12\x1f.gta.agent.RegisterProbeRequest\x1a\x1b.gta.agent.RegisterProbeAck\x12:\n" +
-	"\aConnect\x12\x17.gta.agent.ControlEvent\x1a\x12.gta.agent.Command(\x010\x01\x12G\n" +
-	"\rUploadArchive\x12\x17.gta.agent.ArchiveChunk\x1a\x1b.gta.agent.UploadArchiveAck(\x01B\x1dZ\x1bgta/pkg/capture/agent/protob\x06proto3"
+	"\adropped\x18\x02 \x01(\x04R\adropped2O\n" +
+	"\vAgentIngest\x12@\n" +
+	"\x04Push\x12\x1c.gametrace.agent.PacketBatch\x1a\x18.gametrace.agent.PushAck(\x012\x86\x02\n" +
+	"\fAgentControl\x12Y\n" +
+	"\rRegisterProbe\x12%.gametrace.agent.RegisterProbeRequest\x1a!.gametrace.agent.RegisterProbeAck\x12F\n" +
+	"\aConnect\x12\x1d.gametrace.agent.ControlEvent\x1a\x18.gametrace.agent.Command(\x010\x01\x12S\n" +
+	"\rUploadArchive\x12\x1d.gametrace.agent.ArchiveChunk\x1a!.gametrace.agent.UploadArchiveAck(\x01B#Z!gametrace/pkg/capture/agent/protob\x06proto3"
 
 var (
 	file_pkg_capture_agent_proto_agent_proto_rawDescOnce sync.Once
@@ -1900,61 +1900,61 @@ func file_pkg_capture_agent_proto_agent_proto_rawDescGZIP() []byte {
 
 var file_pkg_capture_agent_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_pkg_capture_agent_proto_agent_proto_goTypes = []any{
-	(*PacketBatch)(nil),          // 0: gta.agent.PacketBatch
-	(*RawPacket)(nil),            // 1: gta.agent.RawPacket
-	(*PushAck)(nil),              // 2: gta.agent.PushAck
-	(*RegisterProbeRequest)(nil), // 3: gta.agent.RegisterProbeRequest
-	(*RegisterProbeAck)(nil),     // 4: gta.agent.RegisterProbeAck
-	(*ProbeHello)(nil),           // 5: gta.agent.ProbeHello
-	(*ProbeCaptureStatus)(nil),   // 6: gta.agent.ProbeCaptureStatus
-	(*ProbeDataStatus)(nil),      // 7: gta.agent.ProbeDataStatus
-	(*ProbeArchiveStatus)(nil),   // 8: gta.agent.ProbeArchiveStatus
-	(*ProbeHeartbeat)(nil),       // 9: gta.agent.ProbeHeartbeat
-	(*CommandResult)(nil),        // 10: gta.agent.CommandResult
-	(*ArchiveSegmentInfo)(nil),   // 11: gta.agent.ArchiveSegmentInfo
-	(*ArchiveSegmentsReply)(nil), // 12: gta.agent.ArchiveSegmentsReply
-	(*ControlEvent)(nil),         // 13: gta.agent.ControlEvent
-	(*AssignCapture)(nil),        // 14: gta.agent.AssignCapture
-	(*StopCaptureCmd)(nil),       // 15: gta.agent.StopCaptureCmd
-	(*UpdateFilter)(nil),         // 16: gta.agent.UpdateFilter
-	(*SetConfig)(nil),            // 17: gta.agent.SetConfig
-	(*ArchiveQuery)(nil),         // 18: gta.agent.ArchiveQuery
-	(*ArchiveUpload)(nil),        // 19: gta.agent.ArchiveUpload
-	(*RetryCmd)(nil),             // 20: gta.agent.RetryCmd
-	(*Command)(nil),              // 21: gta.agent.Command
-	(*ArchiveChunk)(nil),         // 22: gta.agent.ArchiveChunk
-	(*UploadArchiveAck)(nil),     // 23: gta.agent.UploadArchiveAck
-	nil,                          // 24: gta.agent.RawPacket.MetadataEntry
-	nil,                          // 25: gta.agent.SetConfig.KvsEntry
+	(*PacketBatch)(nil),          // 0: gametrace.agent.PacketBatch
+	(*RawPacket)(nil),            // 1: gametrace.agent.RawPacket
+	(*PushAck)(nil),              // 2: gametrace.agent.PushAck
+	(*RegisterProbeRequest)(nil), // 3: gametrace.agent.RegisterProbeRequest
+	(*RegisterProbeAck)(nil),     // 4: gametrace.agent.RegisterProbeAck
+	(*ProbeHello)(nil),           // 5: gametrace.agent.ProbeHello
+	(*ProbeCaptureStatus)(nil),   // 6: gametrace.agent.ProbeCaptureStatus
+	(*ProbeDataStatus)(nil),      // 7: gametrace.agent.ProbeDataStatus
+	(*ProbeArchiveStatus)(nil),   // 8: gametrace.agent.ProbeArchiveStatus
+	(*ProbeHeartbeat)(nil),       // 9: gametrace.agent.ProbeHeartbeat
+	(*CommandResult)(nil),        // 10: gametrace.agent.CommandResult
+	(*ArchiveSegmentInfo)(nil),   // 11: gametrace.agent.ArchiveSegmentInfo
+	(*ArchiveSegmentsReply)(nil), // 12: gametrace.agent.ArchiveSegmentsReply
+	(*ControlEvent)(nil),         // 13: gametrace.agent.ControlEvent
+	(*AssignCapture)(nil),        // 14: gametrace.agent.AssignCapture
+	(*StopCaptureCmd)(nil),       // 15: gametrace.agent.StopCaptureCmd
+	(*UpdateFilter)(nil),         // 16: gametrace.agent.UpdateFilter
+	(*SetConfig)(nil),            // 17: gametrace.agent.SetConfig
+	(*ArchiveQuery)(nil),         // 18: gametrace.agent.ArchiveQuery
+	(*ArchiveUpload)(nil),        // 19: gametrace.agent.ArchiveUpload
+	(*RetryCmd)(nil),             // 20: gametrace.agent.RetryCmd
+	(*Command)(nil),              // 21: gametrace.agent.Command
+	(*ArchiveChunk)(nil),         // 22: gametrace.agent.ArchiveChunk
+	(*UploadArchiveAck)(nil),     // 23: gametrace.agent.UploadArchiveAck
+	nil,                          // 24: gametrace.agent.RawPacket.MetadataEntry
+	nil,                          // 25: gametrace.agent.SetConfig.KvsEntry
 }
 var file_pkg_capture_agent_proto_agent_proto_depIdxs = []int32{
-	1,  // 0: gta.agent.PacketBatch.packets:type_name -> gta.agent.RawPacket
-	24, // 1: gta.agent.RawPacket.metadata:type_name -> gta.agent.RawPacket.MetadataEntry
-	6,  // 2: gta.agent.ProbeHeartbeat.capture:type_name -> gta.agent.ProbeCaptureStatus
-	7,  // 3: gta.agent.ProbeHeartbeat.data:type_name -> gta.agent.ProbeDataStatus
-	8,  // 4: gta.agent.ProbeHeartbeat.archive:type_name -> gta.agent.ProbeArchiveStatus
-	11, // 5: gta.agent.ArchiveSegmentsReply.segments:type_name -> gta.agent.ArchiveSegmentInfo
-	5,  // 6: gta.agent.ControlEvent.hello:type_name -> gta.agent.ProbeHello
-	9,  // 7: gta.agent.ControlEvent.heartbeat:type_name -> gta.agent.ProbeHeartbeat
-	10, // 8: gta.agent.ControlEvent.result:type_name -> gta.agent.CommandResult
-	12, // 9: gta.agent.ControlEvent.archive_segments:type_name -> gta.agent.ArchiveSegmentsReply
-	25, // 10: gta.agent.SetConfig.kvs:type_name -> gta.agent.SetConfig.KvsEntry
-	14, // 11: gta.agent.Command.assign:type_name -> gta.agent.AssignCapture
-	15, // 12: gta.agent.Command.stop:type_name -> gta.agent.StopCaptureCmd
-	16, // 13: gta.agent.Command.filter:type_name -> gta.agent.UpdateFilter
-	17, // 14: gta.agent.Command.config:type_name -> gta.agent.SetConfig
-	18, // 15: gta.agent.Command.archive_query:type_name -> gta.agent.ArchiveQuery
-	19, // 16: gta.agent.Command.archive_upload:type_name -> gta.agent.ArchiveUpload
-	20, // 17: gta.agent.Command.retry:type_name -> gta.agent.RetryCmd
-	1,  // 18: gta.agent.ArchiveChunk.packet:type_name -> gta.agent.RawPacket
-	0,  // 19: gta.agent.AgentIngest.Push:input_type -> gta.agent.PacketBatch
-	3,  // 20: gta.agent.AgentControl.RegisterProbe:input_type -> gta.agent.RegisterProbeRequest
-	13, // 21: gta.agent.AgentControl.Connect:input_type -> gta.agent.ControlEvent
-	22, // 22: gta.agent.AgentControl.UploadArchive:input_type -> gta.agent.ArchiveChunk
-	2,  // 23: gta.agent.AgentIngest.Push:output_type -> gta.agent.PushAck
-	4,  // 24: gta.agent.AgentControl.RegisterProbe:output_type -> gta.agent.RegisterProbeAck
-	21, // 25: gta.agent.AgentControl.Connect:output_type -> gta.agent.Command
-	23, // 26: gta.agent.AgentControl.UploadArchive:output_type -> gta.agent.UploadArchiveAck
+	1,  // 0: gametrace.agent.PacketBatch.packets:type_name -> gametrace.agent.RawPacket
+	24, // 1: gametrace.agent.RawPacket.metadata:type_name -> gametrace.agent.RawPacket.MetadataEntry
+	6,  // 2: gametrace.agent.ProbeHeartbeat.capture:type_name -> gametrace.agent.ProbeCaptureStatus
+	7,  // 3: gametrace.agent.ProbeHeartbeat.data:type_name -> gametrace.agent.ProbeDataStatus
+	8,  // 4: gametrace.agent.ProbeHeartbeat.archive:type_name -> gametrace.agent.ProbeArchiveStatus
+	11, // 5: gametrace.agent.ArchiveSegmentsReply.segments:type_name -> gametrace.agent.ArchiveSegmentInfo
+	5,  // 6: gametrace.agent.ControlEvent.hello:type_name -> gametrace.agent.ProbeHello
+	9,  // 7: gametrace.agent.ControlEvent.heartbeat:type_name -> gametrace.agent.ProbeHeartbeat
+	10, // 8: gametrace.agent.ControlEvent.result:type_name -> gametrace.agent.CommandResult
+	12, // 9: gametrace.agent.ControlEvent.archive_segments:type_name -> gametrace.agent.ArchiveSegmentsReply
+	25, // 10: gametrace.agent.SetConfig.kvs:type_name -> gametrace.agent.SetConfig.KvsEntry
+	14, // 11: gametrace.agent.Command.assign:type_name -> gametrace.agent.AssignCapture
+	15, // 12: gametrace.agent.Command.stop:type_name -> gametrace.agent.StopCaptureCmd
+	16, // 13: gametrace.agent.Command.filter:type_name -> gametrace.agent.UpdateFilter
+	17, // 14: gametrace.agent.Command.config:type_name -> gametrace.agent.SetConfig
+	18, // 15: gametrace.agent.Command.archive_query:type_name -> gametrace.agent.ArchiveQuery
+	19, // 16: gametrace.agent.Command.archive_upload:type_name -> gametrace.agent.ArchiveUpload
+	20, // 17: gametrace.agent.Command.retry:type_name -> gametrace.agent.RetryCmd
+	1,  // 18: gametrace.agent.ArchiveChunk.packet:type_name -> gametrace.agent.RawPacket
+	0,  // 19: gametrace.agent.AgentIngest.Push:input_type -> gametrace.agent.PacketBatch
+	3,  // 20: gametrace.agent.AgentControl.RegisterProbe:input_type -> gametrace.agent.RegisterProbeRequest
+	13, // 21: gametrace.agent.AgentControl.Connect:input_type -> gametrace.agent.ControlEvent
+	22, // 22: gametrace.agent.AgentControl.UploadArchive:input_type -> gametrace.agent.ArchiveChunk
+	2,  // 23: gametrace.agent.AgentIngest.Push:output_type -> gametrace.agent.PushAck
+	4,  // 24: gametrace.agent.AgentControl.RegisterProbe:output_type -> gametrace.agent.RegisterProbeAck
+	21, // 25: gametrace.agent.AgentControl.Connect:output_type -> gametrace.agent.Command
+	23, // 26: gametrace.agent.AgentControl.UploadArchive:output_type -> gametrace.agent.UploadArchiveAck
 	23, // [23:27] is the sub-list for method output_type
 	19, // [19:23] is the sub-list for method input_type
 	19, // [19:19] is the sub-list for extension type_name

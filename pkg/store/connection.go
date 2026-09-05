@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"gta/pkg/capture"
-	"gta/pkg/event"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/event"
 )
 
 // ConnectionSummary 连接列表行（Connections 页面）。

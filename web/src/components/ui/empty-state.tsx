@@ -14,7 +14,7 @@ export function EmptyState({ icon, title, hint, action, className }: EmptyStateP
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center px-6 py-12 text-center gta-fade-in",
+        "flex flex-col items-center justify-center px-6 py-12 text-center gt-fade-in",
         className,
       )}
     >

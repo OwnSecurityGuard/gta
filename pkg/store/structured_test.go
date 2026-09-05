@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // TestWriteEventsV2_StructuredFields 验证 Event 结构化字段正确落库。

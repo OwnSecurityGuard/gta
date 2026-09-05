@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 func TestSQLiteStore_QueryEventsV2(t *testing.T) {

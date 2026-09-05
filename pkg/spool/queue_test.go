@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	agentproto "gta/pkg/capture/agent/proto"
+	agentproto "gametrace/pkg/capture/agent/proto"
 )
 
 func pkt(id string) *agentproto.RawPacket {

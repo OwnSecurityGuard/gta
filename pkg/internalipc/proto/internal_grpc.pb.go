@@ -19,44 +19,44 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CaptureControl_StartCapture_FullMethodName        = "/gta.internalipc.CaptureControl/StartCapture"
-	CaptureControl_StopCapture_FullMethodName         = "/gta.internalipc.CaptureControl/StopCapture"
-	CaptureControl_GetCaptureStatus_FullMethodName    = "/gta.internalipc.CaptureControl/GetCaptureStatus"
-	CaptureControl_ListCaptureSessions_FullMethodName = "/gta.internalipc.CaptureControl/ListCaptureSessions"
-	CaptureControl_ListInterfaces_FullMethodName      = "/gta.internalipc.CaptureControl/ListInterfaces"
-	CaptureControl_DecodeRawPackets_FullMethodName    = "/gta.internalipc.CaptureControl/DecodeRawPackets"
-	CaptureControl_ListPlugins_FullMethodName         = "/gta.internalipc.CaptureControl/ListPlugins"
-	CaptureControl_GetPluginManifest_FullMethodName   = "/gta.internalipc.CaptureControl/GetPluginManifest"
-	CaptureControl_DeregisterPlugin_FullMethodName    = "/gta.internalipc.CaptureControl/DeregisterPlugin"
-	CaptureControl_SetSessionPlugin_FullMethodName    = "/gta.internalipc.CaptureControl/SetSessionPlugin"
-	CaptureControl_WatchPlugins_FullMethodName        = "/gta.internalipc.CaptureControl/WatchPlugins"
-	CaptureControl_TestPlugin_FullMethodName          = "/gta.internalipc.CaptureControl/TestPlugin"
-	CaptureControl_Verify_FullMethodName              = "/gta.internalipc.CaptureControl/Verify"
-	CaptureControl_SampleBytes_FullMethodName         = "/gta.internalipc.CaptureControl/SampleBytes"
-	CaptureControl_GetRegistryAddr_FullMethodName     = "/gta.internalipc.CaptureControl/GetRegistryAddr"
-	CaptureControl_CreateProxyLease_FullMethodName    = "/gta.internalipc.CaptureControl/CreateProxyLease"
-	CaptureControl_ListProxyLeases_FullMethodName     = "/gta.internalipc.CaptureControl/ListProxyLeases"
-	CaptureControl_GetProxyLease_FullMethodName       = "/gta.internalipc.CaptureControl/GetProxyLease"
-	CaptureControl_ReleaseProxyLease_FullMethodName   = "/gta.internalipc.CaptureControl/ReleaseProxyLease"
-	CaptureControl_ListProbes_FullMethodName          = "/gta.internalipc.CaptureControl/ListProbes"
-	CaptureControl_GetProbe_FullMethodName            = "/gta.internalipc.CaptureControl/GetProbe"
-	CaptureControl_ProbeStartCapture_FullMethodName   = "/gta.internalipc.CaptureControl/ProbeStartCapture"
-	CaptureControl_ProbeStopCapture_FullMethodName    = "/gta.internalipc.CaptureControl/ProbeStopCapture"
-	CaptureControl_ProbeUpdateFilter_FullMethodName   = "/gta.internalipc.CaptureControl/ProbeUpdateFilter"
-	CaptureControl_ProbeRetryCapture_FullMethodName   = "/gta.internalipc.CaptureControl/ProbeRetryCapture"
-	CaptureControl_ProbeRename_FullMethodName         = "/gta.internalipc.CaptureControl/ProbeRename"
-	CaptureControl_ProbeRevoke_FullMethodName         = "/gta.internalipc.CaptureControl/ProbeRevoke"
-	CaptureControl_ProbeListArchive_FullMethodName    = "/gta.internalipc.CaptureControl/ProbeListArchive"
-	CaptureControl_ProbeImportArchive_FullMethodName  = "/gta.internalipc.CaptureControl/ProbeImportArchive"
-	CaptureControl_StartLeaseCapture_FullMethodName   = "/gta.internalipc.CaptureControl/StartLeaseCapture"
-	CaptureControl_StopLeaseCapture_FullMethodName    = "/gta.internalipc.CaptureControl/StopLeaseCapture"
+	CaptureControl_StartCapture_FullMethodName        = "/gametrace.internalipc.CaptureControl/StartCapture"
+	CaptureControl_StopCapture_FullMethodName         = "/gametrace.internalipc.CaptureControl/StopCapture"
+	CaptureControl_GetCaptureStatus_FullMethodName    = "/gametrace.internalipc.CaptureControl/GetCaptureStatus"
+	CaptureControl_ListCaptureSessions_FullMethodName = "/gametrace.internalipc.CaptureControl/ListCaptureSessions"
+	CaptureControl_ListInterfaces_FullMethodName      = "/gametrace.internalipc.CaptureControl/ListInterfaces"
+	CaptureControl_DecodeRawPackets_FullMethodName    = "/gametrace.internalipc.CaptureControl/DecodeRawPackets"
+	CaptureControl_ListPlugins_FullMethodName         = "/gametrace.internalipc.CaptureControl/ListPlugins"
+	CaptureControl_GetPluginManifest_FullMethodName   = "/gametrace.internalipc.CaptureControl/GetPluginManifest"
+	CaptureControl_DeregisterPlugin_FullMethodName    = "/gametrace.internalipc.CaptureControl/DeregisterPlugin"
+	CaptureControl_SetSessionPlugin_FullMethodName    = "/gametrace.internalipc.CaptureControl/SetSessionPlugin"
+	CaptureControl_WatchPlugins_FullMethodName        = "/gametrace.internalipc.CaptureControl/WatchPlugins"
+	CaptureControl_TestPlugin_FullMethodName          = "/gametrace.internalipc.CaptureControl/TestPlugin"
+	CaptureControl_Verify_FullMethodName              = "/gametrace.internalipc.CaptureControl/Verify"
+	CaptureControl_SampleBytes_FullMethodName         = "/gametrace.internalipc.CaptureControl/SampleBytes"
+	CaptureControl_GetRegistryAddr_FullMethodName     = "/gametrace.internalipc.CaptureControl/GetRegistryAddr"
+	CaptureControl_CreateProxyLease_FullMethodName    = "/gametrace.internalipc.CaptureControl/CreateProxyLease"
+	CaptureControl_ListProxyLeases_FullMethodName     = "/gametrace.internalipc.CaptureControl/ListProxyLeases"
+	CaptureControl_GetProxyLease_FullMethodName       = "/gametrace.internalipc.CaptureControl/GetProxyLease"
+	CaptureControl_ReleaseProxyLease_FullMethodName   = "/gametrace.internalipc.CaptureControl/ReleaseProxyLease"
+	CaptureControl_ListProbes_FullMethodName          = "/gametrace.internalipc.CaptureControl/ListProbes"
+	CaptureControl_GetProbe_FullMethodName            = "/gametrace.internalipc.CaptureControl/GetProbe"
+	CaptureControl_ProbeStartCapture_FullMethodName   = "/gametrace.internalipc.CaptureControl/ProbeStartCapture"
+	CaptureControl_ProbeStopCapture_FullMethodName    = "/gametrace.internalipc.CaptureControl/ProbeStopCapture"
+	CaptureControl_ProbeUpdateFilter_FullMethodName   = "/gametrace.internalipc.CaptureControl/ProbeUpdateFilter"
+	CaptureControl_ProbeRetryCapture_FullMethodName   = "/gametrace.internalipc.CaptureControl/ProbeRetryCapture"
+	CaptureControl_ProbeRename_FullMethodName         = "/gametrace.internalipc.CaptureControl/ProbeRename"
+	CaptureControl_ProbeRevoke_FullMethodName         = "/gametrace.internalipc.CaptureControl/ProbeRevoke"
+	CaptureControl_ProbeListArchive_FullMethodName    = "/gametrace.internalipc.CaptureControl/ProbeListArchive"
+	CaptureControl_ProbeImportArchive_FullMethodName  = "/gametrace.internalipc.CaptureControl/ProbeImportArchive"
+	CaptureControl_StartLeaseCapture_FullMethodName   = "/gametrace.internalipc.CaptureControl/StartLeaseCapture"
+	CaptureControl_StopLeaseCapture_FullMethodName    = "/gametrace.internalipc.CaptureControl/StopLeaseCapture"
 )
 
 // CaptureControlClient is the client API for CaptureControl service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// CaptureControl 由 gta-pipeline 进程提供，gta-mcp 作为 client 调用。
+// CaptureControl 由 gt-pipeline 进程提供，gt-mcp 作为 client 调用。
 // 仅控制面 unary RPC，无 streaming。数据面走 SQLite。
 type CaptureControlClient interface {
 	// StartCapture 启动一次抓包会话。
@@ -89,18 +89,18 @@ type CaptureControlClient interface {
 	// 该能力不暴露原始包，因此无需 --enable-raw-debug 门控。
 	TestPlugin(ctx context.Context, in *TestPluginRequest, opts ...grpc.CallOption) (*TestPluginResponse, error)
 	// Verify 用指定插件对离线会话的 raw_packets 解码并做契约+质量校验，
-	// 产出 violations（引 SDK checker，带 rule_id）+ quality（gta 统计）+ verdict。
+	// 产出 violations（引 SDK checker，带 rule_id）+ quality（gametrace 统计）+ verdict。
 	// 仅统计不落库；validated 证明写入 Developer Plane 的 Tracker（跨平面）。
 	Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*VerifyResponse, error)
 	// SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
 	// 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
 	SampleBytes(ctx context.Context, in *SampleBytesRequest, opts ...grpc.CallOption) (*SampleBytesResponse, error)
 	// GetRegistryAddr 返回插件应连接注册中心地址（即 -registry-addr 的值，如 :9091）。
-	// gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
+	// gt-mcp 与插件启动时需要此地址填入 GT_REGISTRY_ADDR；此前只能由人工从
 	// 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
 	GetRegistryAddr(ctx context.Context, in *GetRegistryAddrRequest, opts ...grpc.CallOption) (*GetRegistryAddrResponse, error)
 	// CreateProxyLease 为调用方创建一个代理抓包租约：独立 mobile 抓包会话 +
-	// 独立 gta-singbox-agent 进程（各自独立端口与筛选配置），手机连 agent 的
+	// 独立 gt-singbox-agent 进程（各自独立端口与筛选配置），手机连 agent 的
 	// listen 端口。会话停止时租约自动回收（杀 agent、释放端口）。
 	CreateProxyLease(ctx context.Context, in *CreateProxyLeaseRequest, opts ...grpc.CallOption) (*CreateProxyLeaseResponse, error)
 	// ListProxyLeases 列出调用方可见的租约（admin 全可见，同 ListPlugins 语义）。
@@ -111,7 +111,7 @@ type CaptureControlClient interface {
 	ReleaseProxyLease(ctx context.Context, in *ReleaseProxyLeaseRequest, opts ...grpc.CallOption) (*ReleaseProxyLeaseResponse, error)
 	// StartLeaseCapture 在常驻租约上开一次新的抓包会话。
 	//
-	// ---- Probe 管理（探针注册/状态/控制全部在 pipeline 侧，gta-mcp 代理调用）----
+	// ---- Probe 管理（探针注册/状态/控制全部在 pipeline 侧，gt-mcp 代理调用）----
 	// 探针是个人资源：owner 校验在 pipeline 侧做 creator 轴判定（本人或 admin）。
 	ListProbes(ctx context.Context, in *ListProbesRequest, opts ...grpc.CallOption) (*ListProbesResponse, error)
 	GetProbe(ctx context.Context, in *GetProbeRequest, opts ...grpc.CallOption) (*GetProbeResponse, error)
@@ -470,7 +470,7 @@ func (c *captureControlClient) StopLeaseCapture(ctx context.Context, in *StopLea
 // All implementations must embed UnimplementedCaptureControlServer
 // for forward compatibility.
 //
-// CaptureControl 由 gta-pipeline 进程提供，gta-mcp 作为 client 调用。
+// CaptureControl 由 gt-pipeline 进程提供，gt-mcp 作为 client 调用。
 // 仅控制面 unary RPC，无 streaming。数据面走 SQLite。
 type CaptureControlServer interface {
 	// StartCapture 启动一次抓包会话。
@@ -503,18 +503,18 @@ type CaptureControlServer interface {
 	// 该能力不暴露原始包，因此无需 --enable-raw-debug 门控。
 	TestPlugin(context.Context, *TestPluginRequest) (*TestPluginResponse, error)
 	// Verify 用指定插件对离线会话的 raw_packets 解码并做契约+质量校验，
-	// 产出 violations（引 SDK checker，带 rule_id）+ quality（gta 统计）+ verdict。
+	// 产出 violations（引 SDK checker，带 rule_id）+ quality（gametrace 统计）+ verdict。
 	// 仅统计不落库；validated 证明写入 Developer Plane 的 Tracker（跨平面）。
 	Verify(context.Context, *VerifyRequest) (*VerifyResponse, error)
 	// SampleBytes 读取会话原始包的前若干字节（事实：hexdump/长度直方图/首字节分布/熵），
 	// 不解释，并在 plugin_debug_access 留审计。硬上限由服务端强制（20 包 / 64 字节）。
 	SampleBytes(context.Context, *SampleBytesRequest) (*SampleBytesResponse, error)
 	// GetRegistryAddr 返回插件应连接注册中心地址（即 -registry-addr 的值，如 :9091）。
-	// gta-mcp 与插件启动时需要此地址填入 GTA_REGISTRY_ADDR；此前只能由人工从
+	// gt-mcp 与插件启动时需要此地址填入 GT_REGISTRY_ADDR；此前只能由人工从
 	// 启动日志中获取。改为由 pipeline 通过本 RPC 直接暴露，避免插件「不知道该连哪里」。
 	GetRegistryAddr(context.Context, *GetRegistryAddrRequest) (*GetRegistryAddrResponse, error)
 	// CreateProxyLease 为调用方创建一个代理抓包租约：独立 mobile 抓包会话 +
-	// 独立 gta-singbox-agent 进程（各自独立端口与筛选配置），手机连 agent 的
+	// 独立 gt-singbox-agent 进程（各自独立端口与筛选配置），手机连 agent 的
 	// listen 端口。会话停止时租约自动回收（杀 agent、释放端口）。
 	CreateProxyLease(context.Context, *CreateProxyLeaseRequest) (*CreateProxyLeaseResponse, error)
 	// ListProxyLeases 列出调用方可见的租约（admin 全可见，同 ListPlugins 语义）。
@@ -525,7 +525,7 @@ type CaptureControlServer interface {
 	ReleaseProxyLease(context.Context, *ReleaseProxyLeaseRequest) (*ReleaseProxyLeaseResponse, error)
 	// StartLeaseCapture 在常驻租约上开一次新的抓包会话。
 	//
-	// ---- Probe 管理（探针注册/状态/控制全部在 pipeline 侧，gta-mcp 代理调用）----
+	// ---- Probe 管理（探针注册/状态/控制全部在 pipeline 侧，gt-mcp 代理调用）----
 	// 探针是个人资源：owner 校验在 pipeline 侧做 creator 轴判定（本人或 admin）。
 	ListProbes(context.Context, *ListProbesRequest) (*ListProbesResponse, error)
 	GetProbe(context.Context, *GetProbeRequest) (*GetProbeResponse, error)
@@ -1230,7 +1230,7 @@ func _CaptureControl_StopLeaseCapture_Handler(srv interface{}, ctx context.Conte
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var CaptureControl_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "gta.internalipc.CaptureControl",
+	ServiceName: "gametrace.internalipc.CaptureControl",
 	HandlerType: (*CaptureControlServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

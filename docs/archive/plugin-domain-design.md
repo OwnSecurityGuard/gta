@@ -1,13 +1,13 @@
 # MCP Plugin Domain 设计 v2：三平面 + 双状态空间
 
 > ⚠️ **过期设计稿（未实现），且部分架构描述已与实际不符。** 实际 MCP 工具面以
-> `cmd/gta-mcp/main.go` 的 `AddTool` 注册为准（约 40 个工具，非本文的 13 个）；插件
+> `cmd/gt-mcp/main.go` 的 `AddTool` 注册为准（约 40 个工具，非本文的 13 个）；插件
 > 生命周期与状态模型以运行时 `plugin.status` / `list_plugins` 的真实返回为准。本文仅作
 > 架构演进史料，不要据此判断"有哪些可用工具"。文中示例插件名 `http` 仅为占位示例，
 > 不代表仓库中存在该插件。
 
 > 状态：设计稿（未实现）
-> 涉及仓库：`E:\gta`（MCP + Pipeline + Event Store + Plugin 管理）、`E:\ai_workspace\gta-plugin-sdk`（契约定义 + SDK Runtime）
+> 涉及仓库：`E:/gta`（MCP + Pipeline + Event Store + Plugin 管理）、`E:\ai_workspace\gta-plugin-sdk`（契约定义 + SDK Runtime）
 > v2 变更：按评审意见重构。核心变化是引入 Developer Plane，把 build/activate 移出 MCP 进程；状态从单一状态机拆为 Artifact / Runtime 双状态空间。
 
 ---
@@ -40,7 +40,7 @@
 
 ### 1.2 现状：MCP 本来就是薄代理，是 create_plugin 起的头
 
-查代码可以确认：`cmd/gta-mcp` 里绝大多数 handler 都只是 gRPC 转发（`handleTestPlugin` → `pipelineClient.TestPlugin`、`handleSetSessionPlugin`、`handleDeregisterPlugin` 等），本地只做参数校验。
+查代码可以确认：`cmd/gt-mcp` 里绝大多数 handler 都只是 gRPC 转发（`handleTestPlugin` → `pipelineClient.TestPlugin`、`handleSetSessionPlugin`、`handleDeregisterPlugin` 等），本地只做参数校验。
 
 唯二直接摸本地文件系统的是：
 
@@ -57,17 +57,17 @@ Runtime Plane     ← 拥有流量、session、registry：verify 执行 / bind /
 MCP               ← 只做协议适配与路由，零 exec、零 os.WriteFile
 ```
 
-具体落法：新增 `pkg/plugindev` 提供 `PluginDev` gRPC 服务，可内嵌于 `gta-pipeline` 也可独立成 `gta-plugin-dev` 二进制。MCP 侧全部改为转发，`create_plugin.go` 里的文件写入下沉过去。
+具体落法：新增 `pkg/plugindev` 提供 `PluginDev` gRPC 服务，可内嵌于 `gt-pipeline` 也可独立成 `gt-plugin-dev` 二进制。MCP 侧全部改为转发，`create_plugin.go` 里的文件写入下沉过去。
 
 这样做的三个收益：
 
-1. `cmd/gta-mcp` 里 `exec.Command` 数量保持为 0（Python 脚本沙箱 `pkg/script` 已移除，全仓库不再有 gta-mcp 直接 subprocess 的调用）
+1. `cmd/gt-mcp` 里 `exec.Command` 数量保持为 0（Python 脚本沙箱 `pkg/script` 已移除，全仓库不再有 gt-mcp 直接 subprocess 的调用）
 2. 生产部署只要不启动 Developer Plane，全部开发态能力零暴露——比一个 `--enable-plugin-dev` 布尔开关强，因为那是**物理隔离**而非条件分支
 3. Developer Plane 与 Runtime Plane 的边界，正好对上 §2 的双状态空间
 
 ### 1.4 为什么 activate 属于 Developer Plane
 
-`activate` 是"从本地目录拉起一个本地二进制并注入 `GTA_REGISTRY_ADDR`"。生产环境里插件由 systemd / k8s 拉起，gta 从不 spawn（`Manager.Restart()` 至今是占位，`pkg/plugin/manager.go:534`）。所以 activate 只服务于开发回路，归 Developer Plane。
+`activate` 是"从本地目录拉起一个本地二进制并注入 `GT_REGISTRY_ADDR`"。生产环境里插件由 systemd / k8s 拉起，gametrace 从不 spawn（`Manager.Restart()` 至今是占位，`pkg/plugin/manager.go:534`）。所以 activate 只服务于开发回路，归 Developer Plane。
 
 Runtime Plane 对插件进程只做**观测**（registry 注册 + 心跳），不做**管理**。这条线一划，`Manager` 保持被动的现有设计就不必改了。
 
@@ -242,7 +242,7 @@ rules:
 
 ## 5. checker 归属：分界线不是静态/动态
 
-评审第 5 条建议把 `CheckDecodeResponse`（input_id 一致、done 生命周期、payload 非空）移到 gta，理由是"SDK 不应该知道 pipeline runtime"。
+评审第 5 条建议把 `CheckDecodeResponse`（input_id 一致、done 生命周期、payload 非空）移到 gametrace，理由是"SDK 不应该知道 pipeline runtime"。
 
 **这条我不采纳**，原因是它会破坏一个已经建立的重要性质。
 
@@ -250,13 +250,13 @@ rules:
 
 `CheckDecodeResponse` 校验的是**插件与宿主之间的线上协议**，不是 pipeline 的运行时知识——它是 `DecodeResponseV2` 这个 message 的自洽性，纯函数，不需要知道 session、不需要知道 registry、不需要知道 SQLite。
 
-更关键的是：**插件作者需要在自己的单元测试里跑它**。SDK 的 `Agents.md` §17 明确要求验证 "every decode input eventually emits done=true"。而插件模块的既定性质是 `plugins/<name>/go.mod` **只 require SDK**，不依赖 gta 根模块。把 checker 移到 gta，等于插件作者无法离线自测响应合规性，只能跑起整条 pipeline 才知道对错——这是明显退步。
+更关键的是：**插件作者需要在自己的单元测试里跑它**。SDK 的 `Agents.md` §17 明确要求验证 "every decode input eventually emits done=true"。而插件模块的既定性质是 `plugins/<name>/go.mod` **只 require SDK**，不依赖 gametrace 根模块。把 checker 移到 gametrace，等于插件作者无法离线自测响应合规性，只能跑起整条 pipeline 才知道对错——这是明显退步。
 
 ### 5.2 更好的分界线
 
 评审的直觉没错，确实存在两类校验，只是切分维度选错了。正确的分界线是**"插件作者能否只依赖 SDK、离线跑通"**：
 
-| | SDK `contract/` | gta `pkg/plugin/quality/` |
+| | SDK `contract/` | gametrace `pkg/plugin/quality/` |
 |---|---|---|
 | 判据 | 单条消息的协议自洽性 | 一批消息的统计质量 |
 | 输入 | 一个 request/response 对 | 一次 verify 的完整语料 |
@@ -264,9 +264,9 @@ rules:
 | 能否离线自测 | 能 | 不能（需要真实流量） |
 | 性质 | 对错判定 | 好坏判定 |
 
-一句话检验：**能不能在插件项目里 `go test` 跑通？能 → SDK；不能 → gta。**
+一句话检验：**能不能在插件项目里 `go test` 跑通？能 → SDK；不能 → gametrace。**
 
-`plugin.verify` 的结果就是这两层的合并：`violations`（引 SDK checker，带 rule_id）+ `quality`（gta 侧统计）+ `verdict`。
+`plugin.verify` 的结果就是这两层的合并：`violations`（引 SDK checker，带 rule_id）+ `quality`（gametrace 侧统计）+ `verdict`。
 
 ---
 
@@ -289,11 +289,11 @@ rules:
 
 | 阶段 | 内容 | 为什么在这个位置 |
 |---|---|---|
-| **P0 契约统一** | contract.yaml 迁 SDK 并修正 v2 `output_contract`（现 output_contract 已统一为 msgpack，`payload_msgpack` 为唯一产出，v1 JSON 约定已废止，见 SDK 仓库 contract/contract.yaml）；新增 `rules:` 段；gta 删重复 Manifest 定义改依赖 `sdk.Manifest`；修 `list_plugins` 目录 bug | 不先做，后面每个工具都在放大同一份错误契约 |
+| **P0 契约统一** | contract.yaml 迁 SDK 并修正 v2 `output_contract`（现 output_contract 已统一为 msgpack，`payload_msgpack` 为唯一产出，v1 JSON 约定已废止，见 SDK 仓库 contract/contract.yaml）；新增 `rules:` 段；gametrace 删重复 Manifest 定义改依赖 `sdk.Manifest`；修 `list_plugins` 目录 bug | 不先做，后面每个工具都在放大同一份错误契约 |
 | **P1 平面拆分** | 建 `pkg/plugindev` + `PluginDev` gRPC；`create_plugin` 的文件写入下沉；MCP 全面转发化 | 结构先立住，之后加工具是填空而非改架构 |
 | **P2 闭环** | `plugin.build`（结构化 file:line:col）+ `plugin.activate/deactivate` + `plugin.status`（双状态 + last_attempt） | AI 第一次能不离开 MCP 跑通 |
 | **P3a explain 一期** | 只归因 build 失败与注册失败 | 这两类不需要流量语料，成本低、见效早，正好接住 P2 的失败面 |
-| **P4 验证** | `plugin.verify`（SDK violations + gta quality + verdict）；`plugin.sample_bytes` + 审计 | — |
+| **P4 验证** | `plugin.verify`（SDK violations + gametrace quality + verdict）；`plugin.sample_bytes` + 审计 | — |
 | **P3b explain 二期** | 加解码类归因（全 unknown、错 framing、疑似加密、疑似缺流重组） | 依赖 P4 产出的语料才有判据 |
 | **P5 可选** | `plugin.analyze_sample` | 锦上添花 |
 
@@ -307,7 +307,7 @@ rules:
 
 - [ ] 全程零 shell 调用
 - [ ] 全程未读取 SDK 仓库任何文件
-- [ ] `cmd/gta-mcp` 中 `exec.Command` 与 `os.WriteFile` 计数为 0
+- [ ] `cmd/gt-mcp` 中 `exec.Command` 与 `os.WriteFile` 计数为 0
 - [ ] 编译失败时，AI 凭 `last_attempt.errors` 的 file:line:col 定点修复
 - [ ] 解码全 unknown 时，AI 凭 `plugin.explain` 定位到 framing 或加密，且结论引用了可回查的 rule_id
 - [ ] 每次 `build` 成功后 `artifact.state` 正确从 `validated` 降级回 `compiled`

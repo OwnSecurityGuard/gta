@@ -6,12 +6,12 @@
 
 **Architecture:** 后端在 `auth.Middleware` 内做两处小改动（`?token=` 查询参数回退、身份回显响应头）并在 `list_all_sessions` 输出补 `owner` 字段；前端新增 `src/lib/auth.ts`（token/身份/401 三个轻量 store），`mcp-client` 注入 Bearer 头并同步身份，设置弹窗填 token，开始抓包弹窗加源选择，侧栏/插件面板显示归属。无路由、无状态库，沿用 TanStack Query 轮询。
 
-**Tech Stack:** Go（pkg/auth、cmd/gta-mcp，testify 不用、标准库 testing）；React 19 + TypeScript + Vite 6 + TanStack Query 5；新增 devDependency：vitest。
+**Tech Stack:** Go（pkg/auth、cmd/gt-mcp，testify 不用、标准库 testing）；React 19 + TypeScript + Vite 6 + TanStack Query 5；新增 devDependency：vitest。
 
 **Spec:** `docs/superpowers/specs/2026-08-29-frontend-team-collab-design.md`
 
 **关键事实（探索已确认，不要重复验证）：**
-- 匿名模式（未配置 `GTA_AUTH_TOKENS`）时 `cmd/gta-mcp/http_server.go` 的 `authMiddleware` 直接透传，**根本不会进入** `auth.Middleware` —— 所以匿名模式天然没有身份响应头，前端把"无 `X-GTA-Owner` 头"当作匿名。
+- 匿名模式（未配置 `GT_AUTH_TOKENS`）时 `cmd/gt-mcp/http_server.go` 的 `authMiddleware` 直接透传，**根本不会进入** `auth.Middleware` —— 所以匿名模式天然没有身份响应头，前端把"无 `X-GT-Owner` 头"当作匿名。
 - `pkg/auth` 现有 API：`Resolver`/`StaticResolver`/`Principal{Owner string; IsAdmin bool}`/`WithPrincipal(ctx, *Principal)`/`AnonymousOwner = "local"`；测试助手 `mustResolver(t, spec)` 在 `interceptor_test.go`。
 - `list_registered_plugins` 已回传 `owner`（main.go:756），前端类型缺字段而已；`list_all_sessions` 的输出 map **没有** `owner`。
 - `start_capture` 的 `source=agent` 分支：**不要求 port**（仅 nic 要求 port>0），可与 `pcap_file` 组合；pipeline 侧只订阅 agent hub。
@@ -49,7 +49,7 @@ func doRequest(t *testing.T, r Resolver, target, header string) (called bool, ow
 // 头缺失时回退解析查询参数 ?token=（admin 身份一并回显）。
 func TestMiddleware_QueryParamToken(t *testing.T) {
 	t.Parallel()
-	called, owner, rec := doRequest(t, mustResolver(t, "alice=gta_aaa,bob=gta_bbb:admin"), "/mcp?token=gta_bbb", "")
+	called, owner, rec := doRequest(t, mustResolver(t, "alice=gt_aaa,bob=gt_bbb:admin"), "/mcp?token=gt_bbb", "")
 	if !called {
 		t.Fatal("查询参数携带合法 token 应放行")
 	}
@@ -57,14 +57,14 @@ func TestMiddleware_QueryParamToken(t *testing.T) {
 		t.Fatalf("owner 应为 bob，实际 %q", owner)
 	}
 	if got := rec.Header().Get(HeaderAdmin); got != "true" {
-		t.Fatalf("admin 应回显 X-GTA-Admin: true，实际 %q", got)
+		t.Fatalf("admin 应回显 X-GT-Admin: true，实际 %q", got)
 	}
 }
 
 // TestMiddleware_HeaderBeatsQueryParam 验证头永远优先于查询参数。
 func TestMiddleware_HeaderBeatsQueryParam(t *testing.T) {
 	t.Parallel()
-	called, owner, _ := doRequest(t, mustResolver(t, "alice=gta_aaa,bob=gta_bbb:admin"), "/mcp?token=gta_bbb", "Bearer gta_aaa")
+	called, owner, _ := doRequest(t, mustResolver(t, "alice=gt_aaa,bob=gt_bbb:admin"), "/mcp?token=gt_bbb", "Bearer gt_aaa")
 	if !called || owner != "alice" {
 		t.Fatalf("头应优先于查询参数: called=%v owner=%q", called, owner)
 	}
@@ -73,7 +73,7 @@ func TestMiddleware_HeaderBeatsQueryParam(t *testing.T) {
 // TestMiddleware_RejectsBadQueryParam 验证查询参数里的非法 token 同样 401。
 func TestMiddleware_RejectsBadQueryParam(t *testing.T) {
 	t.Parallel()
-	called, _, rec := doRequest(t, mustResolver(t, "alice=gta_aaa"), "/mcp?token=gta_zzz", "")
+	called, _, rec := doRequest(t, mustResolver(t, "alice=gt_aaa"), "/mcp?token=gt_zzz", "")
 	if called {
 		t.Fatal("非法查询参数 token 必须拒绝且不触达下游")
 	}
@@ -85,12 +85,12 @@ func TestMiddleware_RejectsBadQueryParam(t *testing.T) {
 // TestMiddleware_IdentityHeaders 验证身份回显头：owner 恒回显，admin 仅 admin 回显。
 func TestMiddleware_IdentityHeaders(t *testing.T) {
 	t.Parallel()
-	_, _, rec := doRequest(t, mustResolver(t, "alice=gta_aaa,bob=gta_bbb:admin"), "/mcp", "Bearer gta_aaa")
+	_, _, rec := doRequest(t, mustResolver(t, "alice=gt_aaa,bob=gt_bbb:admin"), "/mcp", "Bearer gt_aaa")
 	if got := rec.Header().Get(HeaderOwner); got != "alice" {
-		t.Fatalf("X-GTA-Owner 应为 alice，实际 %q", got)
+		t.Fatalf("X-GT-Owner 应为 alice，实际 %q", got)
 	}
 	if got := rec.Header().Get(HeaderAdmin); got != "" {
-		t.Fatalf("非 admin 不应回显 X-GTA-Admin，实际 %q", got)
+		t.Fatalf("非 admin 不应回显 X-GT-Admin，实际 %q", got)
 	}
 }
 ```
@@ -110,10 +110,10 @@ import (
 )
 
 // 身份回显响应头。跨域直连时默认不对页面 JS 暴露，需在 CORS
-// Access-Control-Expose-Headers 中放行（见 cmd/gta-mcp/http_server.go）。
+// Access-Control-Expose-Headers 中放行（见 cmd/gt-mcp/http_server.go）。
 const (
-	HeaderOwner = "X-GTA-Owner"
-	HeaderAdmin = "X-GTA-Admin"
+	HeaderOwner = "X-GT-Owner"
+	HeaderAdmin = "X-GT-Admin"
 )
 
 // Middleware 是 MCP HTTP 侧的鉴权中间件，校验 Authorization: Bearer <token>。
@@ -130,7 +130,7 @@ func Middleware(r Resolver, next http.Handler) http.Handler {
 		p, ok := r.Resolve(token)
 		if !ok {
 			// 带上 WWW-Authenticate，否则客户端不知道该用什么方式认证。
-			w.Header().Set("WWW-Authenticate", `Bearer realm="gta"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="gametrace"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -152,7 +152,7 @@ Expected: 全部 PASS（含既有匿名/Bearer/WWW-Authenticate 测试）
 - [ ] **Step 5: Commit**
 
 ```bash
-cd E:/gta && git add pkg/auth/http.go pkg/auth/http_test.go && git commit -m "feat(auth): Middleware 支持 ?token= 查询参数回退（SSE 场景）并回显 X-GTA-Owner/X-GTA-Admin 身份头"
+cd E:/gta && git add pkg/auth/http.go pkg/auth/http_test.go && git commit -m "feat(auth): Middleware 支持 ?token= 查询参数回退（SSE 场景）并回显 X-GT-Owner/X-GT-Admin 身份头"
 ```
 
 ---
@@ -160,14 +160,14 @@ cd E:/gta && git add pkg/auth/http.go pkg/auth/http_test.go && git commit -m "fe
 ### Task 2: 后端 — CORS 放行身份回显头（跨域直连可读）
 
 **Files:**
-- Modify: `cmd/gta-mcp/http_server.go:24-28`（corsMiddleware 内 echo Origin 处）
-- Test: `cmd/gta-mcp/t13_test.go`
+- Modify: `cmd/gt-mcp/http_server.go:24-28`（corsMiddleware 内 echo Origin 处）
+- Test: `cmd/gt-mcp/t13_test.go`
 
-- [ ] **Step 1: 在 `cmd/gta-mcp/t13_test.go` 的 `TestCORSMiddlewareAllowlist` 函数之后追加失败测试**
+- [ ] **Step 1: 在 `cmd/gt-mcp/t13_test.go` 的 `TestCORSMiddlewareAllowlist` 函数之后追加失败测试**
 
 ```go
 // TestCORSExposeIdentityHeaders 验证命中 allowlist 的跨域响应暴露身份回显头，
-// 否则前端 JS 在跨域直连场景下读不到 X-GTA-Owner / X-GTA-Admin。
+// 否则前端 JS 在跨域直连场景下读不到 X-GT-Owner / X-GT-Admin。
 func TestCORSExposeIdentityHeaders(t *testing.T) {
 	h := buildHTTPHandler([]string{"http://good.example.com"}, nil, okHandler())
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
@@ -176,7 +176,7 @@ func TestCORSExposeIdentityHeaders(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	expose := rec.Header().Get("Access-Control-Expose-Headers")
 	if !strings.Contains(expose, auth.HeaderOwner) || !strings.Contains(expose, auth.HeaderAdmin) {
-		t.Fatalf("应暴露 X-GTA-Owner/X-GTA-Admin，实际 %q", expose)
+		t.Fatalf("应暴露 X-GT-Owner/X-GT-Admin，实际 %q", expose)
 	}
 }
 ```
@@ -185,10 +185,10 @@ func TestCORSExposeIdentityHeaders(t *testing.T) {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd E:/gta && go test ./cmd/gta-mcp/ -run TestCORSExposeIdentityHeaders -v`
+Run: `cd E:/gta && go test ./cmd/gt-mcp/ -run TestCORSExposeIdentityHeaders -v`
 Expected: FAIL（Expose-Headers 为空）
 
-- [ ] **Step 3: 修改 `cmd/gta-mcp/http_server.go` 的 corsMiddleware**
+- [ ] **Step 3: 修改 `cmd/gt-mcp/http_server.go` 的 corsMiddleware**
 
 把：
 
@@ -214,13 +214,13 @@ Expected: FAIL（Expose-Headers 为空）
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd E:/gta && go test ./cmd/gta-mcp/ -run "TestCORS" -v`
+Run: `cd E:/gta && go test ./cmd/gt-mcp/ -run "TestCORS" -v`
 Expected: 全部 PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd E:/gta && git add cmd/gta-mcp/http_server.go cmd/gta-mcp/t13_test.go && git commit -m "feat(mcp): CORS 命中 allowlist 时暴露 X-GTA-Owner/X-GTA-Admin 身份回显头"
+cd E:/gta && git add cmd/gt-mcp/http_server.go cmd/gt-mcp/t13_test.go && git commit -m "feat(mcp): CORS 命中 allowlist 时暴露 X-GT-Owner/X-GT-Admin 身份回显头"
 ```
 
 ---
@@ -228,10 +228,10 @@ cd E:/gta && git add cmd/gta-mcp/http_server.go cmd/gta-mcp/t13_test.go && git c
 ### Task 3: 后端 — list_all_sessions 输出补 owner 字段
 
 **Files:**
-- Modify: `cmd/gta-mcp/main.go`（`handleListAllSessions` 内 `out = append(out, map[string]any{...})`，约 2219 行）
-- Create: `cmd/gta-mcp/list_sessions_owner_test.go`
+- Modify: `cmd/gt-mcp/main.go`（`handleListAllSessions` 内 `out = append(out, map[string]any{...})`，约 2219 行）
+- Create: `cmd/gt-mcp/list_sessions_owner_test.go`
 
-- [ ] **Step 1: 创建 `cmd/gta-mcp/list_sessions_owner_test.go`**
+- [ ] **Step 1: 创建 `cmd/gt-mcp/list_sessions_owner_test.go`**
 
 ```go
 package main
@@ -245,7 +245,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"gta/pkg/auth"
+	"gametrace/pkg/auth"
 )
 
 // TestListAllSessionsEchoesOwner 验证会话列表输出携带 owner：
@@ -295,12 +295,12 @@ func TestListAllSessionsEchoesOwner(t *testing.T) {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd E:/gta && go test ./cmd/gta-mcp/ -run TestListAllSessionsEchoesOwner -v`
+Run: `cd E:/gta && go test ./cmd/gt-mcp/ -run TestListAllSessionsEchoesOwner -v`
 Expected: FAIL（`owner 应为 alice，实际 ""`）
 
 - [ ] **Step 3: 修改 `handleListAllSessions` 的输出 map**
 
-在 `cmd/gta-mcp/main.go` 中找到（约 2220 行）：
+在 `cmd/gt-mcp/main.go` 中找到（约 2220 行）：
 
 ```go
 		seen[sess.SessionID] = true
@@ -321,13 +321,13 @@ Expected: FAIL（`owner 应为 alice，实际 ""`）
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd E:/gta && go test ./cmd/gta-mcp/ -run TestListAllSessionsEchoesOwner -v`
+Run: `cd E:/gta && go test ./cmd/gt-mcp/ -run TestListAllSessionsEchoesOwner -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd E:/gta && git add cmd/gta-mcp/main.go cmd/gta-mcp/list_sessions_owner_test.go && git commit -m "feat(mcp): list_all_sessions 输出补 owner 字段，供前端归属展示与 admin 筛选"
+cd E:/gta && git add cmd/gt-mcp/main.go cmd/gt-mcp/list_sessions_owner_test.go && git commit -m "feat(mcp): list_all_sessions 输出补 owner 字段，供前端归属展示与 admin 筛选"
 ```
 
 ---
@@ -406,22 +406,22 @@ afterEach(() => {
 
 describe("token 存取", () => {
   it("setToken/getToken 往返并持久化到 localStorage", () => {
-    setToken("gta_aaa");
-    expect(getToken()).toBe("gta_aaa");
-    expect(store.get("gta_auth_token")).toBe("gta_aaa");
+    setToken("gt_aaa");
+    expect(getToken()).toBe("gt_aaa");
+    expect(store.get("gt_auth_token")).toBe("gt_aaa");
   });
 
   it("空串视为清除", () => {
-    setToken("gta_aaa");
+    setToken("gt_aaa");
     setToken("   ");
     expect(getToken()).toBeNull();
-    expect(store.has("gta_auth_token")).toBe(false);
+    expect(store.has("gt_auth_token")).toBe(false);
   });
 
   it("authHeaders：有 token 带 Bearer，无 token 不带头", () => {
     expect(authHeaders()).toEqual({});
-    setToken("gta_aaa");
-    expect(authHeaders()).toEqual({ Authorization: "Bearer gta_aaa" });
+    setToken("gt_aaa");
+    expect(authHeaders()).toEqual({ Authorization: "Bearer gt_aaa" });
   });
 });
 
@@ -431,12 +431,12 @@ describe("withTokenParam", () => {
   });
 
   it("有 token 时拼查询参数并编码", () => {
-    setToken("gta aaa/1");
+    setToken("gametrace aaa/1");
     expect(withTokenParam("/events/plugins")).toBe(
-      "/events/plugins?token=gta%20aaa%2F1",
+      "/events/plugins?token=gametrace%20aaa%2F1",
     );
     expect(withTokenParam("/events/plugins?a=1")).toBe(
-      "/events/plugins?a=1&token=gta%20aaa%2F1",
+      "/events/plugins?a=1&token=gametrace%20aaa%2F1",
     );
   });
 });
@@ -455,7 +455,7 @@ describe("authError", () => {
     expect(getAuthError()).toBe(false);
     notifyAuthError();
     expect(getAuthError()).toBe(true);
-    setToken("gta_new");
+    setToken("gt_new");
     expect(getAuthError()).toBe(false);
   });
 });
@@ -474,12 +474,12 @@ Expected: FAIL（`Failed to resolve import "@/lib/auth"`）
  *
  * 三个极小的可订阅 store（token / identity / authError），供
  * useSyncExternalStore 的 hook（hooks/use-auth.ts）与 mcp-client 使用：
- *  - token 持久化在 localStorage（键 gta_auth_token），无 token = 匿名模式；
- *  - identity 来自后端身份回显响应头（X-GTA-Owner / X-GTA-Admin），不持久化；
+ *  - token 持久化在 localStorage（键 gt_auth_token），无 token = 匿名模式；
+ *  - identity 来自后端身份回显响应头（X-GT-Owner / X-GT-Admin），不持久化；
  *  - authError 在收到 401 时置位，重新保存 token 即清除。
  */
 
-const TOKEN_KEY = "gta_auth_token";
+const TOKEN_KEY = "gt_auth_token";
 
 // localStorage 在隐私模式/被禁用时可能抛异常，统一吞掉降级为内存态。
 function safeGet(key: string): string | null {
@@ -675,12 +675,12 @@ afterEach(() => {
 
 describe("callTool", () => {
   it("有 token 时请求带 Authorization: Bearer", async () => {
-    setToken("gta_aaa");
+    setToken("gt_aaa");
     await mcpClient.callTool("list_all_sessions");
     const header = (fetchCalls[0]!.init.headers as Record<string, string>)[
       "Authorization"
     ];
-    expect(header).toBe("Bearer gta_aaa");
+    expect(header).toBe("Bearer gt_aaa");
   });
 
   it("无 token 时不带 Authorization 头（匿名模式零变化）", async () => {
@@ -719,7 +719,7 @@ describe("callTool", () => {
           },
         },
         200,
-        { "X-GTA-Owner": "bob", "X-GTA-Admin": "true" },
+        { "X-GT-Owner": "bob", "X-GT-Admin": "true" },
       ),
     );
     await mcpClient.callTool("list_all_sessions");
@@ -769,12 +769,12 @@ export class AuthError extends Error {
 
 /** 从响应头读取身份回显（后端 auth.Middleware 注入；匿名模式无此头 → 清空身份）。 */
 function syncIdentityFromHeaders(headers: { get(k: string): string | null }): void {
-  const owner = headers.get("X-GTA-Owner");
+  const owner = headers.get("X-GT-Owner");
   if (!owner) {
     setIdentity(null);
     return;
   }
-  setIdentity({ owner, isAdmin: headers.get("X-GTA-Admin") === "true" });
+  setIdentity({ owner, isAdmin: headers.get("X-GT-Admin") === "true" });
 }
 
 /**
@@ -934,7 +934,7 @@ export function useAuthToken(): string | null {
   return useSyncExternalStore(subscribeToken, getToken);
 }
 
-/** 当前身份（来自后端 X-GTA-Owner/X-GTA-Admin 响应头回显；匿名模式为 null）。 */
+/** 当前身份（来自后端 X-GT-Owner/X-GT-Admin 响应头回显；匿名模式为 null）。 */
 export function useIdentity(): Identity | null {
   return useSyncExternalStore(subscribeIdentity, getIdentity);
 }
@@ -1107,7 +1107,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           />
           <p className="mt-1 text-xs text-muted-foreground">
             团队共享服务端开启令牌校验时，向管理员领取你的 token（形如
-            <code className="font-mono"> gta_…</code>）填入；留空则按匿名/单机模式访问。保存后立即生效。
+            <code className="font-mono"> gt_…</code>）填入；留空则按匿名/单机模式访问。保存后立即生效。
           </p>
         </div>
       </div>
@@ -1324,7 +1324,7 @@ export function StartCaptureDialog({ open, onClose, onStarted, onRunLinked }: St
           </div>
           {source === "agent" && (
             <p className="mt-1.5 text-xs text-muted-foreground">
-              需在成员机运行 <code className="font-mono">gta-agent --server &lt;服务端&gt;:9091 --token &lt;令牌&gt;</code>
+              需在成员机运行 <code className="font-mono">gt-agent --server &lt;服务端&gt;:9091 --token &lt;令牌&gt;</code>
               ，agent 会抓取本机流量并推流到此会话（端口可留空）。
             </p>
           )}
@@ -1447,7 +1447,7 @@ function SessionItem({
           <span
             className={cn(
               "inline-block h-2 w-2 rounded-full shrink-0",
-              isRunning ? "gta-live-dot" : "bg-muted-foreground/50",
+              isRunning ? "gt-live-dot" : "bg-muted-foreground/50",
             )}
           />
           <span className="text-sm font-medium truncate font-mono">
@@ -1520,7 +1520,7 @@ export function SessionSidebar({
         <h2 className="text-sm font-semibold">会话列表</h2>
         {data && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {runningCount > 0 && <span className="gta-live-dot" />}
+            {runningCount > 0 && <span className="gt-live-dot" />}
             {data.count} 个会话{runningCount > 0 && ` · ${runningCount} 运行`}
           </span>
         )}
@@ -1737,8 +1737,8 @@ cd E:/gta && git add web/src/types/registered-plugin.ts web/src/components/plugi
 
 - [ ] **Step 1: Go 全量测试**
 
-Run: `cd E:/gta && go test ./pkg/auth/... ./cmd/gta-mcp/... 2>&1 | tail -5`
-Expected: `ok` 两行（pkg/auth、cmd/gta-mcp）
+Run: `cd E:/gta && go test ./pkg/auth/... ./cmd/gt-mcp/... 2>&1 | tail -5`
+Expected: `ok` 两行（pkg/auth、cmd/gt-mcp）
 
 - [ ] **Step 2: 前端测试 + 构建**
 
@@ -1747,21 +1747,21 @@ Expected: 测试全 PASS；`tsc -b` 无错误；vite build 成功
 
 - [ ] **Step 3: 匿名模式回归核对（不启动任何 token）**
 
-启动本地 gta-mcp + gta-pipeline（既有方式），打开前端，逐项确认：
+启动本地 gt-mcp + gt-pipeline（既有方式），打开前端，逐项确认：
 1. DevTools Network：`POST /mcp` 请求头**没有** `Authorization`；
 2. `/events/plugins` 连接 URL **没有** `token=` 查询参数；
 3. 无 401 横幅、设置弹窗令牌为空；
 4. 会话/插件卡片无归属徽标、无「视图：全部/只看我的」筛选行；
 5. 会话列表内容与改造前一致。
 
-- [ ] **Step 4: token 模式联测（GTA_AUTH_TOKENS）**
+- [ ] **Step 4: token 模式联测（GT_AUTH_TOKENS）**
 
-用 `GTA_AUTH_TOKENS=alice=gta_tok_aaa:admin,bob=gta_tok_bbb` 启动服务端，逐项确认：
+用 `GT_AUTH_TOKENS=alice=gt_tok_aaa:admin,bob=gt_tok_bbb` 启动服务端，逐项确认：
 1. 无 token 打开前端 → 出现 401 横幅 + 设置弹窗自动打开；
-2. 设置中填 `gta_tok_bbb` 保存 → 横幅消失、列表恢复、显示身份 bob（非 admin，无筛选行）；
-3. DevTools：`/mcp` 请求带 `Authorization: Bearer gta_tok_bbb`；`/events/plugins?token=gta_tok_bbb` 连接正常（插件上下线仍实时刷新）；
-4. 换 `gta_tok_aaa`（admin）→ 出现「全部/只看我的」筛选；用 bob 的账号启动一个抓包会话后，alice 在「全部」视图能看到 bob 会话并带 `bob` 徽标，「只看我的」则隐藏之；
-5. 开始抓包弹窗选「远程 agent」→ 启动成功（会话出现在列表、source 为 agent）；在成员机运行 `gta-agent --server <host>:9091 --token gta_tok_bbb` 后流量入库。
+2. 设置中填 `gt_tok_bbb` 保存 → 横幅消失、列表恢复、显示身份 bob（非 admin，无筛选行）；
+3. DevTools：`/mcp` 请求带 `Authorization: Bearer gt_tok_bbb`；`/events/plugins?token=gt_tok_bbb` 连接正常（插件上下线仍实时刷新）；
+4. 换 `gt_tok_aaa`（admin）→ 出现「全部/只看我的」筛选；用 bob 的账号启动一个抓包会话后，alice 在「全部」视图能看到 bob 会话并带 `bob` 徽标，「只看我的」则隐藏之；
+5. 开始抓包弹窗选「远程 agent」→ 启动成功（会话出现在列表、source 为 agent）；在成员机运行 `gt-agent --server <host>:9091 --token gt_tok_bbb` 后流量入库。
 
 - [ ] **Step 5: Commit（如联测中有修补）**
 

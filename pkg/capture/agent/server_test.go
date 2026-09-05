@@ -13,9 +13,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	"gta/pkg/auth"
-	"gta/pkg/capture/agent/proto"
-	"gta/pkg/event"
+	"gametrace/pkg/auth"
+	"gametrace/pkg/capture/agent/proto"
+	"gametrace/pkg/event"
 )
 
 // newBufconnServer 起一个带鉴权拦截器的 AgentIngest server，返回客户端拨号函数。
@@ -51,7 +51,7 @@ func newAgentClient(t *testing.T, dial func(context.Context, string) (net.Conn, 
 	return newAgentClientWithMD(t, dial, nil)
 }
 
-// newAgentClientWithMD 开流并附带 outgoing metadata（模拟 gta-agent 声明目标会话）。
+// newAgentClientWithMD 开流并附带 outgoing metadata（模拟 gt-agent 声明目标会话）。
 func newAgentClientWithMD(t *testing.T, dial func(context.Context, string) (net.Conn, error), md metadata.MD) proto.AgentIngest_PushClient {
 	t.Helper()
 	cc, err := grpc.NewClient("passthrough:///agent",
@@ -164,8 +164,8 @@ func TestPushRoundTripPreservesFullFrameAndLinkType(t *testing.T) {
 // PushAck.Rejected 汇总拒绝数；无 token 的流在鉴权拦截器就被拒绝。
 func TestPushRejectsOwnerMismatch(t *testing.T) {
 	resolver := auth.NewStaticResolver(map[string]auth.Principal{
-		"gta_alice": {Owner: "alice"},
-		"gta_bob":   {Owner: "bob"},
+		"gt_alice": {Owner: "alice"},
+		"gt_bob":   {Owner: "bob"},
 	})
 	sessions := SessionOwnerCheckerFunc(func(sessionID string) (string, bool) {
 		if sessionID == "sess-1" {
@@ -195,7 +195,7 @@ func TestPushRejectsOwnerMismatch(t *testing.T) {
 
 	// bob（有 token）不能推 alice 的会话：batch 逐个拒绝（不投递），流保持到 EOF，
 	// PushAck.Rejected 汇总拒绝数（拒绝按 batch 记录并进 ack）。
-	bobCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer gta_bob")
+	bobCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer gt_bob")
 	stream, err := proto.NewAgentIngestClient(cc).Push(bobCtx)
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestPushRejectsOwnerMismatch(t *testing.T) {
 	}
 
 	// alice 推自己的会话 OK。
-	aliceCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer gta_alice")
+	aliceCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer gt_alice")
 	stream3, err := proto.NewAgentIngestClient(cc).Push(aliceCtx)
 	if err != nil {
 		t.Fatal(err)

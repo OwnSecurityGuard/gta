@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"gta/pkg/event"
+	"gametrace/pkg/event"
 )
 
 // rawTsUserVersion 是 raw_packets.timestamp INTEGER 迁移的 user_version 标记。

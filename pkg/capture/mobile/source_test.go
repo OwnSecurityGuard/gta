@@ -8,9 +8,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"gta/pkg/capture"
-	"gta/pkg/capture/mobile/proto"
-	"gta/pkg/event"
+	"gametrace/pkg/capture"
+	"gametrace/pkg/capture/mobile/proto"
+	"gametrace/pkg/event"
 )
 
 // startSource 启动一个 mobile source，返回 Source 与 gRPC 监听地址。

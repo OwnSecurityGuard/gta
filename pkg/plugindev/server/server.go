@@ -1,8 +1,8 @@
 // Package server exposes the Developer Plane as a gRPC service. It is a thin
 // glue layer that maps proto messages onto pkg/plugindev domain functions and
 // owns no filesystem or subprocess logic of its own — that all lives in
-// pkg/plugindev so the same code can run embedded (in gta-mcp for dev) or as
-// the standalone gta-plugin-dev binary.
+// pkg/plugindev so the same code can run embedded (in gt-mcp for dev) or as
+// the standalone gt-plugin-dev binary.
 package server
 
 import (
@@ -12,9 +12,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"gta/pkg/internalipc"
-	"gta/pkg/plugindev"
-	pb "gta/pkg/plugindev/proto"
+	"gametrace/pkg/internalipc"
+	"gametrace/pkg/plugindev"
+	pb "gametrace/pkg/plugindev/proto"
 )
 
 // Server implements the PluginDev gRPC service. It is scoped to a single
@@ -245,7 +245,7 @@ func (s *Server) Explain(ctx context.Context, req *pb.ExplainRequest) (*pb.Expla
 }
 
 // Serve registers the service on lis and blocks serving until the listener
-// closes. It is separated from Start so callers (e.g. gta-mcp) can embed the
+// closes. It is separated from Start so callers (e.g. gt-mcp) can embed the
 // server behind an already-bound listener.
 func (s *Server) Serve(lis net.Listener) error {
 	grpcServer := grpc.NewServer()

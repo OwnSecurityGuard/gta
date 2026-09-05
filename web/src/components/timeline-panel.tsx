@@ -316,7 +316,7 @@ function MessageDetail({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto gta-scroll p-3">
+      <div className="min-h-0 flex-1 overflow-auto gt-scroll p-3">
         {tab === "semantic" ? (
           <div className="space-y-3">
             {/* 状态 */}
@@ -373,7 +373,7 @@ function MessageDetail({
             </div>
           </div>
         ) : (
-          <pre className="whitespace-pre-wrap break-words rounded-md bg-background p-3 font-mono text-xs leading-relaxed gta-scroll">
+          <pre className="whitespace-pre-wrap break-words rounded-md bg-background p-3 font-mono text-xs leading-relaxed gt-scroll">
             {raw || "{}"}
           </pre>
         )}
@@ -532,7 +532,7 @@ export function TimelinePanel({ sessionId }: { sessionId: string | null }) {
         )}
 
         {/* 内容 */}
-        <div className="min-h-0 flex-1 overflow-auto gta-scroll p-4">
+        <div className="min-h-0 flex-1 overflow-auto gt-scroll p-4">
           {isLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 6 }).map((_, i) => (

@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"gta/pkg/analyze"
-	"gta/pkg/schema"
+	"gametrace/pkg/analyze"
+	"gametrace/pkg/schema"
 
 	"gopkg.in/yaml.v3"
 )

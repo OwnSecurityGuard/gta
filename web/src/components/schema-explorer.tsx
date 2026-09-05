@@ -6,13 +6,13 @@ import { AlertTriangle, Database, KeyRound, ListTree } from "lucide-react";
 
 function SourceCard({ source }: { source: SchemaSource }) {
   return (
-    <div className="gta-card p-3">
+    <div className="gt-card p-3">
       <div className="mb-2 flex items-center gap-2">
         <Database className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium">{source.name}</span>
       </div>
       <p className="mb-2 text-xs text-muted-foreground">{source.description}</p>
-      <div className="overflow-x-auto gta-scroll rounded-md border border-border">
+      <div className="overflow-x-auto gt-scroll rounded-md border border-border">
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-muted/60 text-muted-foreground">
@@ -38,7 +38,7 @@ function SourceCard({ source }: { source: SchemaSource }) {
 
 function RuleCard({ rule }: { rule: SchemaRule }) {
   return (
-    <div className="gta-card p-3">
+    <div className="gt-card p-3">
       <div className="mb-1 flex items-center gap-2">
         <ListTree className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium">{rule.name}</span>
@@ -121,7 +121,7 @@ export function SchemaExplorer({ sessionId }: { sessionId: string | null }) {
   }
 
   return (
-    <div className="h-full overflow-auto p-4 gta-scroll space-y-5">
+    <div className="h-full overflow-auto p-4 gt-scroll space-y-5">
       <section>
         <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
           <Database className="h-4 w-4 text-primary" />

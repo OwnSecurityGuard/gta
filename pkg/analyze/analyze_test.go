@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"gta/pkg/event"
-	"gta/pkg/schema"
+	"gametrace/pkg/event"
+	"gametrace/pkg/schema"
 )
 
 func makeAgg() struct {

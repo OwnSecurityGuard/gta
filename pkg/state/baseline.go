@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"gta/pkg/event"
-	"gta/pkg/store"
+	"gametrace/pkg/event"
+	"gametrace/pkg/store"
 )
 
 // EntityKey 唯一确定一个实体基线的隔离上下文。

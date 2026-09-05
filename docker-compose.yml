@@ -8,8 +8,11 @@
 #     有意不进 PG，见 cmd/gt-mcp/main.go）；
 #   - SQLite 模式（原默认）回滚方式：删掉 GT_DB_DRIVER/GT_DB_DSN 两个环境
 #     变量与 postgres 服务即可，两套模式的配置入口是同一对 env（pkg/config）。
-# 镜像策略：直接用本地已有 gt-server:dev 镜像，不在 compose 里 build
-# （原 build: 段已移除；需要重建镜像时走 make / docker build 手动打 tag）。
+# 镜像策略：image + build 双声明。本地没有 gt-server:$GT_VERSION 镜像时，
+# compose 自动构建（首次克隆仓库后 docker compose up -d 即可，无需手动 build）；
+# 镜像已存在则直接复用。注意：源码更新后镜像不会自动重建，需显式
+#   docker compose build   （或 docker compose up -d --build）
+# 两个服务共用同一构建定义（x-build 锚点），BuildKit 层缓存使第二次构建近零成本。
 #
 # 端口策略：容器内端口拓扑不变（9888/9091/9092/8781）；宿主侧映射端口默认
 # 用 1xxxx 偏移值——本机 GameTrace 链路（pipeline 12924 / mcp 11056）已占用
@@ -22,6 +25,11 @@
 #
 # 配置（T10 统一配置）：容器内 GT_HOME=/data，各监听地址用 GT_* 环境变量覆盖
 # （与 pkg/config/app.go 对齐）；端口映射用 .env 里的 GT_*_PORT 变量调整。
+
+# 共享构建定义：pipeline 与 mcp 使用同一镜像（gt-server:$GT_VERSION）。
+x-build: &server-build
+  context: .
+  dockerfile: Dockerfile
 
 services:
   postgres:
@@ -41,6 +49,7 @@ services:
 
   pipeline:
     image: gt-server:${GT_VERSION:-dev}
+    build: *server-build
     restart: unless-stopped
     depends_on:
       postgres:
@@ -71,6 +80,7 @@ services:
 
   mcp:
     image: gt-server:${GT_VERSION:-dev}
+    build: *server-build
     restart: unless-stopped
     depends_on:
       postgres:

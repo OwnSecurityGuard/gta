@@ -22,6 +22,8 @@
 #
 # 构建（版本注入与 Makefile 的 -X ldflags 同源，见 pkg/version/version.go）：
 #   docker build --build-arg VERSION=v0.5.0 --build-arg GIT_COMMIT=abc1234 -t gt-server .
+# 境内 apt 默认走腾讯云镜像源（APT_MIRROR）；境外构建覆盖：
+#   docker build --build-arg APT_MIRROR=deb.debian.org .
 
 # ============================================================================
 # 阶段 0：webui（前端构建）
@@ -65,6 +67,11 @@ ARG GOSUMDB=sum.golang.google.cn
 ENV GOPROXY=${GOPROXY} \
     GOSUMDB=${GOSUMDB}
 
+# apt 换源：bookworm 用 deb822 格式，源在 /etc/apt/sources.list.d/debian.sources。
+# 默认腾讯云镜像（境内网络 deb.debian.org 直连极慢，实测 8MB 的包列表要 4 分钟+）。
+ARG APT_MIRROR=mirrors.tencent.com
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources
+
 # pcap 采集层是 cgo 依赖，编译期需要 libpcap 头文件。
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends libpcap-dev \
@@ -100,6 +107,10 @@ RUN CGO_ENABLED=1 \
 # 阶段 2：runtime
 # ============================================================================
 FROM debian:bookworm-slim
+
+# 同 builder：apt 换源（ARG 不跨阶段，需重新声明）。
+ARG APT_MIRROR=mirrors.tencent.com
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources
 
 # libpcap0.8：gopacket/pcap（cgo）的运行时共享库；ca-certificates：出站 TLS。
 # 不再安装 gcc/libpcap-dev：原为远程 agent 现场编译（-tags pcap 走 cgo）所需，
